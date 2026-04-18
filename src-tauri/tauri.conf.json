@@ -47,7 +47,7 @@
     "updater": {
       "active": false,
       "endpoints": [
-        "https://github.com/user/traflix-voice/releases/latest/download/latest.json"
+        "https://github.com/iTzFrancesco/traflix-voice/releases/latest/download/latest.json"
       ],
       "pubkey": ""
     }
