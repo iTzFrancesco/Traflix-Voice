@@ -188,4 +188,7 @@ traflix-voice/
 
 
 **Traflix Voice -- Dettatura vocale locale fornita da  OpenAI Whisper.**
+
+
+
 **© 2026 - Traflix - All rights reserved**
