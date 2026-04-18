@@ -1,7 +1,7 @@
 [package]
-name = "traflix-voice"
-version = "0.1.0"
-description = "Professional local voice-to-text dictation application powered by OpenAI Whisper."
+name = "Traflix-Voice"
+version = "0.1.2"
+description = "Dettatura vocale locale fornita da  OpenAI Whisper."
 authors = ["Francesco | Traflix"]
 edition = "2021"
 
@@ -28,7 +28,7 @@ tauri-plugin-log = "2"
 log = "0.4"
 tauri-plugin-updater = "2"
 cpal = "0.15"
-rdev = "0.5.3"
 
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-global-shortcut = "2"
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+

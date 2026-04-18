@@ -232,7 +232,9 @@
                 else if (data.status === "volume") {
                     targetVolume = data.value;
                 }
-            } catch (_) {}
+            } catch (err) {
+                console.error("[overlay] Errore gestione evento:", err);
+            }
         });
 
         // Animate bars

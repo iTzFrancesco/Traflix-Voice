@@ -1,19 +1,20 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::{debug, error, info, warn};
-use rdev::{listen, Event, EventType, Key};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Listener, Manager, Runtime, WindowEvent,
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
+
+#[cfg(windows)]
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
 // ─── STRUTTURE DATI ──────────────────────────────────────────────────────────
 
@@ -21,8 +22,8 @@ use tauri_plugin_shell::ShellExt;
 pub struct AppSettings {
     pub hotkey: String,
     pub model: String,
-    #[serde(rename = "autoPaste")]
-    pub auto_paste: bool,
+    #[serde(rename = "autoPaste", default)]
+    pub auto_paste: Option<bool>,
     #[serde(rename = "minimizeTray")]
     pub minimize_tray: bool,
     #[serde(rename = "selectedDevice")]
@@ -46,7 +47,7 @@ impl Default for AppSettings {
         AppSettings {
             hotkey: "CommandOrControl+Space".to_string(),
             model: "small".to_string(),
-            auto_paste: true,
+            auto_paste: None,
             minimize_tray: true,
             selected_device: "default".to_string(),
             selected_language: "it".to_string(),
@@ -85,6 +86,7 @@ struct AppState {
     history_path: PathBuf,
     #[allow(dead_code)]
     models_dir: PathBuf,
+    hotkey_config: Arc<AtomicPtr<HotkeyConfig>>,
 }
 
 // ─── HELPERS FILE ────────────────────────────────────────────────────────────
@@ -96,6 +98,63 @@ fn load_stats_from_file(path: &Path) -> AppStats {
         }
     }
     AppStats::default()
+}
+
+#[derive(Debug, Clone)]
+struct HotkeyConfig {
+    vk_codes: Vec<i32>,
+}
+
+fn parse_hotkey(hotkey: &str) -> HotkeyConfig {
+    let mut vk_codes = Vec::new();
+    for part in hotkey.split('+') {
+        if let Some(vk) = str_to_vk(part) {
+            vk_codes.push(vk);
+        }
+    }
+    HotkeyConfig { vk_codes }
+}
+
+fn str_to_vk(s: &str) -> Option<i32> {
+    match s {
+        "CommandOrControl" | "Control" | "Ctrl" => Some(0x11), // VK_CONTROL
+        "Alt" => Some(0x12),     // VK_MENU
+        "Shift" => Some(0x10),   // VK_SHIFT
+        "Super" | "Meta" => Some(0x5B), // VK_LWIN
+        "Space" => Some(0x20),   // VK_SPACE
+        "Enter" | "Return" => Some(0x0D),
+        "Tab" => Some(0x09),
+        "Escape" | "Esc" => Some(0x1B),
+        "Backspace" => Some(0x08),
+        "Delete" => Some(0x2E),
+        "Up" | "ArrowUp" => Some(0x26),
+        "Down" | "ArrowDown" => Some(0x28),
+        "Left" | "ArrowLeft" => Some(0x25),
+        "Right" | "ArrowRight" => Some(0x27),
+        "F1" => Some(0x70), "F2" => Some(0x71), "F3" => Some(0x72),
+        "F4" => Some(0x73), "F5" => Some(0x74), "F6" => Some(0x75),
+        "F7" => Some(0x76), "F8" => Some(0x77), "F9" => Some(0x78),
+        "F10" => Some(0x79), "F11" => Some(0x7A), "F12" => Some(0x7B),
+        "A" => Some(0x41), "B" => Some(0x42), "C" => Some(0x43),
+        "D" => Some(0x44), "E" => Some(0x45), "F" => Some(0x46),
+        "G" => Some(0x47), "H" => Some(0x48), "I" => Some(0x49),
+        "J" => Some(0x4A), "K" => Some(0x4B), "L" => Some(0x4C),
+        "M" => Some(0x4D), "N" => Some(0x4E), "O" => Some(0x4F),
+        "P" => Some(0x50), "Q" => Some(0x51), "R" => Some(0x52),
+        "S" => Some(0x53), "T" => Some(0x54), "U" => Some(0x55),
+        "V" => Some(0x56), "W" => Some(0x57), "X" => Some(0x58),
+        "Y" => Some(0x59), "Z" => Some(0x5A),
+        "0" => Some(0x30), "1" => Some(0x31), "2" => Some(0x32),
+        "3" => Some(0x33), "4" => Some(0x34), "5" => Some(0x35),
+        "6" => Some(0x36), "7" => Some(0x37), "8" => Some(0x38),
+        "9" => Some(0x39),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn is_key_pressed(vk: i32) -> bool {
+    unsafe { GetAsyncKeyState(vk) & (0x8000u16 as i16) != 0 }
 }
 
 fn load_settings_from_file(path: &Path) -> AppSettings {
@@ -130,39 +189,23 @@ async fn load_settings(state: tauri::State<'_, AppState>) -> Result<AppSettings,
     Ok(load_settings_from_file(&state.settings_path))
 }
 
-/// Salva le impostazioni su disco E le applica (hotkey globale)
+/// Salva le impostazioni su disco e aggiorna la hotkey attiva
 #[tauri::command]
 async fn save_settings<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<(), String> {
-    // Persisti su disco
     ensure_app_data_dir(&state.settings_path);
     let data = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     atomic_write(&state.settings_path, &data).map_err(|e| e.to_string())?;
 
-    // Applica hotkey globale (Solo se non è una scorciatoia speciale gestita dall'hook)
-    let manager = app.global_shortcut();
-    let _ = manager.unregister_all();
-
-    let is_special = settings.hotkey.contains("Alt")
-        && settings.hotkey.contains("Control")
-        && !settings.hotkey.contains("+")
-        || settings.hotkey == "CommandOrControl+Alt"
-        || settings.hotkey == "Control+Alt";
-
-    if !is_special {
-        if let Ok(shortcut) = Shortcut::from_str(&settings.hotkey) {
-            let _ =
-                manager.on_shortcut(shortcut, move |handle, _shortcut, event: ShortcutEvent| {
-                    if event.state() == ShortcutState::Pressed {
-                        let _ = handle.emit("hotkey_pressed", ());
-                    } else if event.state() == ShortcutState::Released {
-                        let _ = handle.emit("hotkey_released", ());
-                    }
-                });
-        }
+    let new_config = parse_hotkey(&settings.hotkey);
+    info!("[Hotkey] Aggiornata a: {:?}", new_config);
+    let ptr = Box::into_raw(Box::new(new_config));
+    let old = state.hotkey_config.swap(ptr, Ordering::SeqCst);
+    if !old.is_null() {
+        unsafe { drop(Box::from_raw(old)); }
     }
 
     Ok(())
@@ -240,36 +283,82 @@ async fn send_to_python(state: tauri::State<'_, AppState>, message: String) -> R
     }
 }
 
-/// Copia il testo negli appunti e simula Ctrl+V
+/// Copia il testo negli appunti, simula Ctrl+V, poi ripristina il contenuto precedente
 #[tauri::command]
 async fn execute_paste<R: Runtime>(app: AppHandle<R>, text: String) -> Result<(), String> {
-    use rdev::{simulate, EventType, Key};
     use std::{thread, time::Duration};
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
-    // 1. Scrivi negli appunti
+    let previous = app.clipboard().read_text().ok();
+
     app.clipboard()
         .write_text(text)
         .map_err(|e| e.to_string())?;
 
-    // 2. 50ms delay: gives the OS clipboard manager enough time to commit the
-    //    new content before the simulated Ctrl+V keystroke reads it. Shorter
-    //    values (~10-20ms) cause sporadic stale-paste on Windows; 50ms is the
-    //    minimum reliable across Win10/11 and most clipboard-hooking tools.
     thread::sleep(Duration::from_millis(50));
 
-    // 3. Simula CTRL + V (Windows/Linux) o CMD + V (Mac)
-    #[cfg(target_os = "macos")]
-    let modifier = Key::MetaLeft;
-    #[cfg(not(target_os = "macos"))]
-    let modifier = Key::ControlLeft;
+    simulate_ctrl_v();
 
-    let _ = simulate(&EventType::KeyPress(modifier));
-    let _ = simulate(&EventType::KeyPress(Key::KeyV));
-    let _ = simulate(&EventType::KeyRelease(Key::KeyV));
-    let _ = simulate(&EventType::KeyRelease(modifier));
+    thread::sleep(Duration::from_millis(100));
+
+    if let Some(prev) = previous {
+        let _ = app.clipboard().write_text(prev);
+    }
 
     Ok(())
+}
+
+#[cfg(windows)]
+fn simulate_ctrl_v() {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
+    };
+
+    let mut inputs: [INPUT; 4] = unsafe { std::mem::zeroed() };
+
+    // Ctrl down
+    inputs[0].r#type = INPUT_KEYBOARD;
+    inputs[0].Anonymous.ki = KEYBDINPUT {
+        wVk: VK_CONTROL,
+        wScan: 0,
+        dwFlags: 0,
+        time: 0,
+        dwExtraInfo: 0,
+    };
+
+    // V down
+    inputs[1].r#type = INPUT_KEYBOARD;
+    inputs[1].Anonymous.ki = KEYBDINPUT {
+        wVk: VK_V,
+        wScan: 0,
+        dwFlags: 0,
+        time: 0,
+        dwExtraInfo: 0,
+    };
+
+    // V up
+    inputs[2].r#type = INPUT_KEYBOARD;
+    inputs[2].Anonymous.ki = KEYBDINPUT {
+        wVk: VK_V,
+        wScan: 0,
+        dwFlags: KEYEVENTF_KEYUP,
+        time: 0,
+        dwExtraInfo: 0,
+    };
+
+    // Ctrl up
+    inputs[3].r#type = INPUT_KEYBOARD;
+    inputs[3].Anonymous.ki = KEYBDINPUT {
+        wVk: VK_CONTROL,
+        wScan: 0,
+        dwFlags: KEYEVENTF_KEYUP,
+        time: 0,
+        dwExtraInfo: 0,
+    };
+
+    unsafe {
+        SendInput(4, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
+    }
 }
 
 // ─── COMANDI CRONOLOGIA ──────────────────────────────────────────────────────
@@ -348,6 +437,9 @@ pub fn run() {
             let _ = fs::create_dir_all(&models_dir);
 
             let settings = load_settings_from_file(&settings_path);
+            let initial_config = parse_hotkey(&settings.hotkey);
+            info!("[Hotkey] Configurata: {:?}", initial_config);
+            let hotkey_config = Arc::new(AtomicPtr::new(Box::into_raw(Box::new(initial_config))));
 
             app.manage(AppState {
                 stats:          Mutex::new(load_stats_from_file(&stats_path)),
@@ -356,69 +448,47 @@ pub fn run() {
                 stats_path,
                 history_path,
                 models_dir: models_dir.clone(),
+                hotkey_config: hotkey_config.clone(),
             });
 
-            // Registra hotkey all'avvio
-            let manager = app.global_shortcut();
-            let is_special = settings.hotkey == "CommandOrControl+Alt" || settings.hotkey == "Control+Alt";
-
-            if !is_special {
-                if let Ok(shortcut) = Shortcut::from_str(&settings.hotkey) {
-                    let _ = manager.on_shortcut(shortcut, |handle, _shortcut, event| {
-                        if event.state() == ShortcutState::Pressed {
-                            let _ = handle.emit("hotkey_pressed", ());
-                        } else if event.state() == ShortcutState::Released {
-                            let _ = handle.emit("hotkey_released", ());
-                        }
-                    });
-                }
-            }
-
-            // Avvio Keyboard Listener per scorciatoie speciali (es. Control+Alt)
+            // Hotkey polling via GetAsyncKeyState (~60Hz, no hooks, no message pump)
             let app_handle_kb = app.handle().clone();
             std::thread::spawn(move || {
-                let mut ctrl_pressed = false;
-                let mut alt_pressed = false;
-                let mut both_active = false;
+                let mut hotkey_active = false;
 
-                if let Err(error) = listen(move |event: Event| {
-                    match event.event_type {
-                        EventType::KeyPress(key) => {
-                            if key == Key::ControlLeft || key == Key::ControlRight { ctrl_pressed = true; }
-                            if key == Key::Alt || key == Key::AltGr { alt_pressed = true; }
-                        }
-                        EventType::KeyRelease(key) => {
-                            if key == Key::ControlLeft || key == Key::ControlRight { ctrl_pressed = false; }
-                            if key == Key::Alt || key == Key::AltGr { alt_pressed = false; }
-                        }
-                        _ => {}
-                    }
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(16));
 
-                    // Logica di trigger
-                    if ctrl_pressed && alt_pressed {
-                        if !both_active {
-                            both_active = true;
-                            debug!("[Hook] Triggered: Control + Alt");
-                            let _ = app_handle_kb.emit("hotkey_pressed", ());
-                        }
-                    } else {
-                        if both_active {
-                            both_active = false;
-                            debug!("[Hook] Released: Control + Alt");
-                            let _ = app_handle_kb.emit("hotkey_released", ());
-                        }
+                    let config_ptr = hotkey_config.load(Ordering::SeqCst);
+                    if config_ptr.is_null() { continue; }
+                    let config = unsafe { &*config_ptr };
+
+                    if config.vk_codes.is_empty() { continue; }
+
+                    let all_pressed = config.vk_codes.iter().all(|&vk| is_key_pressed(vk));
+
+                    if all_pressed && !hotkey_active {
+                        hotkey_active = true;
+                        debug!("[Hotkey] Pressed");
+                        let _ = app_handle_kb.emit("hotkey_pressed", ());
+                    } else if !all_pressed && hotkey_active {
+                        hotkey_active = false;
+                        debug!("[Hotkey] Released");
+                        let _ = app_handle_kb.emit("hotkey_released", ());
                     }
-                }) {
-                    error!("[Hook] Critical error: {:?}", error);
                 }
             });
 
             // Avvio Python sidecar (con health-check e auto-restart)
             let app_handle = app.handle().clone();
             let models_dir_str = models_dir.to_string_lossy().to_string();
+            let resource_dir = app.path().resource_dir().expect("Impossibile trovare resource dir");
+            let script_path = resource_dir.join("whisper_engine.py");
+            let script_path_str = script_path.to_string_lossy().to_string();
+            info!("[Python sidecar] Script path: {}", script_path_str);
+
             std::thread::spawn(move || {
                 let mut restart_count: u32 = 0;
-                // Back-off delays: 1s, 2s, 4s, 8s, then cap at 10s
                 const MAX_BACKOFF_SECS: u64 = 10;
 
                 loop {
@@ -427,7 +497,7 @@ pub fn run() {
                     let shell = app_handle.shell();
                     let spawn_result = shell
                         .command("python")
-                        .args(["whisper_engine.py"])
+                        .args([&script_path_str])
                         .spawn();
 
                     let (mut rx, mut child) = match spawn_result {
@@ -537,7 +607,6 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![

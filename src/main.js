@@ -209,11 +209,9 @@ async function loadSettings() {
     const hotkeyDisplay = document.querySelector("#current-hotkey-display");
     if (hotkeyDisplay) hotkeyDisplay.textContent = s.hotkey || "CommandOrControl+Space";
 
-    const autoPaste    = document.querySelector("#auto-paste");
     const minimizeTray = document.querySelector("#minimize-tray");
     const audioDevice  = document.querySelector("#audio-device");
 
-    if (autoPaste)    autoPaste.checked    = s.autoPaste    ?? true;
     if (minimizeTray) minimizeTray.checked = s.minimizeTray ?? true;
     if (audioDevice && s.selectedDevice) audioDevice.value = s.selectedDevice;
 
@@ -229,7 +227,6 @@ async function loadSettings() {
     await refreshAllModelStatus();
     renderModels();
     updateModelDisplay();
-    if (typeof updateModeUI === "function") updateModeUI(s.autoPaste ?? true);
 
     console.log("[settings] Caricate:", s);
   } catch (err) {
@@ -258,7 +255,6 @@ async function persistSettings() {
   const settings = {
     hotkey:         hotkeyInput.value || "CommandOrControl+Space",
     model:          selectedModel,
-    autoPaste:      document.querySelector("#auto-paste")?.checked ?? true,
     minimizeTray:   true,
     selectedDevice: document.querySelector("#audio-device").value,
     selectedLanguage: document.querySelector("#transcription-language")?.value || selectedLanguage,
@@ -287,7 +283,13 @@ async function loadAudioDevices() {
 }
 
 // ─── AGGIORNAMENTI (placeholder) ─────────────────────────────────────────────
-const APP_VERSION = "0.1.0";
+async function getAppVersion() {
+  try {
+    return await window.__TAURI__.app.getVersion();
+  } catch (_) {
+    return "unknown";
+  }
+}
 
 async function checkForUpdates() {
   const statusEl = document.querySelector("#update-status");
@@ -305,9 +307,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   const navLinks      = document.querySelectorAll(".nav-links li");
   const tabContents   = document.querySelectorAll(".tab-content");
 
-  // Mostra versione app nel tab Sistema
+  // Mostra versione app
+  const appVersion = await getAppVersion();
   const versionEl = document.querySelector("#app-version");
-  if (versionEl) versionEl.textContent = APP_VERSION;
+  if (versionEl) versionEl.textContent = appVersion;
+  const footerVersion = document.querySelector("#footer-version");
+  if (footerVersion) footerVersion.textContent = `Traflix Voice v${appVersion}`;
 
   // Pulsante Controlla Aggiornamenti
   const checkUpdatesBtn = document.querySelector("#check-updates-btn");
@@ -623,7 +628,6 @@ window.addEventListener("DOMContentLoaded", async () => {
           await loadStats();
         }
 
-        // Salva nella cronologia
         const historyTimestamp = new Date().toLocaleString("it-IT", {
           day: "2-digit", month: "2-digit", year: "numeric",
           hour: "2-digit", minute: "2-digit", second: "2-digit"
@@ -634,50 +638,22 @@ window.addEventListener("DOMContentLoaded", async () => {
           wordCount: wordCount
         });
 
-        // AUTO-PASTE (Se attivo)
-        const isAutoPaste = document.querySelector("#auto-paste")?.checked;
-        if (isAutoPaste) {
-          console.log("[hold-to-speak] Eseguo Incollo Diretto...");
-          await invoke("execute_paste", { text: data.text });
-        }
+        await invoke("execute_paste", { text: data.text });
       }
-    } catch (_) {}
+    } catch (err) {
+      console.error("[python_output] Errore gestione evento:", err);
+    }
+  });
+
+  listen("hotkey_error", (event) => {
+    console.error("[hotkey] Errore:", event.payload);
+    showToast(event.payload, "error");
   });
 
   // ── PULSANTE START REC (Anteprima Trascrizione) ──
   const startRecMain = document.querySelector("#start-rec-main");
   const transcriptionBox = document.querySelector("#transcription-box");
   const clearBtn = document.querySelector("#clear-text-btn");
-  const modeBoxBtn = document.querySelector("#mode-box");
-  const modePasteBtn = document.querySelector("#mode-paste");
-  const autoPasteToggle = document.querySelector("#auto-paste");
-
-  function updateModeUI(isPaste) {
-    if (isPaste) {
-      modePasteBtn?.classList.add("active");
-      modeBoxBtn?.classList.remove("active");
-      if (autoPasteToggle) autoPasteToggle.checked = true;
-    } else {
-      modeBoxBtn?.classList.add("active");
-      modePasteBtn?.classList.remove("active");
-      if (autoPasteToggle) autoPasteToggle.checked = false;
-    }
-  }
-
-  modeBoxBtn?.addEventListener("click", () => {
-    updateModeUI(false);
-    persistSettings();
-  });
-
-  modePasteBtn?.addEventListener("click", () => {
-    updateModeUI(true);
-    persistSettings();
-  });
-
-  autoPasteToggle?.addEventListener("change", () => {
-    updateModeUI(autoPasteToggle.checked);
-    persistSettings();
-  });
 
   if (clearBtn && transcriptionBox) {
     clearBtn.addEventListener("click", () => {
@@ -756,15 +732,17 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   // ── LISTENER EVENTI RUST ──
+  console.log("[hotkey] Registrazione listener hotkey_pressed/released...");
   listen("hotkey_pressed", () => {
-    console.log("[event] hotkey_pressed ricevuto da Rust");
+    console.log("[event] hotkey_pressed ricevuto da Rust, activeTranscription:", activeTranscription);
     startTranscription();
   });
 
   listen("hotkey_released", () => {
-    console.log("[event] hotkey_released ricevuto da Rust");
+    console.log("[event] hotkey_released ricevuto da Rust, activeTranscription:", activeTranscription);
     stopTranscription();
   });
+  console.log("[hotkey] Listener registrati OK");
 
   // ── LISTENER LOCALE (Fallback quando la finestra ha il focus) ──
   window.addEventListener("keydown", (e) => {
