@@ -1,7 +1,10 @@
+use cpal::traits::{DeviceTrait, HostTrait};
 use log::{debug, error, info, warn};
+use rdev::{listen, Event, EventType, Key};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -9,11 +12,8 @@ use tauri::{
     AppHandle, Emitter, Listener, Manager, Runtime, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
-use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandChild;
-use std::str::FromStr;
-use cpal::traits::{DeviceTrait, HostTrait};
-use rdev::{listen, Event, EventType, Key};
+use tauri_plugin_shell::ShellExt;
 
 // ─── STRUTTURE DATI ──────────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ struct AppState {
 
 // ─── HELPERS FILE ────────────────────────────────────────────────────────────
 
-fn load_stats_from_file(path: &PathBuf) -> AppStats {
+fn load_stats_from_file(path: &Path) -> AppStats {
     if let Ok(data) = fs::read_to_string(path) {
         if let Ok(stats) = serde_json::from_str(&data) {
             return stats;
@@ -98,7 +98,7 @@ fn load_stats_from_file(path: &PathBuf) -> AppStats {
     AppStats::default()
 }
 
-fn load_settings_from_file(path: &PathBuf) -> AppSettings {
+fn load_settings_from_file(path: &Path) -> AppSettings {
     if let Ok(data) = fs::read_to_string(path) {
         if let Ok(settings) = serde_json::from_str(&data) {
             return settings;
@@ -107,7 +107,7 @@ fn load_settings_from_file(path: &PathBuf) -> AppSettings {
     AppSettings::default()
 }
 
-fn ensure_app_data_dir(path: &PathBuf) {
+fn ensure_app_data_dir(path: &Path) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -115,7 +115,7 @@ fn ensure_app_data_dir(path: &PathBuf) {
 
 /// Writes data atomically: writes to a `.tmp` file first, then renames to the
 /// final path. This prevents corruption if the app crashes mid-write.
-fn atomic_write(path: &PathBuf, data: &str) -> std::io::Result<()> {
+fn atomic_write(path: &Path, data: &str) -> std::io::Result<()> {
     let tmp_path = path.with_extension("json.tmp");
     fs::write(&tmp_path, data)?;
     fs::rename(&tmp_path, path)?;
@@ -145,20 +145,23 @@ async fn save_settings<R: Runtime>(
     // Applica hotkey globale (Solo se non è una scorciatoia speciale gestita dall'hook)
     let manager = app.global_shortcut();
     let _ = manager.unregister_all();
-    
-    let is_special = settings.hotkey.contains("Alt") && settings.hotkey.contains("Control") && !settings.hotkey.contains("+") || 
-                     settings.hotkey == "CommandOrControl+Alt" || 
-                     settings.hotkey == "Control+Alt";
+
+    let is_special = settings.hotkey.contains("Alt")
+        && settings.hotkey.contains("Control")
+        && !settings.hotkey.contains("+")
+        || settings.hotkey == "CommandOrControl+Alt"
+        || settings.hotkey == "Control+Alt";
 
     if !is_special {
         if let Ok(shortcut) = Shortcut::from_str(&settings.hotkey) {
-            let _ = manager.on_shortcut(shortcut, move |handle, _shortcut, event: ShortcutEvent| {
-                if event.state() == ShortcutState::Pressed {
-                    let _ = handle.emit("hotkey_pressed", ());
-                } else if event.state() == ShortcutState::Released {
-                    let _ = handle.emit("hotkey_released", ());
-                }
-            });
+            let _ =
+                manager.on_shortcut(shortcut, move |handle, _shortcut, event: ShortcutEvent| {
+                    if event.state() == ShortcutState::Pressed {
+                        let _ = handle.emit("hotkey_pressed", ());
+                    } else if event.state() == ShortcutState::Released {
+                        let _ = handle.emit("hotkey_released", ());
+                    }
+                });
         }
     }
 
@@ -204,7 +207,10 @@ fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
     let input_devices = host.input_devices().map_err(|e| e.to_string())?;
     for device in input_devices {
         if let Ok(name) = device.name() {
-            devices.push(AudioDeviceInfo { id: name.clone(), name });
+            devices.push(AudioDeviceInfo {
+                id: name.clone(),
+                name,
+            });
         }
     }
     Ok(devices)
@@ -214,7 +220,9 @@ fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
 #[tauri::command]
 fn check_model_exists(app: AppHandle, model_id: String) -> bool {
     let app_dir = app.path().app_data_dir().unwrap_or_default();
-    let model_path = app_dir.join("models").join(format!("faster-whisper-{}", model_id));
+    let model_path = app_dir
+        .join("models")
+        .join(format!("faster-whisper-{}", model_id));
     model_path.join("model.bin").exists()
 }
 
@@ -223,7 +231,9 @@ fn check_model_exists(app: AppHandle, model_id: String) -> bool {
 async fn send_to_python(state: tauri::State<'_, AppState>, message: String) -> Result<(), String> {
     let mut process_lock = state.python_process.lock().unwrap();
     if let Some(child) = process_lock.as_mut() {
-        child.write(format!("{}\n", message).as_bytes()).map_err(|e| e.to_string())?;
+        child
+            .write(format!("{}\n", message).as_bytes())
+            .map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Motore Python non avviato".to_string())
@@ -233,12 +243,14 @@ async fn send_to_python(state: tauri::State<'_, AppState>, message: String) -> R
 /// Copia il testo negli appunti e simula Ctrl+V
 #[tauri::command]
 async fn execute_paste<R: Runtime>(app: AppHandle<R>, text: String) -> Result<(), String> {
-    use tauri_plugin_clipboard_manager::ClipboardExt;
     use rdev::{simulate, EventType, Key};
     use std::{thread, time::Duration};
+    use tauri_plugin_clipboard_manager::ClipboardExt;
 
     // 1. Scrivi negli appunti
-    app.clipboard().write_text(text).map_err(|e| e.to_string())?;
+    app.clipboard()
+        .write_text(text)
+        .map_err(|e| e.to_string())?;
 
     // 2. 50ms delay: gives the OS clipboard manager enough time to commit the
     //    new content before the simulated Ctrl+V keystroke reads it. Shorter
@@ -272,13 +284,18 @@ async fn save_transcription(
 ) -> Result<(), String> {
     ensure_app_data_dir(&state.history_path);
 
-    let mut entries: Vec<TranscriptionEntry> = if let Ok(data) = fs::read_to_string(&state.history_path) {
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let mut entries: Vec<TranscriptionEntry> =
+        if let Ok(data) = fs::read_to_string(&state.history_path) {
+            serde_json::from_str(&data).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
-    entries.push(TranscriptionEntry { text, timestamp, word_count });
+    entries.push(TranscriptionEntry {
+        text,
+        timestamp,
+        word_count,
+    });
 
     // Mantieni solo le ultime 50 voci
     if entries.len() > 50 {
@@ -344,7 +361,7 @@ pub fn run() {
             // Registra hotkey all'avvio
             let manager = app.global_shortcut();
             let is_special = settings.hotkey == "CommandOrControl+Alt" || settings.hotkey == "Control+Alt";
-            
+
             if !is_special {
                 if let Ok(shortcut) = Shortcut::from_str(&settings.hotkey) {
                     let _ = manager.on_shortcut(shortcut, |handle, _shortcut, event| {
