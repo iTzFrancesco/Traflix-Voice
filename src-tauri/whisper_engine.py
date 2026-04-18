@@ -148,14 +148,16 @@ class WhisperEngine:
             self.current_model_size = size
             self.log({"status": "info", "message": f"Modello caricato con successo su {self.current_device}."})
 
-    def _preload_default_model(self):
-        """Pre-load the default model at startup so first transcription is instant."""
+    def _preload_default_model(self, model_size="small"):
+        """Pre-load the selected model at startup so first transcription is instant."""
         try:
-            is_valid, _ = self.verify_model("small")
+            is_valid, _ = self.verify_model(model_size)
             if is_valid:
-                self.log({"status": "info", "message": "Pre-caricamento modello small..."})
-                self.load_model("small")
-                self.log({"status": "info", "message": "Modello small pronto."})
+                self.log({"status": "info", "message": f"Pre-caricamento modello {model_size}..."})
+                self.load_model(model_size)
+                self.log({"status": "info", "message": f"Modello {model_size} pronto."})
+            else:
+                self.log({"status": "info", "message": f"Modello {model_size} non scaricato, preload saltato."})
         except Exception as e:
             self.log({"status": "info", "message": f"Pre-caricamento saltato: {str(e)}"})
 
@@ -314,7 +316,8 @@ class WhisperEngine:
                         self.compute_device = data.get("compute_device")
                     self.log({"status": "info", "message": f"Cartella modelli impostata: {self.models_dir}"})
                     self.check_gpu()
-                    threading.Thread(target=self._preload_default_model, daemon=True).start()
+                    preload_model = data.get("model", "small")
+                    threading.Thread(target=self._preload_default_model, args=(preload_model,), daemon=True).start()
                 elif cmd == "download":
                     threading.Thread(target=self.download_model, args=(data.get("model"),)).start()
                 elif cmd == "check_gpu":

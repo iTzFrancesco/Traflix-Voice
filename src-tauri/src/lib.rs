@@ -512,14 +512,15 @@ pub fn run() {
                     };
 
                     // Send init command (models_dir + compute_device)
-                    let compute_device = {
+                    let (selected_model, compute_device) = {
                         let s = load_settings_from_file(&app_handle.state::<AppState>().settings_path);
-                        s.compute_device
+                        (s.model, s.compute_device)
                     };
                     let _ = child.write(format!(
-                        "{{\"command\": \"init\", \"models_dir\": \"{}\", \"compute_device\": \"{}\"}}\n",
+                        "{{\"command\": \"init\", \"models_dir\": \"{}\", \"compute_device\": \"{}\", \"model\": \"{}\"}}\n",
                         models_dir_str.replace("\\", "\\\\"),
-                        compute_device
+                        compute_device,
+                        selected_model
                     ).as_bytes());
 
                     // Store the child handle so send_to_python can write to it
