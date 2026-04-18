@@ -42,8 +42,8 @@ Traflix Voice e un'applicazione desktop che sfrutta [faster-whisper](https://git
 ### 1. Clona il repository
 
 ```bash
-git clone https://github.com/tuousername/traflix-voice.git
-cd traflix-voice
+git clone https://github.com/iTzFrancesco/Traflix-Voice.git
+cd Traflix-Voice
 ```
 
 ### 2. Installa le dipendenze Python
@@ -187,4 +187,5 @@ traflix-voice/
 
 
 
-*Traflix Voice v0.1.0 -- Dettatura vocale locale alimentata da Whisper.*
+**Traflix Voice -- Dettatura vocale locale fornita da  OpenAI Whisper.**
+**© 2026 - Traflix - All rights reserved**
