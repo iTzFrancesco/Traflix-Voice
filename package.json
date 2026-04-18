@@ -1,0 +1,19 @@
+{
+  "name": "traflix-voice",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Dettatura vocale locale professionale alimentata da OpenAI Whisper.",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
+    "@tauri-apps/plugin-global-shortcut": "^2.3.1",
+    "@tauri-apps/plugin-log": "^2.8.0",
+    "@tauri-apps/plugin-shell": "^2.3.5"
+  }
+}

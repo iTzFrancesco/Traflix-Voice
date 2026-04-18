@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Traflix Voice</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+    <div class="app-container">
+        <!-- SIDEBAR -->
+        <nav class="sidebar" role="navigation" aria-label="Menu principale">
+            <div class="logo-container">
+                <img src="assets/logo.png" alt="Traflix Logo" class="app-logo">
+            </div>
+
+            <ul class="nav-links" role="tablist">
+                <li class="active" data-tab="home" role="tab" aria-selected="true" aria-controls="home" tabindex="0">
+                    <div class="nav-icon-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    </div>
+                    <span class="nav-label">Home</span>
+                </li>
+                <li data-tab="ia" role="tab" aria-selected="false" aria-controls="ia" tabindex="-1">
+                    <div class="nav-icon-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v8"></path><path d="m16 6-4 4-4-4"></path><path d="M12 18v4"></path><path d="m8 18 4-4 4 4"></path><path d="M2 12h8"></path><path d="m6 8 4 4-4 4"></path><path d="M22 12h-8"></path><path d="m18 16 4-4-4-4"></path></svg>
+                    </div>
+                    <span class="nav-label">IA</span>
+                </li>
+                <li data-tab="tasti" role="tab" aria-selected="false" aria-controls="tasti" tabindex="-1">
+                    <div class="nav-icon-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M6 12h.01"/><path d="M10 12h.01"/><path d="M14 12h.01"/><path d="M18 12h.01"/><path d="M7 16h10"/></svg>
+                    </div>
+                    <span class="nav-label">Tasti</span>
+                </li>
+                <li data-tab="cronologia" role="tab" aria-selected="false" aria-controls="cronologia" tabindex="-1">
+                    <div class="nav-icon-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    </div>
+                    <span class="nav-label">Cronologia</span>
+                </li>
+                <li data-tab="sistema" role="tab" aria-selected="false" aria-controls="sistema" tabindex="-1">
+                    <div class="nav-icon-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </div>
+                    <span class="nav-label">Sistema</span>
+                </li>
+            </ul>
+
+
+        </nav>
+
+        <!-- MAIN CONTENT -->
+        <main class="content-area">
+            <!-- TAB HOME -->
+            <section id="home" class="tab-content active" role="tabpanel" aria-labelledby="home-tab">
+                <header class="main-header">
+                    <h1 class="gradient-text">Dashboard</h1>
+                </header>
+
+                <div class="stats-grid">
+                    <div class="stat-card orange-glow">
+                        <span class="stat-label">Parole Trascritte</span>
+                        <span id="stat-words" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">WPM Media</span>
+                        <span id="stat-wpm" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Tempo Attivo</span>
+                        <span id="stat-time" class="stat-value">0h</span>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h2 class="section-title gradient-text">Stato Attuale</h2>
+                    <p class="help-text">Combinazione attiva: <strong id="current-hotkey-display" style="color: var(--primary-orange);">Cmd+Spazio</strong></p>
+                    <p class="help-text">Modello in uso: <strong id="current-model-display">Whisper Small (ITA)</strong></p>
+                </div>
+            </section>
+
+            <!-- TAB IA (Modelli) -->
+            <section id="ia" class="tab-content" role="tabpanel" aria-labelledby="ia-tab">
+                <h2 class="section-title gradient-text">Modelli Whisper</h2>
+                <p class="help-text" style="margin-bottom: 0.75rem;">Scegli il modello in base alla precisione che vuoi ottenere.</p>
+
+                <div class="model-grid">
+                    <!-- Cards via JS -->
+                </div>
+            </section>
+
+
+            <!-- TAB TASTI (Hotkey) -->
+            <section id="tasti" class="tab-content" role="tabpanel" aria-labelledby="tasti-tab">
+                <h2 class="section-title gradient-text">Scorciatoie</h2>
+                <div class="settings-group">
+                    <div class="setting-item">
+                        <label for="hotkey">Hotkey di Attivazione</label>
+                        <div class="hotkey-input-wrapper">
+                            <input type="text" id="hotkey" placeholder="Premi combinazione..." readonly aria-label="Combinazione tasti attuale">
+                            <button id="record-btn" class="icon-btn" aria-label="Registra nuova combinazione tasti">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                        </div>
+                        <p class="help-text">Premi il pulsante per registrare una nuova combinazione.</p>
+                    </div>
+                    <button id="save-btn" class="primary" aria-label="Salva impostazioni scorciatoie">Salva Impostazioni</button>
+                </div>
+            </section>
+
+            <!-- TAB CRONOLOGIA -->
+            <section id="cronologia" class="tab-content" role="tabpanel" aria-labelledby="cronologia-tab">
+                <div class="history-header">
+                    <h2 class="section-title gradient-text">Cronologia</h2>
+                    <button id="clear-history-btn" class="secondary-btn" aria-label="Cancella tutta la cronologia">Cancella Cronologia</button>
+                </div>
+                <p class="help-text" style="margin-bottom: 1rem;">Clicca su una trascrizione per copiarla negli appunti.</p>
+                <div id="history-list" class="history-list" role="list" aria-label="Lista cronologia trascrizioni">
+                    <p class="history-empty">Nessuna trascrizione salvata.</p>
+                </div>
+            </section>
+
+            <!-- TAB SISTEMA -->
+            <section id="sistema" class="tab-content" role="tabpanel" aria-labelledby="sistema-tab">
+                <h2 class="section-title gradient-text">Configurazione Sistema</h2>
+                <div class="settings-group">
+                    <div class="setting-item">
+                        <label for="audio-device">Sorgente Audio (Microfono)</label>
+                        <select id="audio-device" aria-label="Seleziona sorgente audio">
+                            <option value="default">Predefinito di sistema</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label for="transcription-language">Lingua Trascrizione</label>
+                        <select id="transcription-language" aria-label="Seleziona lingua di trascrizione">
+                            <option value="it">Italiano</option>
+                            <option value="en">English</option>
+                            <option value="fr">Français</option>
+                            <option value="de">Deutsch</option>
+                            <option value="es">Español</option>
+                            <option value="pt">Português</option>
+                            <option value="auto">Auto-detect</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label for="compute-device">Dispositivo di Calcolo</label>
+                        <select id="compute-device" aria-label="Seleziona dispositivo di calcolo">
+                            <option value="cpu">CPU (Predefinito)</option>
+                            <option value="cuda">GPU (CUDA)</option>
+                            <option value="auto">Auto-detect</option>
+                        </select>
+                        <p id="gpu-status" class="help-text">Dispositivo in uso: CPU</p>
+                    </div>
+                    <div class="setting-item toggle">
+                        <label for="auto-paste">Incolla Automatica</label>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-paste" checked aria-label="Attiva o disattiva incolla automatica">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-group" style="margin-top: 1rem;">
+                    <p class="help-text" style="text-align: center; opacity: 0.4;">Traflix Voice v0.1.0</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- POPUP DOWNLOAD -->
+    <div id="download-popup" class="modal-overlay" role="dialog" aria-labelledby="download-title" aria-modal="true">
+        <div class="modal-card">
+            <h3 id="download-title">Scaricando Modello...</h3>
+            <div class="progress-container">
+                <div id="progress-bar" class="progress-fill" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progresso download"></div>
+            </div>
+            <p id="progress-text" aria-live="polite">0% (0/0 MB)</p>
+            <p class="help-text">Non chiudere l'applicazione durante il download.</p>
+        </div>
+    </div>
+
+    <div id="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="export-functions.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
