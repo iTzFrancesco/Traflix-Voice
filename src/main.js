@@ -86,9 +86,14 @@ const WHISPER_MODELS = [
 
 // ─── RENDER MODELLI ──────────────────────────────────────────────────────────
 async function refreshAllModelStatus() {
-  for (const m of WHISPER_MODELS) {
-    const exists = await invoke("check_model_exists", { modelId: m.id });
-    modelStatus[m.id] = { ...modelStatus[m.id], downloaded: exists };
+  const results = await Promise.all(
+    WHISPER_MODELS.map(m =>
+      invoke("check_model_exists", { modelId: m.id })
+        .then(exists => ({ id: m.id, exists }))
+    )
+  );
+  for (const { id, exists } of results) {
+    modelStatus[id] = { ...modelStatus[id], downloaded: exists };
   }
 }
 
@@ -205,7 +210,7 @@ async function loadSettings() {
   try {
     const s = await invoke("load_settings");
     if (hotkeyInput) hotkeyInput.value = s.hotkey || "CommandOrControl+Space";
-    
+
     const hotkeyDisplay = document.querySelector("#current-hotkey-display");
     if (hotkeyDisplay) hotkeyDisplay.textContent = s.hotkey || "CommandOrControl+Space";
 
@@ -224,16 +229,10 @@ async function loadSettings() {
     if (computeDeviceSelect) computeDeviceSelect.value = computeDevice;
 
     selectedModel = s.model || "small";
-    await refreshAllModelStatus();
-    renderModels();
-    updateModelDisplay();
 
     console.log("[settings] Caricate:", s);
   } catch (err) {
     console.warn("[settings] Nessun file trovato, uso default.", err);
-    await refreshAllModelStatus();
-    renderModels();
-    updateModelDisplay();
   }
 }
 
@@ -307,12 +306,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   const navLinks      = document.querySelectorAll(".nav-links li");
   const tabContents   = document.querySelectorAll(".tab-content");
 
-  // Mostra versione app
-  const appVersion = await getAppVersion();
+  // ── PARALLEL STARTUP ──
+  const [appVersion] = await Promise.all([
+    getAppVersion(),
+    loadAudioDevices(),
+    loadSettings(),
+    loadStats(),
+  ]);
+
+  // Versione app (dopo Promise.all, appVersion è già risolta)
   const versionEl = document.querySelector("#app-version");
   if (versionEl) versionEl.textContent = appVersion;
   const footerVersion = document.querySelector("#footer-version");
   if (footerVersion) footerVersion.textContent = `Traflix Voice v${appVersion}`;
+
+  // ── MODELS (4 checks in parallelo) ──
+  await refreshAllModelStatus();
+  renderModels();
+  updateModelDisplay();
 
   // Pulsante Controlla Aggiornamenti
   const checkUpdatesBtn = document.querySelector("#check-updates-btn");
@@ -338,10 +349,6 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     });
   }
-
-  await loadAudioDevices();
-  await loadSettings();
-  await loadStats();
 
   // ── AUDIO DEVICE AND LANGUAGE CHANGE LISTENERS ──
   const audioDeviceSelect = document.querySelector("#audio-device");
@@ -421,6 +428,30 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // ── MOUSE BUTTON RECORDING ──
+  window.addEventListener("mousedown", (e) => {
+    if (!isRecording) return;
+
+    let mouseKey = null;
+    if (e.button === 3) mouseKey = "XBUTTON1";
+    else if (e.button === 4) mouseKey = "XBUTTON2";
+    else return;
+
+    e.preventDefault();
+
+    const keys = [];
+    if (e.ctrlKey)  keys.push("CommandOrControl");
+    if (e.altKey)   keys.push("Alt");
+    if (e.shiftKey) keys.push("Shift");
+    if (e.metaKey)  keys.push("Super");
+
+    keys.push(mouseKey);
+    hotkeyInput.value = keys.join("+");
+    isRecording = false;
+    recordBtn.classList.remove("recording");
+    hotkeyInput.placeholder = "Premi i tasti...";
+  });
+
   saveBtn.addEventListener("click", async () => {
     // Permettiamo specificamente "Control+Alt" (o CommandOrControl+Alt)
     const isControlAlt = hotkeyInput.value === "CommandOrControl+Alt+..." || 
@@ -463,6 +494,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // ── LISTENER OUTPUT PYTHON ──
   const { listen } = window.__TAURI__.event;
+  // Flag per sapere se il modello è stato caricato e possiamo trascrivere
+  let modelReady = false;
+
   const statusEl = document.querySelector("#transcription-status");
 
   listen("python_output", async (event) => {
@@ -470,10 +504,15 @@ window.addEventListener("DOMContentLoaded", async () => {
       const data = JSON.parse(event.payload);
 
       if (statusEl) {
-        if (data.status === "listening")  statusEl.textContent = "🎤 Registrazione in corso...";
-        if (data.status === "processing") statusEl.textContent = "⚙️ Elaborazione...";
-        if (data.status === "ready")      statusEl.textContent = "✅ Pronto";
-        if (data.status === "result")     statusEl.textContent = "✅ Pronto";
+        if (data.status === "starting")     statusEl.textContent = "🚀 Avvio motore vocale...";
+        if (data.status === "loading_model") statusEl.textContent = "📦 Caricamento modello...";
+        if (data.status === "listening")     statusEl.textContent = "🎤 Registrazione in corso...";
+        if (data.status === "processing")   statusEl.textContent = "⚙️ Elaborazione...";
+        if (data.status === "ready") {
+          statusEl.textContent = "✅ Pronto";
+          modelReady = true;
+        }
+        if (data.status === "result")       statusEl.textContent = "✅ Pronto";
       }
 
       if (data.status === "listening") {
@@ -685,6 +724,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function startTranscription() {
     if (activeTranscription) return;
+
+    if (!modelReady) {
+      showToast("Caricamento modello in corso, attendere...", "info");
+      return;
+    }
+
     activeTranscription = true;
     updateRecButton();
     console.log("[hold-to-speak] Inizio");
@@ -734,6 +779,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   // ── LISTENER EVENTI RUST ──
   console.log("[hotkey] Registrazione listener hotkey_pressed/released...");
   listen("hotkey_pressed", () => {
+    if (!modelReady) {
+      console.log("[hotkey] Ignorato: modello non ancora pronto");
+      return;
+    }
     console.log("[event] hotkey_pressed ricevuto da Rust, activeTranscription:", activeTranscription);
     startTranscription();
   });

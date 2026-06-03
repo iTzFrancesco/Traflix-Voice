@@ -148,6 +148,10 @@ fn str_to_vk(s: &str) -> Option<i32> {
         "3" => Some(0x33), "4" => Some(0x34), "5" => Some(0x35),
         "6" => Some(0x36), "7" => Some(0x37), "8" => Some(0x38),
         "9" => Some(0x39),
+        // Pulsanti laterali del mouse
+        "XBUTTON1" | "XButton1" | "Mouse4" | "Back" => Some(0x05),  // VK_XBUTTON1
+        "XBUTTON2" | "XButton2" | "Mouse5" | "Forward" => Some(0x06), // VK_XBUTTON2
+        "MButton" | "Middle" => Some(0x04),  // VK_MBUTTON
         _ => None,
     }
 }
@@ -265,8 +269,8 @@ fn check_model_exists(app: AppHandle, model_id: String) -> bool {
     let app_dir = app.path().app_data_dir().unwrap_or_default();
     let model_path = app_dir
         .join("models")
-        .join(format!("faster-whisper-{}", model_id));
-    model_path.join("model.bin").exists()
+        .join(format!("ggml-{}.bin", model_id));
+    model_path.exists()
 }
 
 /// Invia un comando al processo Python
