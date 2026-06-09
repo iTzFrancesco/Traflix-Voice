@@ -32,6 +32,8 @@ pub struct AppSettings {
     pub selected_language: String,
     #[serde(rename = "computeDevice", default = "default_compute_device")]
     pub compute_device: String,
+    #[serde(rename = "holdToSpeak", default = "default_hold_to_speak")]
+    pub hold_to_speak: bool,
 }
 
 fn default_language() -> String {
@@ -40,6 +42,10 @@ fn default_language() -> String {
 
 fn default_compute_device() -> String {
     "cpu".to_string()
+}
+
+fn default_hold_to_speak() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -52,6 +58,7 @@ impl Default for AppSettings {
             selected_device: "default".to_string(),
             selected_language: "it".to_string(),
             compute_device: "cpu".to_string(),
+            hold_to_speak: true,
         }
     }
 }

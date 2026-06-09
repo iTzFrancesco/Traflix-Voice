@@ -216,9 +216,11 @@ async function loadSettings() {
 
     const minimizeTray = document.querySelector("#minimize-tray");
     const audioDevice  = document.querySelector("#audio-device");
+    const holdToSpeakToggle = document.querySelector("#hold-to-speak");
 
     if (minimizeTray) minimizeTray.checked = s.minimizeTray ?? true;
     if (audioDevice && s.selectedDevice) audioDevice.value = s.selectedDevice;
+    if (holdToSpeakToggle) holdToSpeakToggle.checked = s.holdToSpeak ?? true;
 
     const langSelect = document.querySelector("#transcription-language");
     selectedLanguage = s.selectedLanguage || "it";
@@ -258,6 +260,7 @@ async function persistSettings() {
     selectedDevice: document.querySelector("#audio-device").value,
     selectedLanguage: document.querySelector("#transcription-language")?.value || selectedLanguage,
     computeDevice: document.querySelector("#compute-device")?.value || computeDevice,
+    holdToSpeak:    document.querySelector("#hold-to-speak")?.checked ?? true,
   };
   await invoke("save_settings", { settings });
   return settings;
@@ -373,6 +376,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     minimizeTrayToggle.addEventListener("change", async () => {
       await persistSettings();
       showToast("Impostazioni salvate", "info");
+    });
+  }
+
+  const holdToSpeakEl = document.querySelector("#hold-to-speak");
+  if (holdToSpeakEl) {
+    holdToSpeakEl.addEventListener("change", async () => {
+      await persistSettings();
+      const mode = holdToSpeakEl.checked ? "Tieni premuto" : "Click per toggle";
+      showToast(`Modalità: ${mode}`, "info");
     });
   }
 
@@ -495,7 +507,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // ── LISTENER OUTPUT PYTHON ──
   const { listen } = window.__TAURI__.event;
   // Flag per sapere se il modello è stato caricato e possiamo trascrivere
-  let modelReady = false;
+  let modelReady = true;
 
   const statusEl = document.querySelector("#transcription-status");
 
@@ -503,15 +515,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       const data = JSON.parse(event.payload);
 
+      // Aggiorna lo stato di modelReady indipendentemente dalla presenza di statusEl nel DOM
+      if (data.status === "starting" || data.status === "loading_model") {
+        modelReady = false;
+      } else if (data.status === "ready" || data.status === "result" || data.status === "error") {
+        modelReady = true;
+      }
+
       if (statusEl) {
         if (data.status === "starting")     statusEl.textContent = "🚀 Avvio motore vocale...";
         if (data.status === "loading_model") statusEl.textContent = "📦 Caricamento modello...";
         if (data.status === "listening")     statusEl.textContent = "🎤 Registrazione in corso...";
         if (data.status === "processing")   statusEl.textContent = "⚙️ Elaborazione...";
-        if (data.status === "ready") {
-          statusEl.textContent = "✅ Pronto";
-          modelReady = true;
-        }
+        if (data.status === "ready")        statusEl.textContent = "✅ Pronto";
         if (data.status === "result")       statusEl.textContent = "✅ Pronto";
       }
 
@@ -776,6 +792,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Legge la modalità hold-to-speak in tempo reale dal DOM
+  function isHoldMode() {
+    return document.querySelector("#hold-to-speak")?.checked ?? true;
+  }
+
   // ── LISTENER EVENTI RUST ──
   console.log("[hotkey] Registrazione listener hotkey_pressed/released...");
   listen("hotkey_pressed", () => {
@@ -784,27 +805,46 @@ window.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     console.log("[event] hotkey_pressed ricevuto da Rust, activeTranscription:", activeTranscription);
-    startTranscription();
+    if (isHoldMode()) {
+      // Modalità "tieni premuto": avvia alla pressione
+      startTranscription();
+    } else {
+      // Modalità "click toggle": alterna avvio/stop ad ogni pressione
+      if (activeTranscription) {
+        stopTranscription();
+      } else {
+        startTranscription();
+      }
+    }
   });
 
   listen("hotkey_released", () => {
     console.log("[event] hotkey_released ricevuto da Rust, activeTranscription:", activeTranscription);
-    stopTranscription();
+    // In modalità hold: ferma al rilascio; in modalità toggle: nessuna azione
+    if (isHoldMode()) {
+      stopTranscription();
+    }
   });
   console.log("[hotkey] Listener registrati OK");
 
   // ── LISTENER LOCALE (Fallback quando la finestra ha il focus) ──
   window.addEventListener("keydown", (e) => {
-    // Se la scorciatoia salvata è Control+Alt, o se l'utente la sta forzando
     const isControlAlt = e.ctrlKey && e.altKey;
-    if (isControlAlt && !isRecording) {
+    if (!isControlAlt || isRecording) return;
+    if (isHoldMode()) {
       startTranscription();
+    } else {
+      if (activeTranscription) {
+        stopTranscription();
+      } else {
+        startTranscription();
+      }
     }
   });
 
   window.addEventListener("keyup", (e) => {
-    // Rilasciamo se uno dei due viene alzato
-    if (e.key === "Control" || e.key === "Alt") {
+    // In hold mode: ferma al rilascio di uno dei modificatori
+    if (isHoldMode() && (e.key === "Control" || e.key === "Alt")) {
       stopTranscription();
     }
   });
