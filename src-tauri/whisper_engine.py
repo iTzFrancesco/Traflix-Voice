@@ -6,6 +6,8 @@ import os
 import queue
 import threading
 import concurrent.futures
+from pywhispercpp.model import Model
+from huggingface_hub import hf_hub_download
 
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 4000
@@ -19,6 +21,8 @@ class WhisperEngine:
         self.is_recording = False
         self.models_dir = None
         self._model_lock = threading.Lock()
+        self.current_device = "cpu"
+        self.compute_device = "cpu"
 
     def verify_model(self, size):
         model_path = os.path.join(self.models_dir, f"ggml-{size}.bin")
@@ -44,7 +48,6 @@ class WhisperEngine:
             self.log({"status": "loading_model", "message": f"Caricamento modello {size}..."})
             model_path = os.path.join(self.models_dir, f"ggml-{size}.bin")
             try:
-                from pywhispercpp.model import Model
                 self.model = Model(model_path, print_realtime=False, print_progress=False)
                 self.current_model_size = size
                 self.log({"status": "info", "message": f"Modello {size} caricato."})
@@ -69,7 +72,6 @@ class WhisperEngine:
         sys.stdout.flush()
 
     def download_model(self, size):
-        from huggingface_hub import hf_hub_download
         local_path = os.path.join(self.models_dir, f"ggml-{size}.bin")
 
         try:

@@ -21,6 +21,8 @@ import numpy as np
 sys.modules["faster_whisper"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
 sys.modules["huggingface_hub"] = MagicMock()
+sys.modules["pywhispercpp"] = MagicMock()
+sys.modules["pywhispercpp.model"] = MagicMock()
 
 from whisper_engine import WhisperEngine, SAMPLE_RATE, BLOCK_SIZE
 
@@ -322,44 +324,42 @@ class TestAudioCallback(unittest.TestCase):
 class TestModelPath(unittest.TestCase):
 
     def test_download_model_path(self):
-        """download_model should build the local_dir as models_dir/faster-whisper-{size}."""
-        import os
+        """download_model should call hf_hub_download with models_dir as local_dir."""
         engine = WhisperEngine()
         engine.models_dir = "/home/user/.traflix/models"
 
-        with patch("whisper_engine.snapshot_download") as mock_dl, \
+        with patch("whisper_engine.hf_hub_download") as mock_dl, \
              patch.object(engine, "verify_model", return_value=(True, "ok")), \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.download_model("small")
 
-        expected_local_dir = os.path.join("/home/user/.traflix/models", "faster-whisper-small")
-        mock_dl.assert_called_once()
-        call_kwargs = mock_dl.call_args
-        self.assertEqual(
-            call_kwargs.kwargs.get("local_dir") or call_kwargs[1].get("local_dir"),
-            expected_local_dir,
+        mock_dl.assert_called_once_with(
+            repo_id="ggerganov/whisper.cpp",
+            filename="ggml-small.bin",
+            local_dir="/home/user/.traflix/models",
+            local_dir_use_symlinks=False,
         )
 
     def test_load_model_path(self):
-        """load_model should pass models_dir/faster-whisper-{size} to WhisperModel."""
+        """load_model should pass models_dir/ggml-{size}.bin to Model."""
         import os
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.WhisperModel") as MockModel, \
+        with patch("whisper_engine.Model") as MockModel, \
              patch.object(engine, "verify_model", return_value=(True, "ok")), \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.load_model("large-v2")
 
-        expected_root = os.path.join("/models", "faster-whisper-large-v2")
-        MockModel.assert_called_once_with(expected_root, device="cpu", compute_type="int8")
+        expected_path = os.path.join("/models", "ggml-large-v2.bin")
+        MockModel.assert_called_once_with(expected_path, print_realtime=False, print_progress=False)
 
     def test_load_model_caches(self):
         """Calling load_model twice with the same size must NOT reload."""
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.WhisperModel") as MockModel, \
+        with patch("whisper_engine.Model") as MockModel, \
              patch.object(engine, "verify_model", return_value=(True, "ok")), \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.load_model("small")
@@ -368,11 +368,11 @@ class TestModelPath(unittest.TestCase):
         MockModel.assert_called_once()
 
     def test_load_model_reloads_on_size_change(self):
-        """Switching model size should trigger a new WhisperModel load."""
+        """Switching model size should trigger a new Model load."""
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.WhisperModel") as MockModel, \
+        with patch("whisper_engine.Model") as MockModel, \
              patch.object(engine, "verify_model", return_value=(True, "ok")), \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.load_model("small")
@@ -392,7 +392,6 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine.models_dir = "/models"
         engine.model = MagicMock()
         engine.current_model_size = "small"
-        engine.current_device = "cpu"
         return engine
 
     def _mock_input_stream(self, engine, audio_blocks=None):
@@ -426,8 +425,7 @@ class TestTranscriptionFlow(unittest.TestCase):
 
         mock_segment = MagicMock()
         mock_segment.text = "ciao mondo"
-        mock_info = MagicMock()
-        engine.model.transcribe.return_value = ([mock_segment], mock_info)
+        engine.model.transcribe.return_value = [mock_segment]
 
         self._mock_input_stream(engine, [fake_audio])
 
@@ -465,7 +463,7 @@ class TestTranscriptionFlow(unittest.TestCase):
 
         mock_segment = MagicMock()
         mock_segment.text = "test"
-        engine.model.transcribe.return_value = ([mock_segment], MagicMock())
+        engine.model.transcribe.return_value = [mock_segment]
 
         self._mock_input_stream(engine, [block1, block2])
 
@@ -504,11 +502,11 @@ class TestDownloadModel(unittest.TestCase):
 
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_download_error_logged(self, mock_stdout):
-        """If snapshot_download raises, the error is logged as JSON."""
+        """If hf_hub_download raises, the error is logged as JSON."""
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.snapshot_download", side_effect=OSError("disk full")):
+        with patch("whisper_engine.hf_hub_download", side_effect=OSError("disk full")):
             engine.download_model("tiny")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
@@ -522,7 +520,7 @@ class TestDownloadModel(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.snapshot_download"), \
+        with patch("whisper_engine.hf_hub_download"), \
              patch.object(engine, "verify_model", return_value=(True, "ok")):
             engine.download_model("small")
 
