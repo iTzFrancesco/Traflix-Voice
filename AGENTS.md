@@ -62,3 +62,41 @@ Files in `AppData/Roaming/it.traflix.voice/`: `settings.json`, `stats.json`, `hi
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`): Rust lint (fmt + clippy), Python lint (py_compile), Python tests (pytest, conditional), full Tauri build on Windows. Build artifacts uploaded as `traflix-voice-windows`.
+
+### Auto-CI Check Workflow
+
+When the user pushes code, I should automatically check the CI status using `gh` CLI and fix any failures.
+
+**Check CI command** (available in OpenCode TUI as `/check-ci`):
+`.opencode/commands/check-ci.md`
+
+**Manual check steps:**
+```bash
+# 1. List recent runs (find the latest failed one)
+gh run list --limit 5 --json conclusion,databaseId,headBranch,displayTitle,status
+
+# 2. View failed logs for a specific run
+gh run view <ID> --log-failed
+
+# 3. Fix the errors in the codebase
+
+# 4. Verify fixes locally
+cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings
+python -m py_compile src-tauri/whisper_engine.py
+python -m pytest src-tauri/test_whisper_engine.py -v
+
+# 5. Commit and push
+git add -A && git commit -m "fix: CI errors" && git push
+```
+
+**CI Failure Issue workflow** (`.github/workflows/ci-failure-issue.yml`):
+When the CI workflow fails on a push, an issue is automatically created with:
+- Which jobs failed and links to their logs
+- Branch, commit, and workflow run info
+- Labels: `ci-failure`, `auto-generated`
+
+When I see an open issue with `ci-failure` label, I should:
+1. Read the issue body to understand which jobs failed
+2. Check the linked CI logs
+3. Fix the errors
+4. Close the issue with a reference to the fix commit
