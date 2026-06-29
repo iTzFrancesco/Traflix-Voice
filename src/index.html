@@ -85,6 +85,23 @@
                 <h2 class="section-title gradient-text">Modelli Whisper</h2>
                 <p class="help-text" style="margin-bottom: 0.75rem;">Scegli il modello in base alla precisione che vuoi ottenere.</p>
 
+                <div class="settings-group" style="margin-bottom: 1rem; padding: 1rem 1.2rem;">
+                    <div class="setting-item toggle" style="margin-bottom: 0;">
+                        <div>
+                            <label for="provider-toggle">Provider Cloud</label>
+                            <p class="help-text">Usa Groq Cloud (whisper-large-v3-turbo, 216x real-time) invece del modello locale.</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="provider-toggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div id="provider-dashboard" style="display:none; margin-top: 0.75rem;">
+                        <hr class="section-divider" style="margin: 0 0 0.75rem 0;">
+                        <div id="provider-dashboard-content"></div>
+                    </div>
+                </div>
+
                 <div class="model-grid">
                     <!-- Cards via JS -->
                 </div>
@@ -95,27 +112,43 @@
             <section id="tasti" class="tab-content" role="tabpanel" aria-labelledby="tasti-tab">
                 <h2 class="section-title gradient-text">Scorciatoie</h2>
                 <div class="settings-group">
+
+                    <h3 class="section-subtitle">Scorciatoia</h3>
                     <div class="setting-item">
                         <label for="hotkey">Hotkey di Attivazione</label>
-                        <div class="hotkey-input-wrapper">
-                            <input type="text" id="hotkey" placeholder="Premi combinazione..." readonly aria-label="Combinazione tasti attuale">
+                        <div class="hotkey-wrapper">
+                            <div class="hotkey-display">
+                                <input type="text" id="hotkey" placeholder="Premi combinazione..." readonly aria-label="Combinazione tasti attuale">
+                            </div>
                             <button id="record-btn" class="icon-btn" aria-label="Registra nuova combinazione tasti">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="2" y="4" width="20" height="16" rx="2"/>
+                                    <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M6 16h12"/>
+                                </svg>
                             </button>
                         </div>
                         <p class="help-text">Premi il pulsante per registrare una nuova combinazione. Supporta anche i tasti laterali del mouse (Mouse4/Mouse5).</p>
                     </div>
+
+                    <hr class="section-divider">
+
+                    <h3 class="section-subtitle">Modalità</h3>
                     <div class="setting-item toggle">
                         <div>
                             <label for="hold-to-speak">Tieni premuto per parlare</label>
                             <p class="help-text">Se disattivato, premi la scorciatoia una volta per avviare la registrazione e premila di nuovo per interromperla.</p>
                         </div>
                         <label class="switch">
-                            <input type="checkbox" id="hold-to-speak" checked>
+                            <input type="checkbox" id="hold-to-speak">
                             <span class="slider"></span>
                         </label>
                     </div>
+
+                    <hr class="section-divider">
+
+                    <h3 class="section-subtitle">Salvataggio</h3>
                     <button id="save-btn" class="primary" aria-label="Salva impostazioni scorciatoie">Salva Impostazioni</button>
+
                 </div>
             </section>
 
@@ -161,6 +194,11 @@
                             <option value="auto">Auto-detect</option>
                         </select>
                         <p id="gpu-status" class="help-text">Dispositivo in uso: CPU</p>
+                    </div>
+                    <div class="setting-item">
+                        <label for="groq-api-key">Groq API Key (Cloud)</label>
+                        <input type="password" id="groq-api-key" placeholder="gsk_..." autocomplete="off" aria-label="Chiave API Groq">
+                        <p class="help-text">Inserisci la tua API key da <a href="https://console.groq.com/keys" target="_blank" style="color:var(--primary-orange);">console.groq.com/keys</a></p>
                     </div>
                 </div>
                 <div class="settings-group" style="margin-top: 1rem;">

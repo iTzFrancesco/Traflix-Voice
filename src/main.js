@@ -6,6 +6,7 @@ let isRecording = false;
 let selectedModel = "small";
 let selectedLanguage = "it";
 let computeDevice = "cpu";  // "cpu", "cuda", "auto"
+let selectedProvider = "local"; // "local" | "cloud"
 const modelStatus = {}; // { modelId: { downloaded: bool, loading: bool } }
 
 // ─── TOAST NOTIFICATION SYSTEM ───────────────────────────────────────────────
@@ -40,18 +41,8 @@ function showToast(message, type = "info") {
   }, 3000);
 }
 
-// ─── CATALOGO MODELLI WHISPER (filtrato per: i5-11600K · 16GB RAM · RX 6500 XT) ──
+// ─── CATALOGO MODELLI WHISPER ──────────────────────────────────────────────────
 const WHISPER_MODELS = [
-  {
-    id: "tiny",
-    name: "Tiny",
-    size: "75 MB",
-    ram: "~1 GB",
-    speed: 5,
-    quality: 1,
-    tag: null,
-    description: "Velocissimo. Ideale per test rapidi o se hai mille altre app aperte. Precisione base sull'italiano.",
-  },
   {
     id: "base",
     name: "Base",
@@ -59,8 +50,8 @@ const WHISPER_MODELS = [
     ram: "~1 GB",
     speed: 4,
     quality: 2,
-    tag: null,
-    description: "Leggero e reattivo. Buon punto di partenza per una dettatura informale.",
+    tag: "Veloce",
+    description: "Leggero e reattivo. Buona scelta per dettatura rapida con hardware limitato.",
   },
   {
     id: "small",
@@ -70,18 +61,8 @@ const WHISPER_MODELS = [
     speed: 3,
     quality: 3,
     tag: "Consigliato",
-    description: "Miglior equilibrio velocità/precisione per il tuo hardware. Ottimo per dettatura quotidiana in italiano.",
+    description: "Miglior equilibrio velocità/precisione. Ottimo per dettatura quotidiana in italiano.",
   },
-  {
-    id: "medium",
-    name: "Medium",
-    size: "1.5 GB",
-    ram: "~5 GB",
-    speed: 2,
-    quality: 4,
-    tag: null,
-    description: "Alta precisione su accenti regionali e terminologia tecnica. Leggermente più lento, ma gestibile.",
-  }
 ];
 
 // ─── RENDER MODELLI ──────────────────────────────────────────────────────────
@@ -100,6 +81,40 @@ async function refreshAllModelStatus() {
 function renderModels() {
   const grid = document.querySelector(".model-grid");
   if (!grid) return;
+
+  if (selectedProvider === "cloud") {
+    grid.innerHTML = `
+      <div class="model-card active" data-model-id="cloud">
+        <div class="model-main">
+          <div class="model-header">
+            <div class="model-title-row">
+              <h3>Whisper Large V3 Turbo</h3>
+              <span class="model-tag" style="background:rgba(79,195,247,0.15);color:#4fc3f7;border-color:rgba(79,195,247,0.3);">Cloud</span>
+            </div>
+            <div class="model-meta">
+              <span class="model-size">~3 GB (remoto)</span>
+              <span class="model-ram">0 GB RAM locale</span>
+            </div>
+          </div>
+          <p class="model-desc">Massima precisione su Groq LPU. 216x real-time — trascrive 1 minuto di audio in ~0.3 secondi. Supporto multilingua incluso italiano. Nessun download richiesto.</p>
+          <div class="model-metrics">
+            <div class="metric">
+              <span class="metric-label">Velocità</span>
+              <div class="dots">${renderDots(5, 5, "var(--primary-orange)")}</div>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Precisione</span>
+              <div class="dots">${renderDots(5, 5, "#4fc3f7")}</div>
+            </div>
+          </div>
+        </div>
+        <button class="model-btn select">
+          ✓ Attivo
+        </button>
+      </div>
+    `;
+    return;
+  }
 
   grid.innerHTML = WHISPER_MODELS.map(m => {
     const isActive = m.id === selectedModel;
@@ -168,6 +183,7 @@ function renderModels() {
         selectedModel = id;
         renderModels();
         updateModelDisplay();
+        loadProviderDashboard();
       }
     });
   });
@@ -182,9 +198,111 @@ function renderDots(filled, total, color) {
 function updateModelDisplay() {
   const modelDisplay = document.querySelector("#current-model-display");
   if (modelDisplay) {
-    const m = WHISPER_MODELS.find(m => m.id === selectedModel);
-    modelDisplay.textContent = m ? `Whisper ${m.name}` : selectedModel;
+    if (selectedProvider === "cloud") {
+      modelDisplay.textContent = "Whisper Large V3 Turbo (Cloud)";
+    } else {
+      const m = WHISPER_MODELS.find(m => m.id === selectedModel);
+      modelDisplay.textContent = m ? `Whisper ${m.name}` : selectedModel;
+    }
   }
+}
+
+function loadProviderDashboard() {
+  const dashboard = document.querySelector("#provider-dashboard");
+  const content = document.querySelector("#provider-dashboard-content");
+  if (!dashboard || !content) return;
+
+  if (selectedProvider !== "cloud") {
+    dashboard.style.display = "none";
+    return;
+  }
+
+  dashboard.style.display = "block";
+  renderCloudDashboard(content, loadGroqUsageFromStorage());
+}
+
+function loadGroqUsageFromStorage() {
+  try {
+    const raw = localStorage.getItem("groq_usage");
+    if (!raw) return null;
+    const usage = JSON.parse(raw);
+    const today = new Date().toISOString().split("T")[0];
+    if (usage.date !== today) return null;
+    return usage;
+  } catch (_) {
+    return null;
+  }
+}
+
+function recordGroqUsage(durationSecs) {
+  if (selectedProvider !== "cloud" || !durationSecs) return;
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    let usage;
+    try {
+      const raw = localStorage.getItem("groq_usage");
+      usage = raw ? JSON.parse(raw) : { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
+    } catch (_) {
+      usage = { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
+    }
+
+    if (usage.date !== today) {
+      usage = { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
+    }
+
+    const now = Date.now();
+    const thisHour = Math.floor(now / 3600000);
+    if (usage._lastHour !== thisHour) {
+      usage.audio_seconds_hourly = 0;
+      usage._lastHour = thisHour;
+    }
+
+    usage.audio_seconds = Math.round((usage.audio_seconds || 0) + durationSecs);
+    usage.audio_seconds_hourly = Math.round((usage.audio_seconds_hourly || 0) + durationSecs);
+    const nextHour = (Math.floor(now / 3600000) + 1) * 3600000;
+    usage.hourly_reset = new Date(nextHour).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+
+    localStorage.setItem("groq_usage", JSON.stringify(usage));
+  } catch (_) {}
+}
+
+function renderCloudDashboard(content, usage) {
+  if (!usage) usage = {};
+
+  const dailySecs = usage.audio_seconds || 0;
+  const hourlySecs = usage.audio_seconds_hourly || 0;
+  const dailyPct = Math.min(100, (dailySecs / 28800) * 100);
+  const hourlyPct = Math.min(100, (hourlySecs / 7200) * 100);
+
+  const warnColor = dailyPct > 80 || hourlyPct > 80;
+  const dailyColor = warnColor ? "#ff4444" : "#4fc3f7";
+  const hourlyColor = warnColor ? "#ff4444" : "var(--primary-orange)";
+
+  content.innerHTML = `
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:0.5rem;">
+      <span style="font-size:0.7rem;font-weight:700;color:#4fc3f7;text-transform:uppercase;letter-spacing:0.04em;">Utilizzo Cloud</span>
+    </div>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+      <div style="flex:1;min-width:130px;">
+        <div style="display:flex;justify-content:space-between;font-size:0.68rem;color:#888;margin-bottom:2px;">
+          <span>Giornaliero</span>
+          <span>${Math.round(dailySecs)} / 28,800s</span>
+        </div>
+        <div class="progress-container" style="height:5px;margin:0;">
+          <div class="progress-fill" style="width:${dailyPct}%;background:${dailyColor};"></div>
+        </div>
+      </div>
+      <div style="flex:1;min-width:130px;">
+        <div style="display:flex;justify-content:space-between;font-size:0.68rem;color:#888;margin-bottom:2px;">
+          <span>Orario (reset ${usage.hourly_reset || "--:--"})</span>
+          <span>${Math.round(hourlySecs)} / 7,200s</span>
+        </div>
+        <div class="progress-container" style="height:5px;margin:0;">
+          <div class="progress-fill" style="width:${hourlyPct}%;background:${hourlyColor};"></div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 // ─── HELPERS HOTKEY ──────────────────────────────────────────────────────────
@@ -209,8 +327,12 @@ function formatTime(minutes) {
 async function loadSettings() {
   try {
     const s = await invoke("load_settings");
-    if (hotkeyInput) hotkeyInput.value = s.hotkey || "CommandOrControl+Space";
+    if (!s || typeof s.hotkey === "undefined") return;
 
+    if (hotkeyInput) {
+      hotkeyInput.value = s.hotkey || "CommandOrControl+Space";
+      void hotkeyInput.offsetHeight;
+    }
     const hotkeyDisplay = document.querySelector("#current-hotkey-display");
     if (hotkeyDisplay) hotkeyDisplay.textContent = s.hotkey || "CommandOrControl+Space";
 
@@ -220,7 +342,7 @@ async function loadSettings() {
 
     if (minimizeTray) minimizeTray.checked = s.minimizeTray ?? true;
     if (audioDevice && s.selectedDevice) audioDevice.value = s.selectedDevice;
-    if (holdToSpeakToggle) holdToSpeakToggle.checked = s.holdToSpeak ?? true;
+    if (holdToSpeakToggle) holdToSpeakToggle.checked = s.holdToSpeak ?? false;
 
     const langSelect = document.querySelector("#transcription-language");
     selectedLanguage = s.selectedLanguage || "it";
@@ -232,35 +354,48 @@ async function loadSettings() {
 
     selectedModel = s.model || "small";
 
-    console.log("[settings] Caricate:", s);
+    const groqApiKeyInput = document.querySelector("#groq-api-key");
+    if (groqApiKeyInput) groqApiKeyInput.value = s.groqApiKey || "";
+
+    selectedProvider = s.provider || "local";
+    const providerToggle = document.querySelector("#provider-toggle");
+    if (providerToggle) providerToggle.checked = selectedProvider === "cloud";
   } catch (err) {
-    console.warn("[settings] Nessun file trovato, uso default.", err);
+    console.warn("[settings] Caricamento fallito, uso default:", err);
   }
 }
 
 async function loadStats() {
-  try {
-    const stats = await invoke("get_stats");
-    const wordsEl = document.querySelector("#stat-words");
-    const wpmEl   = document.querySelector("#stat-wpm");
-    const timeEl  = document.querySelector("#stat-time");
-    if (wordsEl) wordsEl.textContent = stats.total_words ?? 0;
-    if (wpmEl)   wpmEl.textContent   = stats.avg_wpm     ?? 0;
-    if (timeEl)  timeEl.textContent  = formatTime(stats.total_time ?? 0);
-  } catch (err) {
-    console.warn("[stats] Impossibile caricare stats:", err);
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const stats = await invoke("get_stats");
+      const wordsEl = document.querySelector("#stat-words");
+      const wpmEl   = document.querySelector("#stat-wpm");
+      const timeEl  = document.querySelector("#stat-time");
+      if (wordsEl) wordsEl.textContent = stats.total_words ?? 0;
+      if (wpmEl)   wpmEl.textContent   = stats.avg_wpm     ?? 0;
+      if (timeEl)  timeEl.textContent  = formatTime(stats.total_time ?? 0);
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt < 2) await new Promise(r => setTimeout(r, 500));
+    }
   }
+  console.warn("[stats] Impossibile caricare stats dopo 3 tentativi:", lastError);
 }
 
 async function persistSettings() {
   const settings = {
     hotkey:         hotkeyInput.value || "CommandOrControl+Space",
     model:          selectedModel,
-    minimizeTray:   true,
+    minimizeTray:   document.querySelector("#minimize-tray")?.checked ?? true,
     selectedDevice: document.querySelector("#audio-device").value,
     selectedLanguage: document.querySelector("#transcription-language")?.value || selectedLanguage,
     computeDevice: document.querySelector("#compute-device")?.value || computeDevice,
     holdToSpeak:    document.querySelector("#hold-to-speak")?.checked ?? true,
+    groqApiKey:     document.querySelector("#groq-api-key")?.value || "",
+    provider:        selectedProvider,
   };
   await invoke("save_settings", { settings });
   return settings;
@@ -309,13 +444,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   const navLinks      = document.querySelectorAll(".nav-links li");
   const tabContents   = document.querySelectorAll(".tab-content");
 
-  // ── PARALLEL STARTUP ──
+  // ── SETTINGS + STATS (immediati, non aspettano audio devices) ──
+  loadSettings();
+  loadStats();
+
+  // ── ALTRO (audio, versione, modelli) ──
   const [appVersion] = await Promise.all([
     getAppVersion(),
     loadAudioDevices(),
-    loadSettings(),
-    loadStats(),
   ]);
+
+  // Re-sync audio device value after dropdown is populated
+  (async () => {
+    try {
+      const s = await invoke("load_settings");
+      const ad = document.querySelector("#audio-device");
+      if (ad && s.selectedDevice) ad.value = s.selectedDevice;
+    } catch (_) {}
+  })();
 
   // Versione app (dopo Promise.all, appVersion è già risolta)
   const versionEl = document.querySelector("#app-version");
@@ -388,17 +534,52 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  const providerToggle = document.querySelector("#provider-toggle");
+  if (providerToggle) {
+    providerToggle.addEventListener("change", async () => {
+      selectedProvider = providerToggle.checked ? "cloud" : "local";
+      await persistSettings();
+      renderModels();
+      loadProviderDashboard();
+      showToast(`Provider: ${selectedProvider === "cloud" ? "Cloud" : "Locale"}`, "info");
+    });
+  }
+
+  const groqApiKeyInput = document.querySelector("#groq-api-key");
+  if (groqApiKeyInput) {
+    groqApiKeyInput.addEventListener("change", async () => {
+      await persistSettings();
+      showToast("API key salvata", "info");
+    });
+  }
+
+  let currentTab = "home";
+  let dashboardInterval = null;
+
   navLinks.forEach(link => {
-    link.addEventListener("click", () => {
+    link.addEventListener("click", async () => {
       const targetTab = link.getAttribute("data-tab");
+      if (targetTab === currentTab) return;
+
+      if (targetTab === "ia") { await loadSettings(); loadProviderDashboard(); }
+
       navLinks.forEach(l => l.classList.remove("active"));
       link.classList.add("active");
       tabContents.forEach(tab => {
         tab.classList.remove("active");
         if (tab.id === targetTab) tab.classList.add("active");
       });
-      if (targetTab === "home") loadStats();
+
+      if (targetTab === "home") { loadStats(); updateModelDisplay(); }
+      if (targetTab === "tasti") loadSettings();
       if (targetTab === "cronologia") loadHistory();
+
+      clearInterval(dashboardInterval);
+      if (targetTab === "ia" && selectedProvider === "cloud") {
+        dashboardInterval = setInterval(loadProviderDashboard, 15000);
+      }
+
+      currentTab = targetTab;
     });
   });
 
@@ -474,28 +655,19 @@ window.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    // Se è Control+Alt, puliamo la stringa dai puntini prima di salvare
     if (isControlAlt) {
       hotkeyInput.value = "CommandOrControl+Alt";
     }
 
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Salvataggio...";
     try {
       const settings = await persistSettings();
       const hotkeyDisplay = document.querySelector("#current-hotkey-display");
       if (hotkeyDisplay) hotkeyDisplay.textContent = settings.hotkey;
-      saveBtn.textContent = "✅ Salvato!";
       showToast("Scorciatoia salvata con successo", "success");
     } catch (err) {
       console.error("Errore salvataggio:", err);
-      saveBtn.textContent = "❌ Errore";
       showToast("Errore nel salvataggio delle impostazioni", "error");
     }
-    setTimeout(() => {
-      saveBtn.textContent = "Salva Impostazioni";
-      saveBtn.disabled = false;
-    }, 2000);
   });
 
   // ── NOTIFICATION SOUNDS ──
@@ -639,7 +811,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
         // Show error toast
         showToast(data.message || "Errore durante il download del modello", "error");
-      } else if (data.status === "error") {
+      } else       if (data.status === "error") {
         console.error("Python Error:", data.message);
         if (statusEl) statusEl.textContent = "❌ Errore motore";
         for (let m in modelStatus) if (modelStatus[m].loading) modelStatus[m].loading = false;
@@ -647,6 +819,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 
         // Show error toast for Python engine errors
         showToast(data.message || "Errore del motore Python", "error");
+      }
+
+      if (data.status === "rate_limit") {
+        showToast(data.message, "error");
+        updateModelDisplay();
+        loadProviderDashboard();
       }
 
       // Gestione GPU Info
@@ -694,6 +872,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
 
         await invoke("execute_paste", { text: data.text });
+
+        if (selectedProvider === "cloud") { recordGroqUsage(data.duration); loadProviderDashboard(); }
       }
     } catch (err) {
       console.error("[python_output] Errore gestione evento:", err);
@@ -751,7 +931,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     console.log("[hold-to-speak] Inizio");
 
     const status = modelStatus[selectedModel] || { downloaded: false };
-    if (!status.downloaded) {
+    if (selectedProvider !== "cloud" && !status.downloaded) {
       console.warn("[hold-to-speak] Modello non pronto.");
       activeTranscription = false;
       updateRecButton();
@@ -766,7 +946,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         command: "transcribe",
         model: selectedModel,
         device: device === "default" ? null : device,
-        language: language
+        language: language,
+        provider: selectedProvider,
       })
     });
   }

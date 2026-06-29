@@ -2,3 +2,4 @@ pywhispercpp
 sounddevice
 numpy
 huggingface-hub
+groq

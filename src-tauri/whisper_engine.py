@@ -1,5 +1,7 @@
 import sys
 import json
+import io
+import wave
 import sounddevice as sd
 import numpy as np
 import os
@@ -12,6 +14,7 @@ from huggingface_hub import hf_hub_download
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 4000
 TRANSCRIPTION_TIMEOUT = 60
+GROQ_MODEL = "whisper-large-v3-turbo"
 
 class WhisperEngine:
     def __init__(self):
@@ -23,6 +26,8 @@ class WhisperEngine:
         self._model_lock = threading.Lock()
         self.current_device = "cpu"
         self.compute_device = "cpu"
+        self.groq_api_key = None
+        self.provider = "local"
 
     def verify_model(self, size):
         model_path = os.path.join(self.models_dir, f"ggml-{size}.bin")
@@ -71,6 +76,39 @@ class WhisperEngine:
         print(json.dumps(data))
         sys.stdout.flush()
 
+    def _get_groq_usage_path(self):
+        return os.path.join(os.path.dirname(self.models_dir), "groq_usage.json")
+
+    def _record_groq_usage(self, duration_seconds):
+        try:
+            import time as pytime
+            now = pytime.time()
+            today = pytime.strftime("%Y-%m-%d", pytime.localtime(now))
+
+            usage = {"date": today, "audio_seconds": 0.0, "audio_seconds_hourly": 0.0, "hourly_reset": ""}
+            usage_path = self._get_groq_usage_path()
+            if os.path.exists(usage_path):
+                try:
+                    with open(usage_path, "r") as f:
+                        saved = json.load(f)
+                        if saved.get("date") == today:
+                            usage = saved
+                except Exception:
+                    pass
+
+            if usage.get("date") != today:
+                usage = {"date": today, "audio_seconds": 0.0, "audio_seconds_hourly": 0.0, "hourly_reset": ""}
+
+            usage["audio_seconds"] = round(usage.get("audio_seconds", 0) + duration_seconds, 1)
+            usage["audio_seconds_hourly"] = round(usage.get("audio_seconds_hourly", 0) + duration_seconds, 1)
+            next_hour = (now // 3600 + 1) * 3600
+            usage["hourly_reset"] = pytime.strftime("%H:%M", pytime.localtime(next_hour))
+
+            with open(usage_path, "w") as f:
+                json.dump(usage, f)
+        except Exception:
+            pass
+
     def download_model(self, size):
         local_path = os.path.join(self.models_dir, f"ggml-{size}.bin")
 
@@ -118,7 +156,8 @@ class WhisperEngine:
 
     def transcribe(self, device_id, model_size, language="it"):
         try:
-            self.load_model(model_size)
+            if self.provider == "local":
+                self.load_model(model_size)
 
             self.is_recording = True
             self.audio_queue = queue.Queue()
@@ -148,27 +187,76 @@ class WhisperEngine:
 
             recording = np.concatenate(audio_data, axis=0).flatten().astype(np.float32)
 
-            lang_param = "" if language == "auto" else language
-
-            def _run_inference():
-                segments = self.model.transcribe(recording, language=lang_param)
-                text = " ".join(s.text for s in segments).strip()
-                return text
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_run_inference)
-                try:
-                    text = future.result(timeout=TRANSCRIPTION_TIMEOUT)
-                except concurrent.futures.TimeoutError:
-                    self.log({"status": "error", "message": f"Timeout dopo {TRANSCRIPTION_TIMEOUT}s"})
-                    self.log({"status": "ready", "message": "Motore Whisper pronto."})
-                    return
-
-            result = {"status": "result", "text": text, "duration": recording_duration}
-            self.log(result)
+            if self.provider == "cloud":
+                self._transcribe_cloud(recording, language, recording_duration)
+            else:
+                self._transcribe_local(recording, model_size, language, recording_duration)
 
         except Exception as e:
             self.log({"status": "error", "message": str(e)})
+
+    def _transcribe_local(self, recording, model_size, language, recording_duration):
+        lang_param = "" if language == "auto" else language
+
+        def _run_inference():
+            segments = self.model.transcribe(recording, language=lang_param)
+            text = " ".join(s.text for s in segments).strip()
+            return text
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_run_inference)
+            try:
+                text = future.result(timeout=TRANSCRIPTION_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                self.log({"status": "error", "message": f"Timeout dopo {TRANSCRIPTION_TIMEOUT}s"})
+                self.log({"status": "ready", "message": "Motore Whisper pronto."})
+                return
+
+        self.log({"status": "result", "text": text, "duration": recording_duration})
+
+    def _transcribe_cloud(self, recording, language, recording_duration):
+        if not self.groq_api_key:
+            self.log({"status": "error", "message": "Groq API key non configurata. Inseriscila nella tab Sistema."})
+            self.log({"status": "ready", "message": "Motore Whisper pronto."})
+            return
+
+        try:
+            from groq import Groq
+
+            audio_int16 = (np.clip(recording, -1.0, 1.0) * 32767).astype(np.int16)
+
+            buffer = io.BytesIO()
+            with wave.open(buffer, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(SAMPLE_RATE)
+                wf.writeframes(audio_int16.tobytes())
+            buffer.seek(0)
+
+            client = Groq(api_key=self.groq_api_key)
+            lang_param = language if language != "auto" else None
+
+            transcription = client.audio.transcriptions.create(
+                model=GROQ_MODEL,
+                file=("audio.wav", buffer, "audio/wav"),
+                language=lang_param,
+                response_format="text",
+            )
+
+            text = transcription if isinstance(transcription, str) else transcription.text
+            self.log({"status": "result", "text": text.strip(), "duration": recording_duration})
+            self._record_groq_usage(recording_duration)
+
+        except ImportError:
+            self.log({"status": "error", "message": "Libreria 'groq' non installata. Esegui: pip install groq"})
+            self.log({"status": "ready", "message": "Motore Whisper pronto."})
+        except Exception as e:
+            err_msg = str(e)
+            if "429" in err_msg or "rate" in err_msg.lower() or "limit" in err_msg.lower():
+                self.log({"status": "rate_limit", "message": "Limite API Groq raggiunto. Riprova tra qualche minuto o passa al modello locale."})
+            else:
+                self.log({"status": "error", "message": f"Errore API Groq: {err_msg}"})
+            self.log({"status": "ready", "message": "Motore Whisper pronto."})
 
     def run(self):
         self.log({"status": "starting", "message": "Avvio motore vocale..."})
@@ -179,12 +267,18 @@ class WhisperEngine:
 
                 if cmd == "init":
                     self.models_dir = data.get("models_dir")
+                    self.groq_api_key = data.get("groq_api_key")
+                    self.provider = data.get("provider", "local")
                     preload_model = data.get("model", "small")
-                    self.log({"status": "info", "message": f"Cartella modelli: {self.models_dir}"})
-                    threading.Thread(target=self._preload_default_model, args=(preload_model,), daemon=True).start()
+                    self.log({"status": "info", "message": f"Cartella modelli: {self.models_dir}, provider: {self.provider}"})
+                    if self.provider == "local":
+                        threading.Thread(target=self._preload_default_model, args=(preload_model,), daemon=True).start()
+                    else:
+                        self.log({"status": "ready", "message": f"Pronto (cloud: {GROQ_MODEL})."})
                 elif cmd == "download":
                     threading.Thread(target=self.download_model, args=(data.get("model"),)).start()
                 elif cmd == "transcribe":
+                    self.provider = data.get("provider", "local")
                     threading.Thread(target=self.transcribe,
                                      args=(data.get("device"), data.get("model", "small"), data.get("language", "it"))).start()
                 elif cmd == "stop":
