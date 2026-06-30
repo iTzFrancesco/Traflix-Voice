@@ -40,6 +40,13 @@ class WhisperEngine:
             return False, str(e)
         return True, "OK"
 
+    def unload_model(self):
+        with self._model_lock:
+            if self.model is not None:
+                self.model = None
+                self.current_model_size = None
+                self.log({"status": "info", "message": "Modello locale rimosso dalla memoria."})
+
     def load_model(self, size):
         with self._model_lock:
             if self.model is not None and self.current_model_size == size:
@@ -277,6 +284,15 @@ class WhisperEngine:
                         self.log({"status": "ready", "message": f"Pronto (cloud: {GROQ_MODEL})."})
                 elif cmd == "download":
                     threading.Thread(target=self.download_model, args=(data.get("model"),)).start()
+                elif cmd == "set_provider":
+                    new_provider = data.get("provider", "local")
+                    old_provider = self.provider
+                    self.provider = new_provider
+                    if new_provider == "cloud" and old_provider == "local":
+                        self.unload_model()
+                    elif new_provider == "local":
+                        preload_model = data.get("model", "small")
+                        threading.Thread(target=self._preload_default_model, args=(preload_model,), daemon=True).start()
                 elif cmd == "transcribe":
                     self.provider = data.get("provider", "local")
                     threading.Thread(target=self.transcribe,
@@ -284,6 +300,7 @@ class WhisperEngine:
                 elif cmd == "stop":
                     self.is_recording = False
                 elif cmd == "quit":
+                    self.unload_model()
                     break
             except Exception as e:
                 self.log({"status": "error", "message": str(e)})

@@ -436,6 +436,17 @@ async function checkForUpdates() {
   console.log("[updater] Controllo aggiornamenti non ancora attivo.");
 }
 
+// ─── LOADING OVERLAY ─────────────────────────────────────────────────────────
+function showLoadingOverlay() {
+  const overlay = document.querySelector("#loading-overlay");
+  if (overlay) overlay.style.display = "flex";
+}
+
+function hideLoadingOverlay() {
+  const overlay = document.querySelector("#loading-overlay");
+  if (overlay) overlay.style.display = "none";
+}
+
 // ─── INIT ────────────────────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", async () => {
   hotkeyInput = document.querySelector("#hotkey");
@@ -542,6 +553,18 @@ window.addEventListener("DOMContentLoaded", async () => {
       renderModels();
       loadProviderDashboard();
       showToast(`Provider: ${selectedProvider === "cloud" ? "Cloud" : "Locale"}`, "info");
+      // Notifica Python del cambio provider
+      try {
+        await invoke("send_to_python", {
+          message: JSON.stringify({
+            command: "set_provider",
+            provider: selectedProvider,
+            model: selectedModel,
+          })
+        });
+      } catch (err) {
+        console.warn("[provider] Impossibile inviare set_provider a Python:", err);
+      }
     });
   }
 
@@ -687,11 +710,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       const data = JSON.parse(event.payload);
 
-      // Aggiorna lo stato di modelReady indipendentemente dalla presenza di statusEl nel DOM
+      // Aggiorna lo stato di modelReady
       if (data.status === "starting" || data.status === "loading_model") {
         modelReady = false;
+        showLoadingOverlay();
       } else if (data.status === "ready" || data.status === "result" || data.status === "error") {
         modelReady = true;
+        hideLoadingOverlay();
       }
 
       if (statusEl) {
@@ -1012,6 +1037,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("keydown", (e) => {
     const isControlAlt = e.ctrlKey && e.altKey;
     if (!isControlAlt || isRecording) return;
+    if (!modelReady) {
+      showToast("Caricamento modello in corso, attendere...", "info");
+      return;
+    }
     if (isHoldMode()) {
       startTranscription();
     } else {

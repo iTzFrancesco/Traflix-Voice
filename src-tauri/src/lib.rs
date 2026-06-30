@@ -681,6 +681,11 @@ pub fn run() {
                             let _ = overlay.hide();
                         }
                     } else if event.id.as_ref() == "quit" {
+                        // Send quit command to Python for clean model unload
+                        if let Some(child) = handle.state::<AppState>().python_process.lock().unwrap().as_mut() {
+                            let _ = child.write(b"{\"command\": \"quit\"}\n");
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(200));
                         handle.exit(0);
                     }
                 })
