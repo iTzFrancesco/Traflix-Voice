@@ -1,19 +1,20 @@
 # Traflix Voice
 
-**Dettatura vocale locale con Whisper** -- trascrivi la tua voce in testo senza mai uscire dal tuo computer.
+**Dettatura vocale con Whisper** -- trascrivi la tua voce in testo senza mai uscire dal computer.
 
-Traflix Voice e un'applicazione desktop che sfrutta [faster-whisper](https://github.com/SYSTRAN/faster-whisper) per trascrivere l'audio del microfono in tempo reale. Tutto gira in locale: nessun dato viene inviato a server esterni, nessun abbonamento richiesto. Tieni premuta la hotkey, parla, rilascia: il testo appare dove stavi scrivendo.
+Traflix Voice è un'applicazione desktop che sfrutta [whisper.cpp](https://github.com/ggerganov/whisper.cpp) via `pywhispercpp` per la trascrizione locale, con supporto cloud opzionale tramite Groq LPU (`whisper-large-v3-turbo`). Nessun dato viene inviato a server esterni in modalità locale. Premi la hotkey (default: tasto avanti del mouse), parla, premi di nuovo: il testo appare dove stavi scrivendo.
 
 ---
 
 ## Feature principali
 
-- **Trascrizione 100% offline** -- privacy totale, nessuna connessione internet necessaria dopo il download del modello.
-- **Hotkey globali (hold-to-speak)** -- tieni premuto `Ctrl+Alt` (o la combinazione che preferisci) per registrare; rilascia per trascrivere.
+- **Trascrizione offline** -- privacy totale, nessuna connessione necessaria dopo il download del modello.
+- **Cloud opzionale** -- passa a Groq LPU per trascrizioni ultraveloci. Imposta la API key dalla tab Sistema.
+- **Hotkey globali** -- premi il tasto avanti del mouse (default) per avviare/fermare la registrazione. Supporta click-to-toggle o hold-to-speak.
 - **Auto-paste** -- il testo trascritto viene incollato automaticamente nell'applicazione attiva.
-- **Multi-modello** -- scegli tra 4 modelli Whisper (Tiny, Base, Small, Medium) in base alle tue esigenze di velocita e precisione.
-- **Pre-caricamento modello** -- il modello predefinito viene caricato in memoria all'avvio per trascrizioni istantanee.
-- **Download on-demand** -- i modelli vengono scaricati solo quando servono, direttamente dall'app.
+- **Multi-modello** -- scegli tra i modelli Whisper (Base, Small) in base a velocità e precisione.
+- **Pre-caricamento modello** -- il modello selezionato viene caricato in memoria all'avvio (modalità locale).
+- **Download on-demand** -- i modelli vengono scaricati direttamente dall'app.
 - **Overlay compatto** -- widget minimale always-on-top con logo, nome e visualizzatore audio; trascinabile e doppio-click per riaprire il pannello.
 - **Cronologia trascrizioni** -- le ultime 50 trascrizioni vengono salvate con timestamp; click per copiare.
 - **Statistiche di utilizzo** -- parole totali, WPM medio e tempo di dettatura, coerenti con la cronologia.
@@ -54,10 +55,11 @@ pip install -r src-tauri/requirements.txt
 
 Le dipendenze Python sono:
 
-- `faster-whisper` -- motore di trascrizione
+- `pywhispercpp` -- bindings whisper.cpp per trascrizione locale
 - `sounddevice` -- cattura audio dal microfono
 - `numpy` -- elaborazione array audio
-- `huggingface_hub` -- download modelli
+- `huggingface-hub` -- download modelli da Hugging Face
+- `groq` -- trascrizione cloud opzionale via Groq LPU
 
 ### 3. Avvia in modalita sviluppo
 
@@ -71,14 +73,14 @@ Al primo avvio, vai nella sezione **IA** dell'app e scarica almeno un modello (c
 
 ## Modelli Whisper
 
-L'app supporta quattro modelli della famiglia faster-whisper. Ogni modello puo essere scaricato direttamente dall'interfaccia.
+L'app supporta modelli whisper.cpp scaricabili direttamente dall'interfaccia.
 
-| Modello    | Dimensione | RAM   | Velocita | Precisione | Note                                                     |
-| ---------- | ---------- | ----- | -------- | ---------- | -------------------------------------------------------- |
-| **Tiny**   | 75 MB      | ~1 GB | *****    | *          | Velocissimo. Ideale per test rapidi.                     |
-| **Base**   | 145 MB     | ~1 GB | ****     | **         | Leggero e reattivo. Buon punto di partenza.              |
-| **Small**  | 466 MB     | ~2 GB | ***      | ***        | **Consigliato.** Miglior equilibrio velocita/precisione. |
-| **Medium** | 1.5 GB     | ~5 GB | **       | ****       | Alta precisione su accenti regionali e termini tecnici.  |
+| Modello   | Dimensione | RAM   | Velocità | Precisione | Note                                                     |
+| --------- | ---------- | ----- | -------- | ---------- | -------------------------------------------------------- |
+| **Base**  | 145 MB     | ~1 GB | ****     | **         | Leggero e reattivo. Buon punto di partenza.              |
+| **Small** | 466 MB     | ~2 GB | ***      | ***        | **Consigliato.** Miglior equilibrio velocità/precisione. |
+
+In **modalità cloud** viene usato automaticamente `whisper-large-v3-turbo` su Groq LPU (nessun download richiesto).
 
 I modelli vengono salvati nella cartella dati dell'applicazione (`AppData` su Windows) sotto `models/`.
 
@@ -88,10 +90,10 @@ I modelli vengono salvati nella cartella dati dell'applicazione (`AppData` su Wi
 
 ### Flusso base
 
-1. **Avvia l'app** -- il motore Whisper si inizializza e pre-carica il modello Small.
+1. **Avvia l'app** -- il motore Whisper si inizializza e pre-carica il modello selezionato.
 2. **Scarica un modello** -- dalla tab IA, clicca "Scarica" sul modello desiderato.
 3. **Seleziona il modello** -- clicca "Seleziona" per attivarlo (il modello attivo mostra un badge verde).
-4. **Parla** -- tieni premuta la hotkey (default: `Ctrl+Alt`), parla nel microfono, rilascia.
+4. **Parla** -- premi la hotkey (default: tasto avanti del mouse), parla nel microfono, premi di nuovo per fermare.
 5. **Il testo appare** -- con auto-paste attivo, il testo viene incollato direttamente dove stai scrivendo.
 
 ### Overlay
@@ -106,17 +108,18 @@ Quando chiudi la finestra principale, l'app mostra un widget compatto always-on-
 
 ### Hotkey
 
-| Azione          | Scorciatoia predefinita |
-| --------------- | ----------------------- |
-| Registra (hold) | `Ctrl+Alt`              |
+| Azione                        | Scorciatoia predefinita |
+| ----------------------------- | ----------------------- |
+| Avvia / Ferma trascrizione    | `XBUTTON2` (tasto avanti del mouse) |
 
-La hotkey e personalizzabile dalla sezione Tasti. Sono supportate combinazioni con `Ctrl`, `Alt`, `Shift` e tasti funzione.
+La hotkey è personalizzabile dalla sezione Tasti. Sono supportate combinazioni con `Ctrl`, `Alt`, `Shift`, tasti funzione, tasti lettera, `Space` e pulsanti mouse (XBUTTON1, XBUTTON2, MButton). La modalità click-to-toggle è attiva per default; può essere cambiata in hold-to-speak dalle impostazioni.
 
 ### Impostazioni
 
 - **Sorgente audio** -- scegli il microfono di input.
 - **Lingua trascrizione** -- italiano, inglese, francese, tedesco, spagnolo, portoghese, auto-detect.
 - **Dispositivo di calcolo** -- CPU, GPU (CUDA), o auto-detect.
+- **Provider** -- scegli tra motore locale (whisper.cpp) o cloud (Groq LPU).
 - **Incolla automatica** -- attiva/disattiva l'incollaggio automatico del testo trascritto.
 
 ---
@@ -124,14 +127,14 @@ La hotkey e personalizzabile dalla sezione Tasti. Sono supportate combinazioni c
 ## Architettura
 
 ```
-+------------------+      stdin/stdout (JSON)      +--------------------+
-|   Tauri (Rust)   | <---------------------------> |  Python sidecar    |
-|                  |                               |  (whisper_engine)  |
-|  - Global hotkey |                               |  - faster-whisper  |
-|  - Clipboard     |                               |  - sounddevice     |
-|  - System tray   |                               |  - Audio capture   |
-|  - Settings I/O  |                               |  - Transcription   |
-+--------+---------+                               +--------------------+
++------------------+      stdin/stdout (JSON)      +------------------------+
+|   Tauri (Rust)   | <---------------------------> |  Python sidecar        |
+|                  |                               |  (whisper_engine)      |
+|  - Global hotkey |                               |  - pywhispercpp locale |
+|  - Clipboard     |                               |  - Groq cloud          |
+|  - System tray   |                               |  - sounddevice         |
+|  - Settings I/O  |                               |  - Audio capture       |
++--------+---------+                               +------------------------+
          |
          | Tauri events + invoke
          |
@@ -146,9 +149,9 @@ La hotkey e personalizzabile dalla sezione Tasti. Sono supportate combinazioni c
 +------------------+
 ```
 
-- **Tauri 2 (Rust)** -- shell dell'app, gestione hotkey globali (`tauri-plugin-global-shortcut` + `rdev`), clipboard (`tauri-plugin-clipboard-manager`), spawn del processo Python (`tauri-plugin-shell`), persistenza impostazioni/statistiche su disco, icona nella system tray.
+- **Tauri 2 (Rust)** -- shell dell'app, gestione hotkey globali (polling `GetAsyncKeyState` ~60Hz, nessun hook), clipboard (`SendInput` + `tauri-plugin-clipboard-manager`), spawn del processo Python (`tauri-plugin-shell`), persistenza impostazioni/statistiche su disco, icona nella system tray.
 - **Vanilla JS + HTML/CSS** -- interfaccia utente senza framework, comunicazione con Rust tramite `invoke()` e listener di eventi Tauri.
-- **Python sidecar (`whisper_engine.py`)** -- processo figlio che riceve comandi via stdin (JSON) e restituisce risultati via stdout. Gestisce download dei modelli da Hugging Face, cattura audio con `sounddevice`, trascrizione con `faster-whisper`.
+- **Python sidecar (`whisper_engine.py`)** -- processo figlio che riceve comandi via stdin (JSON) e restituisce risultati via stdout. Gestisce download dei modelli da Hugging Face, cattura audio con `sounddevice`, trascrizione locale con `pywhispercpp` (whisper.cpp) o cloud con Groq.
 
 ---
 
@@ -187,8 +190,6 @@ traflix-voice/
 
 
 
-**Traflix Voice -- Dettatura vocale locale fornita da  OpenAI Whisper.**
-
-
+**Traflix Voice -- Dettatura vocale fornita da OpenAI Whisper.**
 
 **© 2026 - Traflix - All rights reserved**

@@ -1,24 +1,21 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+Guidance for OpenCode when working in this repository.
 
 ## Build & Development Commands
 
 ```bash
-# Development (hot reload)
-cargo tauri dev
+cargo tauri dev                    # development (hot reload)
+cargo tauri build                  # production build (.msi + .exe)
+npm run tauri build                # equivalent using npm script
 
-# Production build (Windows .msi + .exe)
-cargo tauri build
-
-# Rust linting (CI runs these)
+# Rust
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy -- -D warnings
+cd src-tauri && cargo test         # unit tests in lib.rs
 
-# Python syntax check
+# Python
 python -m py_compile src-tauri/whisper_engine.py
-
-# Python tests (if test file exists)
 python -m pytest src-tauri/test_whisper_engine.py -v
 
 # Install dependencies
@@ -28,75 +25,60 @@ pip install -r src-tauri/requirements.txt
 
 ## Architecture
 
-Three-layer desktop app for offline voice-to-text dictation using Whisper:
+Three-layer desktop app for offline/cloud voice-to-text dictation:
 
-**Tauri/Rust** (`src-tauri/src/lib.rs`) - Desktop shell: global hotkey registration, clipboard ops, system tray, Python sidecar process management with auto-restart (exponential backoff), audio device enumeration (cpal), settings/stats/history persistence with atomic writes.
+**Tauri/Rust** (`src-tauri/src/lib.rs`) - Desktop shell. Global hotkey via `GetAsyncKeyState` polling thread (~60Hz, no hooks). Clipboard ops via `SendInput` + `ClipboardManager` plugin. System tray (Menu: Mostra/Esci). Python sidecar management with auto-restart (exponential backoff, 1s-10s cap). Audio device enumeration via `cpal`. Atomic file writes (`.tmp` → rename). Entrypoint: `src-tauri/src/main.rs` just calls `traflix_voice_gui_lib::run()`.
 
-**Frontend** (`src/main.js`, `src/index.html`, `src/overlay.html`) - Vanilla JS, no bundler. Tabbed UI (Home/IA/Tasti/Cronologia/Sistema). Canvas waveform visualizer driven by volume. Overlay is a transparent always-on-top widget shown when main window minimized.
+**Frontend** (`src/`) - Vanilla JS, no bundler. Tabbed UI (Home/IA/Tasti/Cronologia/Sistema). Canvas waveform visualizer driven by smoothed RMS volume from Python (throttled ~0.05s). Overlay is a transparent, always-on-top, skip-taskbar widget shown when main window is *hidden* (CloseRequested → `window.hide()`, not minimize).
 
-**Python sidecar** (`src-tauri/whisper_engine.py`) - Spawned as child process. Uses pywhispercpp (bindings for whisper.cpp) for inference. Audio capture via sounddevice. Pre-loads Small model at startup.
-
-## IPC Protocol (Rust <-> Python)
-
-JSON line-delimited over stdin/stdout. Rust sends commands (`init`, `transcribe`, `stop`, `download`, `set_device`, `check_gpu`, `quit`). Python responds with status events (`listening`, `processing`, `result`, `volume`, `downloading`, `download_complete`, `error`, `gpu_info`).
-
-Frontend communicates with Python through the Rust `send_to_python` Tauri command. Python output arrives as `python_output` events.
+**Python sidecar** (`src-tauri/whisper_engine.py`) - Spawned as `shell.command("python")` with args. Uses `pywhispercpp` (whisper.cpp bindings) for local inference or `groq` for cloud transcription. `huggingface-hub` for model downloads from `ggerganov/whisper.cpp`. Models stored as `ggml-{size}.bin`.
 
 ## Hotkey Handling
 
-Default hotkey is Ctrl+Alt (hold-to-speak). Since `tauri-plugin-global-shortcut` can't bind Ctrl+Alt alone, a separate `rdev` keyboard listener thread tracks Ctrl and Alt press/release independently, emitting `hotkey_pressed`/`hotkey_released` events with deduplication. Other hotkeys (e.g. Ctrl+Space) use standard global shortcut registration.
+Default hotkey is `XBUTTON2` (mouse forward button), click-to-toggle mode (`hold_to_speak: false`). The hotkey polling thread wakes every 16ms, reads `GetAsyncKeyState` for each VK code in the configured combination, and emits `hotkey_pressed`/`hotkey_released` Tauri events. Supports any combination of Ctrl, Alt, Shift, letter/digit/function keys, Space, and mouse buttons (XBUTTON1, XBUTTON2, MButton).
+
+When the main window has focus, keyboard event listeners (keydown/keyup) act as local fallback for Ctrl+Alt.
+
+`cargo test` includes tests for `str_to_vk`, `parse_hotkey`, and `AtomicPtr` hotkey config swapping.
+
+## IPC Protocol (Rust ↔ Python)
+
+JSON line-delimited over stdin/stdout. Rust sends commands:
+- `init` - sets models_dir, compute_device, model, groq_api_key, provider; starts model preload on background thread (only for `"local"` provider)
+- `transcribe` - device, model, language, provider
+- `stop` - sets `is_recording = false`
+- `download` - model size (downloads via hf_hub_download)
+- `set_provider` - switches between `"local"` and `"cloud"`; unloads local model on cloud switch
+- `quit` - unloads model, breaks stdin loop
+
+Python responses: `listening`, `processing`, `result`, `volume`, `downloading`, `download_complete`, `error`, `ready`, `rate_limit`, `warning`, `info`.
 
 ## Data Persistence
 
-Files in `AppData/Roaming/it.traflix.voice/`: `settings.json`, `stats.json`, `history.json` (last 50 entries), `models/ggml-{size}.bin`. All writes are atomic (write `.tmp` then rename).
+Files in `AppData/Roaming/it.traflix.voice/`: `settings.json`, `stats.json`, `history.json` (last 50 entries), `groq_usage.json`, `models/ggml-{size}.bin`. All writes atomic (write `.json.tmp` then rename).
+
+`AppSettings` fields: `hotkey`, `model`, `autoPaste`, `minimizeTray`, `selectedDevice`, `selectedLanguage`, `computeDevice`, `holdToSpeak`, `groqApiKey`, `provider`.
 
 ## Key Implementation Details
 
-- **Paste flow**: `execute_paste` writes to clipboard then simulates Ctrl+V via `rdev::simulate` with 50ms delay for OS clipboard sync.
-- **Volume**: RMS computed in Python audio callback, throttled to ~20fps, drives waveform amplitude in both main UI and overlay.
-- **Model preloading**: Background thread loads Small model at startup for zero cold-start latency.
-- **Sidecar recovery**: Python process auto-restarts with exponential backoff (1s-10s cap), emits `python_restarted` event.
-- **Transcription timeout**: 60-second limit per inference.
-- **Crate name**: Rust lib is `traflix_voice_gui_lib` (required for Windows cargo name collision avoidance).
+- **Paste flow**: `execute_paste` writes text to clipboard, 50ms delay, `SendInput` for Ctrl+V, 100ms delay, restores previous clipboard content.
+- **Model download**: Runs in a daemon thread via `hf_hub_download` from `ggerganov/whisper.cpp` repo. Validates downloaded file (exists, non-empty) before reporting success.
+- **Cloud support**: Provider toggle sends `set_provider` command. Groq usage tracked locally in both `groq_usage.json` (Python side) and `localStorage` (frontend). Limits: 28,800s/day, 7,200s/hour.
+- **Transcription timeout**: 60s per local inference (`concurrent.futures.ThreadPoolExecutor` + `TRANSCRIPTION_TIMEOUT`).
+- **Notification sounds**: `start.wav` and `stop.wav` in `src/assets/sounds/`.
+- **Crate name**: `traflix_voice_gui_lib` (Windows cargo name collision avoidance, see `Cargo.toml`).
+- **WebView2Loader.dll**: Copied by `build.rs` from the Cargo build output dir.
+- **No bundler**: `tauri.conf.json` → `frontendDist: "../src"` serves raw HTML/CSS/JS.
+- **Vanilla JS**: imported via `<script>` tags, no framework. `export-functions.js` loaded separately for export functionality.
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`): Rust lint (fmt + clippy), Python lint (py_compile), Python tests (pytest, conditional), full Tauri build on Windows. Build artifacts uploaded as `traflix-voice-windows`.
+GitHub Actions (`.github/workflows/ci.yml`): Rust lint (fmt + clippy), Python lint (py_compile), Python tests (pytest, conditional), full Tauri build on Windows. Build artifacts uploaded as `traflix-voice-windows` (`.msi` + `.exe`).
 
-### Auto-CI Check Workflow
+`ci-failure-issue.yml` auto-creates issues with `ci-failure` label when CI fails on push.
 
-When the user pushes code, I should automatically check the CI status using `gh` CLI and fix any failures.
-
-**Check CI command** (available in OpenCode TUI as `/check-ci`):
-`.opencode/commands/check-ci.md`
-
-**Manual check steps:**
+On CI failure, verify fixes locally with:
 ```bash
-# 1. List recent runs (find the latest failed one)
-gh run list --limit 5 --json conclusion,databaseId,headBranch,displayTitle,status
-
-# 2. View failed logs for a specific run
-gh run view <ID> --log-failed
-
-# 3. Fix the errors in the codebase
-
-# 4. Verify fixes locally
-cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings
-python -m py_compile src-tauri/whisper_engine.py
-python -m pytest src-tauri/test_whisper_engine.py -v
-
-# 5. Commit and push
-git add -A && git commit -m "fix: CI errors" && git push
+cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+python -m py_compile src-tauri/whisper_engine.py && python -m pytest src-tauri/test_whisper_engine.py -v
 ```
-
-**CI Failure Issue workflow** (`.github/workflows/ci-failure-issue.yml`):
-When the CI workflow fails on a push, an issue is automatically created with:
-- Which jobs failed and links to their logs
-- Branch, commit, and workflow run info
-- Labels: `ci-failure`, `auto-generated`
-
-When I see an open issue with `ci-failure` label, I should:
-1. Read the issue body to understand which jobs failed
-2. Check the linked CI logs
-3. Fix the errors
-4. Close the issue with a reference to the fix commit
