@@ -86,13 +86,15 @@ class WhisperEngine:
     def _get_groq_usage_path(self):
         return os.path.join(os.path.dirname(self.models_dir), "groq_usage.json")
 
-    def _record_groq_usage(self, duration_seconds):
+    def _record_groq_usage(self, duration_seconds=0, input_tokens=0, output_tokens=0):
         try:
             import time as pytime
             now = pytime.time()
             today = pytime.strftime("%Y-%m-%d", pytime.localtime(now))
 
-            usage = {"date": today, "audio_seconds": 0.0, "audio_seconds_hourly": 0.0, "hourly_reset": ""}
+            usage = {"date": today, "audio_seconds": 0.0, "audio_seconds_hourly": 0.0, "hourly_reset": "",
+                     "llmInputTokens": 0, "llmOutputTokens": 0,
+                     "llmInputTokensHourly": 0, "llmOutputTokensHourly": 0}
             usage_path = self._get_groq_usage_path()
             if os.path.exists(usage_path):
                 try:
@@ -104,10 +106,20 @@ class WhisperEngine:
                     pass
 
             if usage.get("date") != today:
-                usage = {"date": today, "audio_seconds": 0.0, "audio_seconds_hourly": 0.0, "hourly_reset": ""}
+                usage = {"date": today, "audio_seconds": 0.0, "audio_seconds_hourly": 0.0, "hourly_reset": "",
+                         "llmInputTokens": 0, "llmOutputTokens": 0,
+                         "llmInputTokensHourly": 0, "llmOutputTokensHourly": 0}
 
-            usage["audio_seconds"] = round(usage.get("audio_seconds", 0) + duration_seconds, 1)
-            usage["audio_seconds_hourly"] = round(usage.get("audio_seconds_hourly", 0) + duration_seconds, 1)
+            if duration_seconds > 0:
+                usage["audio_seconds"] = round(usage.get("audio_seconds", 0) + duration_seconds, 1)
+                usage["audio_seconds_hourly"] = round(usage.get("audio_seconds_hourly", 0) + duration_seconds, 1)
+
+            if input_tokens > 0 or output_tokens > 0:
+                usage["llmInputTokens"] = usage.get("llmInputTokens", 0) + input_tokens
+                usage["llmOutputTokens"] = usage.get("llmOutputTokens", 0) + output_tokens
+                usage["llmInputTokensHourly"] = usage.get("llmInputTokensHourly", 0) + input_tokens
+                usage["llmOutputTokensHourly"] = usage.get("llmOutputTokensHourly", 0) + output_tokens
+
             next_hour = (now // 3600 + 1) * 3600
             usage["hourly_reset"] = pytime.strftime("%H:%M", pytime.localtime(next_hour))
 
@@ -146,6 +158,52 @@ class WhisperEngine:
                     os.remove(local_path)
             except Exception:
                 pass
+
+    def _transcribe_cloud(self, recording, language, recording_duration):
+        if not self.groq_api_key:
+            self.log({"status": "error", "message": "Groq API key non configurata. Inseriscila nella tab Sistema."})
+            self.log({"status": "ready", "message": "Motore Whisper pronto."})
+            return
+
+        try:
+            from groq import Groq
+
+            audio_int16 = (np.clip(recording, -1.0, 1.0) * 32767).astype(np.int16)
+
+            buffer = io.BytesIO()
+            with wave.open(buffer, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(SAMPLE_RATE)
+                wf.writeframes(audio_int16.tobytes())
+            buffer.seek(0)
+
+            client = Groq(api_key=self.groq_api_key)
+            lang_param = language if language != "auto" else None
+
+            transcription = client.audio.transcriptions.create(
+                model=GROQ_MODEL,
+                file=("audio.wav", buffer, "audio/wav"),
+                language=lang_param,
+                response_format="text",
+            )
+
+            text = transcription if isinstance(transcription, str) else transcription.text
+            text = text.strip()
+
+            self.log({"status": "result", "text": text, "duration": recording_duration})
+            self._record_groq_usage(duration_seconds=recording_duration)
+
+        except ImportError:
+            self.log({"status": "error", "message": "Libreria 'groq' non installata. Esegui: pip install groq"})
+            self.log({"status": "ready", "message": "Motore Whisper pronto."})
+        except Exception as e:
+            err_msg = str(e)
+            if "429" in err_msg or "rate" in err_msg.lower() or "limit" in err_msg.lower():
+                self.log({"status": "rate_limit", "message": "Limite API Groq raggiunto. Riprova tra qualche minuto o passa al modello locale."})
+            else:
+                self.log({"status": "error", "message": f"Errore API Groq: {err_msg}"})
+            self.log({"status": "ready", "message": "Motore Whisper pronto."})
 
     def audio_callback(self, indata, frames, time, status):
         if status:
@@ -220,50 +278,6 @@ class WhisperEngine:
                 return
 
         self.log({"status": "result", "text": text, "duration": recording_duration})
-
-    def _transcribe_cloud(self, recording, language, recording_duration):
-        if not self.groq_api_key:
-            self.log({"status": "error", "message": "Groq API key non configurata. Inseriscila nella tab Sistema."})
-            self.log({"status": "ready", "message": "Motore Whisper pronto."})
-            return
-
-        try:
-            from groq import Groq
-
-            audio_int16 = (np.clip(recording, -1.0, 1.0) * 32767).astype(np.int16)
-
-            buffer = io.BytesIO()
-            with wave.open(buffer, 'wb') as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(SAMPLE_RATE)
-                wf.writeframes(audio_int16.tobytes())
-            buffer.seek(0)
-
-            client = Groq(api_key=self.groq_api_key)
-            lang_param = language if language != "auto" else None
-
-            transcription = client.audio.transcriptions.create(
-                model=GROQ_MODEL,
-                file=("audio.wav", buffer, "audio/wav"),
-                language=lang_param,
-                response_format="text",
-            )
-
-            text = transcription if isinstance(transcription, str) else transcription.text
-            self.log({"status": "result", "text": text.strip(), "duration": recording_duration})
-            self._record_groq_usage(recording_duration)
-
-        except ImportError:
-            self.log({"status": "error", "message": "Libreria 'groq' non installata. Esegui: pip install groq"})
-            self.log({"status": "ready", "message": "Motore Whisper pronto."})
-        except Exception as e:
-            err_msg = str(e)
-            if "429" in err_msg or "rate" in err_msg.lower() or "limit" in err_msg.lower():
-                self.log({"status": "rate_limit", "message": "Limite API Groq raggiunto. Riprova tra qualche minuto o passa al modello locale."})
-            else:
-                self.log({"status": "error", "message": f"Errore API Groq: {err_msg}"})
-            self.log({"status": "ready", "message": "Motore Whisper pronto."})
 
     def run(self):
         self.log({"status": "starting", "message": "Avvio motore vocale..."})

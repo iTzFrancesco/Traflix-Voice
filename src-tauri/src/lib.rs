@@ -550,14 +550,14 @@ pub fn run() {
             let hotkey_config = Arc::new(AtomicPtr::new(Box::into_raw(Box::new(initial_config))));
 
             app.manage(AppState {
-                stats:          Mutex::new(load_stats_from_file(&stats_path)),
-                python_process: Mutex::new(None),
+                stats:           Mutex::new(load_stats_from_file(&stats_path)),
+                python_process:  Mutex::new(None),
                 settings_path,
                 stats_path,
                 history_path,
-                models_dir:      models_dir.clone(),
-                groq_usage_path: groq_usage_path.clone(),
-                hotkey_config:   hotkey_config.clone(),
+                models_dir:       models_dir.clone(),
+                groq_usage_path:  groq_usage_path.clone(),
+                hotkey_config:    hotkey_config.clone(),
             });
 
             // Hotkey polling via GetAsyncKeyState (~60Hz, no hooks, no message pump)
@@ -631,7 +631,7 @@ pub fn run() {
                         compute_device,
                         selected_model,
                         groq_api_key,
-                        provider
+                        provider,
                     ).as_bytes());
 
                     // Store the child handle so send_to_python can write to it
@@ -798,6 +798,8 @@ mod tests {
             selected_language: "it".to_string(),
             compute_device: "cpu".to_string(),
             hold_to_speak: false,
+            groq_api_key: String::new(),
+            provider: "local".to_string(),
         };
 
         let json = serde_json::to_string_pretty(&original).unwrap();

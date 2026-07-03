@@ -209,16 +209,8 @@ function updateModelDisplay() {
 
 function loadProviderDashboard() {
   const dashboard = document.querySelector("#provider-dashboard");
-  const content = document.querySelector("#provider-dashboard-content");
-  if (!dashboard || !content) return;
-
-  if (selectedProvider !== "cloud") {
-    dashboard.style.display = "none";
-    return;
-  }
-
-  dashboard.style.display = "block";
-  renderCloudDashboard(content, loadGroqUsageFromStorage());
+  if (!dashboard) return;
+  dashboard.style.display = selectedProvider === "cloud" ? "block" : "none";
 }
 
 function loadGroqUsageFromStorage() {
@@ -241,13 +233,19 @@ function recordGroqUsage(durationSecs) {
     let usage;
     try {
       const raw = localStorage.getItem("groq_usage");
-      usage = raw ? JSON.parse(raw) : { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
+      usage = raw ? JSON.parse(raw) : {
+        date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: ""
+      };
     } catch (_) {
-      usage = { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
+      usage = {
+        date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: ""
+      };
     }
 
     if (usage.date !== today) {
-      usage = { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
+      usage = {
+        date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: ""
+      };
     }
 
     const now = Date.now();
@@ -266,45 +264,6 @@ function recordGroqUsage(durationSecs) {
   } catch (_) {}
 }
 
-function renderCloudDashboard(content, usage) {
-  if (!usage) usage = {};
-
-  const dailySecs = usage.audio_seconds || 0;
-  const hourlySecs = usage.audio_seconds_hourly || 0;
-  const dailyPct = Math.min(100, (dailySecs / 28800) * 100);
-  const hourlyPct = Math.min(100, (hourlySecs / 7200) * 100);
-
-  const warnColor = dailyPct > 80 || hourlyPct > 80;
-  const dailyColor = warnColor ? "#ff4444" : "#4fc3f7";
-  const hourlyColor = warnColor ? "#ff4444" : "var(--primary-orange)";
-
-  content.innerHTML = `
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:0.5rem;">
-      <span style="font-size:0.7rem;font-weight:700;color:#4fc3f7;text-transform:uppercase;letter-spacing:0.04em;">Utilizzo Cloud</span>
-    </div>
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;">
-      <div style="flex:1;min-width:130px;">
-        <div style="display:flex;justify-content:space-between;font-size:0.68rem;color:#888;margin-bottom:2px;">
-          <span>Giornaliero</span>
-          <span>${Math.round(dailySecs)} / 28,800s</span>
-        </div>
-        <div class="progress-container" style="height:5px;margin:0;">
-          <div class="progress-fill" style="width:${dailyPct}%;background:${dailyColor};"></div>
-        </div>
-      </div>
-      <div style="flex:1;min-width:130px;">
-        <div style="display:flex;justify-content:space-between;font-size:0.68rem;color:#888;margin-bottom:2px;">
-          <span>Orario (reset ${usage.hourly_reset || "--:--"})</span>
-          <span>${Math.round(hourlySecs)} / 7,200s</span>
-        </div>
-        <div class="progress-container" style="height:5px;margin:0;">
-          <div class="progress-fill" style="width:${hourlyPct}%;background:${hourlyColor};"></div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 // ─── HELPERS HOTKEY ──────────────────────────────────────────────────────────
 function formatKey(key) {
   const map = {
@@ -315,6 +274,52 @@ function formatKey(key) {
     'Meta': 'Super'
   };
   return map[key] || key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+function renderDashboardCloudUsage() {
+  const container = document.querySelector("#dashboard-cloud-usage");
+  if (!container) return;
+  if (selectedProvider !== "cloud") {
+    container.innerHTML = "";
+    container.style.display = "none";
+    return;
+  }
+  container.style.display = "block";
+  const usage = loadGroqUsageFromStorage() || {};
+  const dailySecs = usage.audio_seconds || 0;
+  const hourlySecs = usage.audio_seconds_hourly || 0;
+  const dailyPct = Math.min(100, (dailySecs / 28800) * 100);
+  const hourlyPct = Math.min(100, (hourlySecs / 7200) * 100);
+
+  container.innerHTML = `
+    <div class="settings-group">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4fc3f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"></path><path d="m16 6-4 4-4-4"></path><path d="M12 18v4"></path><path d="m8 18 4-4 4 4"></path><path d="M2 12h8"></path><path d="m6 8 4 4-4 4"></path><path d="M22 12h-8"></path><path d="m18 16 4-4-4-4"></path></svg>
+        <h2 class="section-title gradient-text" style="margin:0;">Utilizzo Cloud</h2>
+      </div>
+      <div style="display:flex;gap:1.5rem;flex-wrap:wrap;">
+        <div style="flex:1;min-width:160px;background:rgba(79,195,247,0.04);border:1px solid rgba(79,195,247,0.12);border-radius:14px;padding:1rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.04em;">Giornaliero</span>
+            <span style="font-size:0.85rem;font-weight:700;color:#4fc3f7;">${Math.round(dailySecs)} / 28,800s</span>
+          </div>
+          <div class="progress-container" style="height:6px;margin:0;border-radius:4px;">
+            <div class="progress-fill" style="width:${dailyPct}%;background:#4fc3f7;border-radius:4px;"></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:160px;background:rgba(255,140,0,0.04);border:1px solid rgba(255,140,0,0.12);border-radius:14px;padding:1rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.04em;">Orario</span>
+            <span style="font-size:0.85rem;font-weight:700;color:var(--primary-orange);">${Math.round(hourlySecs)} / 7,200s</span>
+          </div>
+          <div style="font-size:0.65rem;color:#555;margin-bottom:6px;">Reset ${usage.hourly_reset || "--:--"}</div>
+          <div class="progress-container" style="height:6px;margin:0;border-radius:4px;">
+            <div class="progress-fill" style="width:${hourlyPct}%;background:var(--primary-orange);border-radius:4px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function formatTime(minutes) {
@@ -360,6 +365,11 @@ async function loadSettings() {
     selectedProvider = s.provider || "local";
     const providerToggle = document.querySelector("#provider-toggle");
     if (providerToggle) providerToggle.checked = selectedProvider === "cloud";
+
+    // Sync UI with provider state after loading
+    renderModels();
+    loadProviderDashboard();
+    renderDashboardCloudUsage();
   } catch (err) {
     console.warn("[settings] Caricamento fallito, uso default:", err);
   }
@@ -455,8 +465,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   const navLinks      = document.querySelectorAll(".nav-links li");
   const tabContents   = document.querySelectorAll(".tab-content");
 
-  // ── SETTINGS + STATS (immediati, non aspettano audio devices) ──
-  loadSettings();
+  // ── SETTINGS + STATS ──
+  await loadSettings();
   loadStats();
 
   // ── ALTRO (audio, versione, modelli) ──
@@ -482,7 +492,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // ── MODELS (4 checks in parallelo) ──
   await refreshAllModelStatus();
-  renderModels();
   updateModelDisplay();
 
   // Pulsante Controlla Aggiornamenti
@@ -552,6 +561,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       await persistSettings();
       renderModels();
       loadProviderDashboard();
+      renderDashboardCloudUsage();
       showToast(`Provider: ${selectedProvider === "cloud" ? "Cloud" : "Locale"}`, "info");
       // Notifica Python del cambio provider
       try {
@@ -593,7 +603,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         if (tab.id === targetTab) tab.classList.add("active");
       });
 
-      if (targetTab === "home") { loadStats(); updateModelDisplay(); }
+      if (targetTab === "home") { loadStats(); updateModelDisplay(); renderDashboardCloudUsage(); }
       if (targetTab === "tasti") loadSettings();
       if (targetTab === "cronologia") loadHistory();
 
@@ -871,6 +881,14 @@ window.addEventListener("DOMContentLoaded", async () => {
         targetVolume = data.value;
       }
 
+      if (data.status === "info" && data.message) {
+        console.log("[Python]", data.message);
+      }
+      if (data.status === "warning" && data.message) {
+        console.warn("[Python]", data.message);
+        showToast(data.message, "error");
+      }
+
       // Gestione Trascrizione Statistiche e Textbox
       if (data.status === "result" && data.text) {
         targetVolume = 0; // Reset visualizer
@@ -902,7 +920,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
         await invoke("execute_paste", { text: data.text });
 
-        if (selectedProvider === "cloud") { recordGroqUsage(data.duration); loadProviderDashboard(); }
+        if (selectedProvider === "cloud") {
+          recordGroqUsage(data.duration);
+          loadProviderDashboard();
+          renderDashboardCloudUsage();
+        }
       }
     } catch (err) {
       console.error("[python_output] Errore gestione evento:", err);
