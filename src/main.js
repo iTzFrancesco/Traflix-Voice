@@ -332,7 +332,12 @@ function formatTime(minutes) {
 async function loadSettings() {
   try {
     const s = await invoke("load_settings");
-    if (!s || typeof s.hotkey === "undefined") return;
+    if (!s || typeof s.hotkey === "undefined") {
+      console.warn("[settings] invalid data from load_settings:", JSON.stringify(s));
+      return false;
+    }
+
+    console.log("[settings] loaded provider:", s.provider, "model:", s.model, "hotkey:", s.hotkey);
 
     if (hotkeyInput) {
       hotkeyInput.value = s.hotkey || "CommandOrControl+Space";
@@ -370,8 +375,10 @@ async function loadSettings() {
     renderModels();
     loadProviderDashboard();
     renderDashboardCloudUsage();
+    return true;
   } catch (err) {
-    console.warn("[settings] Caricamento fallito, uso default:", err);
+    console.warn("[settings] load_settings error:", err);
+    return false;
   }
 }
 
@@ -465,8 +472,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   const navLinks      = document.querySelectorAll(".nav-links li");
   const tabContents   = document.querySelectorAll(".tab-content");
 
-  // ── SETTINGS + STATS ──
-  await loadSettings();
+  // ── SETTINGS + STATS (con retry in caso di IPC non pronto) ──
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) {
+      console.warn(`[settings] retrying loadSettings (attempt ${attempt + 1}/4)...`);
+      await new Promise(r => setTimeout(r, 250 * attempt));
+    }
+    const ok = await loadSettings();
+    if (ok) {
+      console.log("[settings] loaded successfully on attempt", attempt + 1);
+      break;
+    }
+  }
   loadStats();
 
   // ── ALTRO (audio, versione, modelli) ──
@@ -712,7 +729,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // ── LISTENER OUTPUT PYTHON ──
   const { listen } = window.__TAURI__.event;
   // Flag per sapere se il modello è stato caricato e possiamo trascrivere
-  let modelReady = true;
+  let modelReady = false;
 
   const statusEl = document.querySelector("#transcription-status");
 
@@ -736,6 +753,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       } else if (data.status === "ready" || data.status === "result" || data.status === "error") {
         modelReady = true;
         hideLoadingOverlay();
+        if (data.status === "ready") {
+          updateModelDisplay();
+          renderDashboardCloudUsage();
+        }
       }
 
       if (statusEl && statusIcons[data.status]) {
@@ -931,6 +952,20 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // ── Sincronizzazione stato modello all'avvio ──
+  // Il comando `get_status` chiede a Python lo stato corrente del modello.
+  // Serve a recuperare lo stato nel caso gli eventi `ready`/`loading_model`
+  // siano stati emessi prima che il frontend registrasse i listener.
+  setTimeout(async () => {
+    try {
+      await invoke("send_to_python", {
+        message: JSON.stringify({ command: "get_status" })
+      });
+    } catch (err) {
+      console.warn("[startup] Impossibile inviare get_status:", err);
+    }
+  }, 100);
+
   listen("hotkey_error", (event) => {
     console.error("[hotkey] Errore:", event.payload);
     showToast(event.payload, "error");
@@ -1034,6 +1069,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   listen("hotkey_pressed", () => {
     if (!modelReady) {
       console.log("[hotkey] Ignorato: modello non ancora pronto");
+      showToast("Caricamento modello in corso, attendere...", "info");
       return;
     }
     console.log("[event] hotkey_pressed ricevuto da Rust, activeTranscription:", activeTranscription);

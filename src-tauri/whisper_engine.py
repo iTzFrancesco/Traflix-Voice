@@ -28,6 +28,7 @@ class WhisperEngine:
         self.compute_device = "cpu"
         self.groq_api_key = None
         self.provider = "local"
+        self._loading_in_progress = False
 
     def verify_model(self, size):
         model_path = os.path.join(self.models_dir, f"ggml-{size}.bin")
@@ -58,12 +59,15 @@ class WhisperEngine:
                 raise Exception(f"Modello {size} non valido: {msg}")
 
             self.log({"status": "loading_model", "message": f"Caricamento modello {size}..."})
+            self._loading_in_progress = True
             model_path = os.path.join(self.models_dir, f"ggml-{size}.bin")
             try:
                 self.model = Model(model_path, print_realtime=False, print_progress=False)
                 self.current_model_size = size
+                self._loading_in_progress = False
                 self.log({"status": "info", "message": f"Modello {size} caricato."})
             except Exception as e:
+                self._loading_in_progress = False
                 self.log({"status": "error", "message": f"Errore caricamento modello: {str(e)}"})
                 raise
 
@@ -298,6 +302,15 @@ class WhisperEngine:
                         self.log({"status": "ready", "message": f"Pronto (cloud: {GROQ_MODEL})."})
                 elif cmd == "download":
                     threading.Thread(target=self.download_model, args=(data.get("model"),)).start()
+                elif cmd == "get_status":
+                    if self.provider == "cloud":
+                        self.log({"status": "ready", "message": "Pronto (cloud)."})
+                    elif self._loading_in_progress:
+                        self.log({"status": "loading_model", "message": "Caricamento modello in corso..."})
+                    elif self.model is not None:
+                        self.log({"status": "ready", "message": "Modello già caricato."})
+                    else:
+                        self.log({"status": "starting", "message": "Motore in fase di avvio..."})
                 elif cmd == "set_provider":
                     new_provider = data.get("provider", "local")
                     old_provider = self.provider
