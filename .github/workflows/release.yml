@@ -1,25 +1,23 @@
-name: CI
+name: Release
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_call:
+    tags:
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
-permissions:
-  contents: read
-
 jobs:
-  lint-rust:
-    name: Lint Rust
+  check-rust:
+    name: Check Rust
     runs-on: windows-latest
     defaults:
       run:
@@ -36,24 +34,13 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: rust-${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
-          restore-keys: rust-${{ runner.os }}-cargo-
+          key: rust-${{ runner.os }}-cargo-release-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
+          restore-keys: rust-${{ runner.os }}-cargo-release-
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
 
-  lint-python:
-    name: Lint Python
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m py_compile src-tauri/whisper_engine.py
-
-  test-python:
-    name: Test Python
+  check-python:
+    name: Check Python
     runs-on: ubuntu-latest
 
     steps:
@@ -67,27 +54,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src-tauri/requirements.txt
           pip install pytest
+      - run: python -m py_compile src-tauri/whisper_engine.py
       - if: hashFiles('src-tauri/test_whisper_engine.py') != ''
         run: python -m pytest src-tauri/test_whisper_engine.py -v
 
-  build:
-    name: Build (Windows MSI)
+  build-and-release:
+    name: Build MSI & Release
     runs-on: windows-latest
-    needs: [lint-rust, lint-python]
+    needs: [check-rust, check-python]
 
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: rust-${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
-          restore-keys: rust-${{ runner.os }}-cargo-
+          key: rust-${{ runner.os }}-cargo-release-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
+          restore-keys: rust-${{ runner.os }}-cargo-release-
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -102,8 +88,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src-tauri/requirements.txt
       - run: npm run tauri build
-      - uses: actions/upload-artifact@v4
+      - uses: softprops/action-gh-release@v2
         with:
-          name: traflix-voice-windows
-          path: src-tauri/target/release/bundle/msi/*.msi
-          if-no-files-found: error
+          files: src-tauri/target/release/bundle/msi/*.msi
+          generate_release_notes: true
+          fail_on_unmatched_files: true
