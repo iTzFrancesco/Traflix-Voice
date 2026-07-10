@@ -271,7 +271,11 @@ async fn load_settings(state: tauri::State<'_, AppState>) -> Result<AppSettings,
     let settings = load_settings_from_file(&state.settings_path);
     info!(
         "[save-debug] load_settings: hotkey={}, hold_to_speak={}, provider={}, model={}, path={:?}",
-        settings.hotkey, settings.hold_to_speak, settings.provider, settings.model, state.settings_path
+        settings.hotkey,
+        settings.hold_to_speak,
+        settings.provider,
+        settings.model,
+        state.settings_path
     );
     Ok(settings)
 }
