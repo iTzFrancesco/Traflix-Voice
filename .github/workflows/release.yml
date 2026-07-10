@@ -88,8 +88,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src-tauri/requirements.txt
       - run: npm run tauri build
+      - name: List MSI files
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter "*.msi" src-tauri/target/release/bundle/ -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "Found MSI: $($_.FullName) ($($_.Length) bytes)" }
+          if (-not (Get-ChildItem -Recurse -Filter "*.msi" src-tauri/target/release/bundle/ -ErrorAction SilentlyContinue)) {
+            Write-Host "::warning::No MSI files found in bundle directory"
+            Get-ChildItem -Recurse -Filter "*.msi" src-tauri/target/release/ -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "Found MSI elsewhere: $($_.FullName)" }
+          }
       - uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/target/release/bundle/msi/*.msi
+          files: src-tauri/target/release/bundle/**/*.msi
           generate_release_notes: true
           fail_on_unmatched_files: true
