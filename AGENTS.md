@@ -1,3 +1,6 @@
+> **⚠️ IMPORTANTE:** Non leggere mai il file `.env` di questo progetto. Contiene chiavi API e segreti. **Don't read .env**  
+> **⚠️ IMPORTANTE:** Non fare **push su GitHub** senza che l'utente abbia esplicitamente approvato. Mai push automatici. **No push without user approval**
+
 # AGENTS.md
 
 Guidance for OpenCode when working in this repository.
@@ -71,11 +74,21 @@ Files in `AppData/Roaming/it.traflix.voice/`: `settings.json`, `stats.json`, `hi
 - **No bundler**: `tauri.conf.json` → `frontendDist: "../src"` serves raw HTML/CSS/JS.
 - **Vanilla JS**: imported via `<script>` tags, no framework. `export-functions.js` loaded separately for export functionality.
 
-## CI
+## CI (GitHub Actions)
 
-GitHub Actions (`.github/workflows/ci.yml`): Rust lint (fmt + clippy), Python lint (py_compile), Python tests (pytest, conditional), full Tauri build on Windows. Build artifacts uploaded as `traflix-voice-windows` (`.msi` + `.exe`).
+### `ci.yml`
+- Trigger: `push`/`pull_request` su `main`.
+- Jobs: lint-rust, test-rust, lint-python, test-python + **build** (MSI come artefatto).
+- Il build **non** crea una release. L'MSI è solo un artefatto scaricabile.
 
-`ci-failure-issue.yml` auto-creates issues with `ci-failure` label when CI fails on push.
+### `release.yml`
+- Trigger **solo** su tag `v*` (es. `git tag v1.0.0 && git push origin v1.0.0`).
+- Jobs: check-rust, check-python + **build MSI + GitHub Release**.
+- Crea una GitHub Release ufficiale con note di rilascio.
+- Serve un **tag esplicito**: nessun push normale genera una release.
+
+### `ci-failure-issue.yml`
+- Auto-crea issue con label `ci-failure` quando la CI fallisce su push.
 
 On CI failure, verify fixes locally with:
 ```bash
