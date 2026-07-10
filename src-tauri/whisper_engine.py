@@ -23,6 +23,7 @@ class WhisperEngine:
         self.audio_queue = queue.Queue()
         self.is_recording = False
         self.models_dir = None
+        self._shutting_down = False
         self._model_lock = threading.Lock()
         self.current_device = "cpu"
         self.compute_device = "cpu"
@@ -164,6 +165,8 @@ class WhisperEngine:
                 pass
 
     def _transcribe_cloud(self, recording, language, recording_duration):
+        if self._shutting_down:
+            return
         if not self.groq_api_key:
             self.log({"status": "error", "message": "Groq API key non configurata. Inseriscila nella tab Sistema."})
             self.log({"status": "ready", "message": "Motore Whisper pronto."})
@@ -265,6 +268,8 @@ class WhisperEngine:
             self.log({"status": "error", "message": str(e)})
 
     def _transcribe_local(self, recording, model_size, language, recording_duration):
+        if self._shutting_down:
+            return
         lang_param = "" if language == "auto" else language
 
         def _run_inference():
@@ -327,7 +332,8 @@ class WhisperEngine:
                 elif cmd == "stop":
                     self.is_recording = False
                 elif cmd == "quit":
-                    self.unload_model()
+                    self._shutting_down = True
+                    self.is_recording = False
                     break
             except Exception as e:
                 self.log({"status": "error", "message": str(e)})

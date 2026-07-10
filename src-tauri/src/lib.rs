@@ -3,7 +3,7 @@ use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -134,6 +134,7 @@ struct AppState {
     models_dir: PathBuf,
     groq_usage_path: PathBuf,
     hotkey_config: Arc<AtomicPtr<HotkeyConfig>>,
+    is_shutting_down: AtomicBool,
 }
 
 // ─── HELPERS FILE ────────────────────────────────────────────────────────────
@@ -562,6 +563,7 @@ pub fn run() {
                 models_dir:       models_dir.clone(),
                 groq_usage_path:  groq_usage_path.clone(),
                 hotkey_config:    hotkey_config.clone(),
+                is_shutting_down: AtomicBool::new(false),
             });
 
             // Hotkey polling via GetAsyncKeyState (~60Hz, no hooks, no message pump)
@@ -654,6 +656,11 @@ pub fn run() {
                     }
 
                     // If we reach here, the Python process has died
+                    // Skip restart if we're shutting down intentionally
+                    if app_handle.state::<AppState>().is_shutting_down.load(Ordering::SeqCst) {
+                        info!("[Python sidecar] Process exited (intentional shutdown)");
+                        break;
+                    }
                     error!("[Python sidecar] Process exited unexpectedly, will restart");
 
                     // Clear the stale child handle
@@ -685,11 +692,17 @@ pub fn run() {
                             let _ = overlay.hide();
                         }
                     } else if event.id.as_ref() == "quit" {
-                        // Send quit command to Python for clean model unload
+                        // Mark as shutting down so the sidecar reader skips restart
+                        handle.state::<AppState>().is_shutting_down.store(true, Ordering::SeqCst);
+                        // Stop any active recording first, then quit cleanly
+                        if let Some(child) = handle.state::<AppState>().python_process.lock().unwrap().as_mut() {
+                            let _ = child.write(b"{\"command\": \"stop\"}\n");
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(300));
                         if let Some(child) = handle.state::<AppState>().python_process.lock().unwrap().as_mut() {
                             let _ = child.write(b"{\"command\": \"quit\"}\n");
                         }
-                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        std::thread::sleep(std::time::Duration::from_millis(500));
                         handle.exit(0);
                     }
                 })
