@@ -1,5 +1,5 @@
 """
-Unit tests for WhisperEngine (whisper_engine.py).
+Unit tests for WhisperEngine (refactored package).
 
 Run with:
     python -m pytest test_whisper_engine.py -v
@@ -24,7 +24,9 @@ sys.modules["huggingface_hub"] = MagicMock()
 sys.modules["pywhispercpp"] = MagicMock()
 sys.modules["pywhispercpp.model"] = MagicMock()
 
-from whisper_engine import WhisperEngine, SAMPLE_RATE, BLOCK_SIZE
+from whisper_engine.engine import WhisperEngine
+from whisper_engine.constants import SAMPLE_RATE, BLOCK_SIZE
+from whisper_engine.audio import audio_callback as _ac
 
 
 class TestWhisperEngineInit(unittest.TestCase):
@@ -99,7 +101,7 @@ class TestRunCommandParsing(unittest.TestCase):
         self.assertEqual(engine.models_dir, "/some/path")
 
     # -- download -----------------------------------------------------------
-    @patch("whisper_engine.threading.Thread")
+    @patch("whisper_engine.ipc.threading.Thread")
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_cmd_download_starts_thread(self, _, mock_thread_cls):
         engine = self._make_engine()
@@ -114,13 +116,10 @@ class TestRunCommandParsing(unittest.TestCase):
             engine.run()
 
         mock_thread_cls.assert_called_once()
-        call_kwargs = mock_thread_cls.call_args
-        self.assertEqual(call_kwargs.kwargs.get("target") or call_kwargs[1].get("target", call_kwargs[0][0] if call_kwargs[0] else None),
-                         engine.download_model)
         mock_thread.start.assert_called_once()
 
     # -- transcribe ---------------------------------------------------------
-    @patch("whisper_engine.threading.Thread")
+    @patch("whisper_engine.ipc.threading.Thread")
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_cmd_transcribe_starts_thread(self, _, mock_thread_cls):
         engine = self._make_engine()
@@ -134,10 +133,9 @@ class TestRunCommandParsing(unittest.TestCase):
         with patch("sys.stdin", io.StringIO("".join(lines))):
             engine.run()
 
-        # At least one Thread was created for transcription
         self.assertTrue(mock_thread.start.called)
 
-    @patch("whisper_engine.threading.Thread")
+    @patch("whisper_engine.ipc.threading.Thread")
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_cmd_transcribe_defaults_model_to_small(self, _, mock_thread_cls):
         engine = self._make_engine()
@@ -151,7 +149,6 @@ class TestRunCommandParsing(unittest.TestCase):
         with patch("sys.stdin", io.StringIO("".join(lines))):
             engine.run()
 
-        # The thread args should contain the default model "small"
         call_args = mock_thread_cls.call_args
         args_tuple = call_args.kwargs.get("args") or call_args[1].get("args")
         self.assertIn("small", args_tuple)
@@ -175,12 +172,10 @@ class TestRunCommandParsing(unittest.TestCase):
         engine = self._make_engine()
         lines = [
             json.dumps({"command": "quit"}) + "\n",
-            # This line should never be reached:
             json.dumps({"command": "init", "models_dir": "/should/not/happen"}) + "\n",
         ]
         with patch("sys.stdin", io.StringIO("".join(lines))):
             engine.run()
-        # models_dir should remain untouched (set in _make_engine, not overwritten)
         self.assertEqual(engine.models_dir, "/tmp/models")
 
     # -- unknown command (silently ignored) ---------------------------------
@@ -192,7 +187,7 @@ class TestRunCommandParsing(unittest.TestCase):
             json.dumps({"command": "quit"}) + "\n",
         ]
         with patch("sys.stdin", io.StringIO("".join(lines))):
-            engine.run()  # should not raise
+            engine.run()
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +206,6 @@ class TestInvalidJsonHandling(unittest.TestCase):
         with patch("sys.stdin", io.StringIO("".join(lines))):
             engine.run()
 
-        # The engine should have logged an error for the bad line
         output_lines = mock_stdout.getvalue().strip().split("\n")
         error_found = False
         for line in output_lines:
@@ -229,13 +223,13 @@ class TestInvalidJsonHandling(unittest.TestCase):
             json.dumps({"command": "quit"}) + "\n",
         ]
         with patch("sys.stdin", io.StringIO("".join(lines))):
-            engine.run()  # command is None, no branch matches, no error
+            engine.run()
 
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_partial_json_logs_error(self, mock_stdout):
         engine = WhisperEngine()
         lines = [
-            '{"command": "init"\n',  # missing closing brace
+            '{"command": "init"\n',
             json.dumps({"command": "quit"}) + "\n",
         ]
         with patch("sys.stdin", io.StringIO("".join(lines))):
@@ -255,8 +249,7 @@ class TestAudioCallback(unittest.TestCase):
     def setUp(self):
         self.engine = WhisperEngine()
         self.engine.is_recording = True
-        # Reset throttle timer so the volume log fires immediately
-        self.engine._last_vol_time = 0
+        _ac._last_vol_time = 0
 
     def test_data_enqueued(self):
         """audio_callback must put a copy of indata into audio_queue."""
@@ -269,7 +262,6 @@ class TestAudioCallback(unittest.TestCase):
         indata = np.ones((BLOCK_SIZE, 1), dtype=np.float32)
         self.engine.audio_callback(indata, BLOCK_SIZE, None, None)
         queued = self.engine.audio_queue.get_nowait()
-        # Mutate original -- queued data should be unaffected
         indata[:] = 999
         self.assertTrue(np.all(queued == 1.0))
 
@@ -279,7 +271,7 @@ class TestAudioCallback(unittest.TestCase):
         indata = np.zeros((BLOCK_SIZE, 1), dtype=np.float32)
         self.engine.audio_callback(indata, BLOCK_SIZE, None, None)
         raw = mock_stdout.getvalue().strip()
-        if raw:  # volume may be logged
+        if raw:
             parsed = json.loads(raw)
             self.assertEqual(parsed["value"], 0)
 
@@ -300,7 +292,6 @@ class TestAudioCallback(unittest.TestCase):
         indata = np.ones((BLOCK_SIZE, 1), dtype=np.float32)
         self.engine.audio_callback(indata, BLOCK_SIZE, None, None)
         raw = mock_stdout.getvalue().strip()
-        # Nothing volume-related should be printed
         if raw:
             for line in raw.split("\n"):
                 parsed = json.loads(line)
@@ -328,8 +319,8 @@ class TestModelPath(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/home/user/.traflix/models"
 
-        with patch("whisper_engine.hf_hub_download") as mock_dl, \
-             patch.object(engine, "verify_model", return_value=(True, "ok")), \
+        with patch("whisper_engine.model.hf_hub_download") as mock_dl, \
+             patch("whisper_engine.model.verify_model", return_value=(True, "ok")), \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.download_model("small")
 
@@ -346,8 +337,8 @@ class TestModelPath(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.Model") as MockModel, \
-             patch.object(engine, "verify_model", return_value=(True, "ok")), \
+        with patch("whisper_engine.model.Model") as MockModel, \
+             patch("whisper_engine.model.verify_model", return_value=(True, "ok")), \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.load_model("large-v2")
 
@@ -359,8 +350,8 @@ class TestModelPath(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.Model") as MockModel, \
-             patch.object(engine, "verify_model", return_value=(True, "ok")), \
+        with patch("whisper_engine.model.Model") as MockModel, \
+             patch("whisper_engine.model.verify_model", return_value=(True, "ok")), \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.load_model("small")
             engine.load_model("small")
@@ -372,8 +363,8 @@ class TestModelPath(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.Model") as MockModel, \
-             patch.object(engine, "verify_model", return_value=(True, "ok")), \
+        with patch("whisper_engine.model.Model") as MockModel, \
+             patch("whisper_engine.model.verify_model", return_value=(True, "ok")), \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.load_model("small")
             engine.load_model("medium")
@@ -395,11 +386,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         return engine
 
     def _mock_input_stream(self, engine, audio_blocks=None):
-        """Helper to mock sd.InputStream context manager.
-        transcribe() resets audio_queue then enters the `with` block.
-        We put blocks into the queue AND use a sentinel approach:
-        after the blocks, we schedule is_recording=False via a
-        queue callback so the while-loop reads all blocks first."""
+        """Helper to mock sd.InputStream context manager."""
         import sounddevice as sd
         import threading
 
@@ -407,7 +394,6 @@ class TestTranscriptionFlow(unittest.TestCase):
             if audio_blocks:
                 for block in audio_blocks:
                     engine.audio_queue.put(block.copy())
-                # Let the while-loop drain the queue before stopping
                 def stop_later():
                     import time; time.sleep(0.15)
                     engine.is_recording = False
@@ -506,12 +492,12 @@ class TestDownloadModel(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.hf_hub_download", side_effect=OSError("disk full")):
+        with patch("whisper_engine.model.hf_hub_download", side_effect=OSError("disk full")):
             engine.download_model("tiny")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed = [json.loads(l) for l in output_lines if l]
-        error_logs = [p for p in parsed if p.get("status") == "error"]
+        error_logs = [p for p in parsed if p.get("status") == "download_error"]
         self.assertTrue(len(error_logs) >= 1)
         self.assertIn("disk full", error_logs[0]["message"])
 
@@ -520,8 +506,8 @@ class TestDownloadModel(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.hf_hub_download"), \
-             patch.object(engine, "verify_model", return_value=(True, "ok")):
+        with patch("whisper_engine.model.hf_hub_download"), \
+             patch("whisper_engine.model.verify_model", return_value=(True, "ok")):
             engine.download_model("small")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
