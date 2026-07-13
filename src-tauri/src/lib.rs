@@ -31,12 +31,15 @@ use tauri_plugin_shell::ShellExt;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let app_data_dir   = app.path().app_data_dir().expect("Impossibile trovare directory dati");
-            let stats_path      = app_data_dir.join("stats.json");
-            let settings_path   = app_data_dir.join("settings.json");
-            let history_path    = app_data_dir.join("history.json");
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("Impossibile trovare directory dati");
+            let stats_path = app_data_dir.join("stats.json");
+            let settings_path = app_data_dir.join("settings.json");
+            let history_path = app_data_dir.join("history.json");
             let groq_usage_path = app_data_dir.join("groq_usage.json");
-            let models_dir      = app_data_dir.join("models");
+            let models_dir = app_data_dir.join("models");
             let _ = fs::create_dir_all(&models_dir);
 
             let settings = load_settings_from_file(&settings_path);
@@ -45,14 +48,14 @@ pub fn run() {
             let hotkey_config = Arc::new(RwLock::new(initial_config));
 
             app.manage(AppState {
-                stats:           Mutex::new(load_stats_from_file(&stats_path)),
-                python_process:  Mutex::new(None),
+                stats: Mutex::new(load_stats_from_file(&stats_path)),
+                python_process: Mutex::new(None),
                 settings_path,
                 stats_path,
                 history_path,
-                models_dir:       models_dir.clone(),
-                groq_usage_path:  groq_usage_path.clone(),
-                hotkey_config:    hotkey_config.clone(),
+                models_dir: models_dir.clone(),
+                groq_usage_path: groq_usage_path.clone(),
+                hotkey_config: hotkey_config.clone(),
                 is_shutting_down: AtomicBool::new(false),
             });
 
@@ -73,7 +76,10 @@ pub fn run() {
                     let all_pressed = config.vk_codes.iter().all(|&vk| is_key_pressed(vk));
                     drop(config);
 
-                    if all_pressed && !hotkey_active && last_emit.elapsed() > std::time::Duration::from_millis(100) {
+                    if all_pressed
+                        && !hotkey_active
+                        && last_emit.elapsed() > std::time::Duration::from_millis(100)
+                    {
                         hotkey_active = true;
                         last_emit = std::time::Instant::now();
                         debug!("[Hotkey] Pressed");
@@ -92,7 +98,10 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let script_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
             #[cfg(not(debug_assertions))]
-            let script_dir = app.path().resource_dir().expect("Impossibile trovare resource dir");
+            let script_dir = app
+                .path()
+                .resource_dir()
+                .expect("Impossibile trovare resource dir");
             let script_path = script_dir.join("whisper_engine.py");
             let script_path_str = script_path.to_string_lossy().to_string();
             info!("[Python sidecar] Script path: {}", script_path_str);
@@ -102,19 +111,20 @@ pub fn run() {
                 const MAX_BACKOFF_SECS: u64 = 10;
 
                 loop {
-                    info!("[Python sidecar] Spawning python process (attempt #{})", restart_count + 1);
+                    info!(
+                        "[Python sidecar] Spawning python process (attempt #{})",
+                        restart_count + 1
+                    );
 
                     let shell = app_handle.shell();
-                    let spawn_result = shell
-                        .command("python")
-                        .args([&script_path_str])
-                        .spawn();
+                    let spawn_result = shell.command("python").args([&script_path_str]).spawn();
 
                     let (mut rx, mut child) = match spawn_result {
                         Ok(pair) => pair,
                         Err(e) => {
                             error!("[Python sidecar] Failed to spawn: {:?}", e);
-                            let delay = std::cmp::min(2u64.saturating_pow(restart_count), MAX_BACKOFF_SECS);
+                            let delay =
+                                std::cmp::min(2u64.saturating_pow(restart_count), MAX_BACKOFF_SECS);
                             std::thread::sleep(std::time::Duration::from_secs(delay));
                             restart_count += 1;
                             continue;
@@ -123,7 +133,8 @@ pub fn run() {
 
                     // Send init command (models_dir + compute_device)
                     let (selected_model, compute_device, groq_api_key, provider) = {
-                        let s = load_settings_from_file(&app_handle.state::<AppState>().settings_path);
+                        let s =
+                            load_settings_from_file(&app_handle.state::<AppState>().settings_path);
                         (s.model, s.compute_device, s.groq_api_key, s.provider)
                     };
                     let init_msg = serde_json::json!({
@@ -134,33 +145,51 @@ pub fn run() {
                         "groq_api_key": groq_api_key,
                         "provider": provider,
                     });
-                    let _ = child.write(format!("{}\n", serde_json::to_string(&init_msg).unwrap()).as_bytes());
+                    let _ = child.write(
+                        format!("{}\n", serde_json::to_string(&init_msg).unwrap()).as_bytes(),
+                    );
 
                     // Store the child handle so send_to_python can write to it
-                    *app_handle.state::<AppState>().python_process.lock().unwrap() = Some(child);
+                    *app_handle
+                        .state::<AppState>()
+                        .python_process
+                        .lock()
+                        .unwrap() = Some(child);
 
                     if restart_count > 0 {
-                        warn!("[Python sidecar] Process restarted (restart #{})", restart_count);
+                        warn!(
+                            "[Python sidecar] Process restarted (restart #{})",
+                            restart_count
+                        );
                         let _ = app_handle.emit("python_restarted", restart_count);
                     }
 
                     // Read stdout until the process exits (rx channel closes)
                     while let Some(event) = rx.blocking_recv() {
                         if let tauri_plugin_shell::process::CommandEvent::Stdout(line) = event {
-                            let _ = app_handle.emit("python_output", String::from_utf8_lossy(&line).to_string());
+                            let _ = app_handle
+                                .emit("python_output", String::from_utf8_lossy(&line).to_string());
                         }
                     }
 
                     // If we reach here, the Python process has died
                     // Skip restart if we're shutting down intentionally
-                    if app_handle.state::<AppState>().is_shutting_down.load(Ordering::SeqCst) {
+                    if app_handle
+                        .state::<AppState>()
+                        .is_shutting_down
+                        .load(Ordering::SeqCst)
+                    {
                         info!("[Python sidecar] Process exited (intentional shutdown)");
                         break;
                     }
                     error!("[Python sidecar] Process exited unexpectedly, will restart");
 
                     // Clear the stale child handle
-                    *app_handle.state::<AppState>().python_process.lock().unwrap() = None;
+                    *app_handle
+                        .state::<AppState>()
+                        .python_process
+                        .lock()
+                        .unwrap() = None;
 
                     // Back-off before restarting
                     restart_count += 1;
@@ -172,7 +201,7 @@ pub fn run() {
 
             // Tray Menu
             let show_i = MenuItem::with_id(app, "show", "Mostra", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Esci",   true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Esci", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
             let tray_tooltip = if cfg!(debug_assertions) {
@@ -196,13 +225,28 @@ pub fn run() {
                         }
                     } else if event.id.as_ref() == "quit" {
                         // Mark as shutting down so the sidecar reader skips restart
-                        handle.state::<AppState>().is_shutting_down.store(true, Ordering::SeqCst);
+                        handle
+                            .state::<AppState>()
+                            .is_shutting_down
+                            .store(true, Ordering::SeqCst);
                         // Stop any active recording first, then quit cleanly
-                        if let Some(child) = handle.state::<AppState>().python_process.lock().unwrap().as_mut() {
+                        if let Some(child) = handle
+                            .state::<AppState>()
+                            .python_process
+                            .lock()
+                            .unwrap()
+                            .as_mut()
+                        {
                             let _ = child.write(b"{\"command\": \"stop\"}\n");
                         }
                         std::thread::sleep(std::time::Duration::from_millis(300));
-                        if let Some(child) = handle.state::<AppState>().python_process.lock().unwrap().as_mut() {
+                        if let Some(child) = handle
+                            .state::<AppState>()
+                            .python_process
+                            .lock()
+                            .unwrap()
+                            .as_mut()
+                        {
                             let _ = child.write(b"{\"command\": \"quit\"}\n");
                         }
                         std::thread::sleep(std::time::Duration::from_millis(500));
