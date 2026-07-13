@@ -5,15 +5,28 @@
   "type": "module",
   "description": "Dettatura vocale locale professionale alimentata da OpenAI Whisper.",
   "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
     "tauri": "tauri",
     "bump": "node scripts/bump-version.mjs"
   },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2"
-  },
   "dependencies": {
+    "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-log": "^2.8.0",
-    "@tauri-apps/plugin-shell": "^2.3.5"
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "tailwindcss": "^4",
+    "typescript": "^5.7"
   }
 }

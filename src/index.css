@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+/* ─── CUSTOM VARIABLES ─── */
+:root {
+  --primary-orange: #ff8c00;
+  --bg-dark: #0a0a0a;
+}
+
+/* ─── GLOBAL STYLES ─── */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  background: var(--bg-dark);
+  color: #f6f6f6;
+}
+
+/* Hide scrollbar */
+*::-webkit-scrollbar { display: none; }
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  box-sizing: border-box;
+}
+
+/* ─── REDUCED MOTION ─── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─── FOCUS VISIBLE ─── */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--primary-orange);
+  outline-offset: 2px;
+}
+
+/* ─── STATUS ICON ANIMATIONS ─── */
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes statusSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.status-icon--pulse {
+  animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+.status-icon--spin {
+  animation: statusSpin 1s linear infinite;
+}
+
+/* ─── TAB SLIDE-IN ─── */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tab-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* ─── PULSE RECORDING ─── */
+@keyframes pulseRec {
+  0%   { box-shadow: 0 4px 20px rgba(255, 34, 34, 0.45); }
+  50%  { box-shadow: 0 4px 30px rgba(255, 34, 34, 0.7); }
+  100% { box-shadow: 0 4px 20px rgba(255, 34, 34, 0.45); }
+}
+
+/* ─── INDETERMINATE PROGRESS ─── */
+@keyframes indeterminateProgress {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ─── TOAST SLIDE-IN ─── */
+@keyframes slideInRight {
+  from { transform: translateX(400px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* ─── SPIN ─── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── PULSE OPACITY ─── */
+@keyframes pulseOpacity {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}

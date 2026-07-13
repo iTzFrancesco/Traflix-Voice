@@ -4,7 +4,9 @@
   "version": "1.2.1",
   "identifier": "it.traflix.voice",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev"
   },
   "app": {
     "withGlobalTauri": true,
@@ -59,6 +61,7 @@
     ],
     "resources": [
       "whisper_engine.py",
+      "whisper_engine/*",
       "WebView2Loader.dll"
     ],
     "icon": [
