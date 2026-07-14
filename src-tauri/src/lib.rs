@@ -124,7 +124,10 @@ pub fn run() {
                     // Fallback: se "py"/"python3" fallisce, prova "python"
                     #[allow(unused_assignments)]
                     let spawn_result = if spawn_result.is_err() {
-                        warn!("[Python sidecar] {:?} not found, trying 'python'", python_cmd);
+                        warn!(
+                            "[Python sidecar] {:?} not found, trying 'python'",
+                            python_cmd
+                        );
                         shell.command("python").args([&script_path_str]).spawn()
                     } else {
                         spawn_result
