@@ -117,7 +117,18 @@ pub fn run() {
                     );
 
                     let shell = app_handle.shell();
-                    let spawn_result = shell.command("python").args([&script_path_str]).spawn();
+                    // Windows: prova "py" (Python launcher, sempre in PATH),
+                    // poi "python" come fallback
+                    let python_cmd = if cfg!(windows) { "py" } else { "python3" };
+                    let spawn_result = shell.command(python_cmd).args([&script_path_str]).spawn();
+                    // Fallback: se "py"/"python3" fallisce, prova "python"
+                    #[allow(unused_assignments)]
+                    let spawn_result = if spawn_result.is_err() {
+                        warn!("[Python sidecar] {:?} not found, trying 'python'", python_cmd);
+                        shell.command("python").args([&script_path_str]).spawn()
+                    } else {
+                        spawn_result
+                    };
 
                     let (mut rx, mut child) = match spawn_result {
                         Ok(pair) => pair,
