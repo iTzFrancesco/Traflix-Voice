@@ -6,9 +6,11 @@ interface TastiTabProps {
   isRecording: boolean;
   recordedKeys: string;
   holdToSpeak: boolean;
+  widgetMode: string;
   onStartRecording: () => void;
   onStopRecording: () => void;
   onHoldToSpeakChange: (value: boolean) => void;
+  onWidgetModeChange: (value: string) => void;
   onSave: () => void;
   onHotkeyChange: (value: string) => void;
 }
@@ -18,9 +20,11 @@ export default function TastiTab({
   isRecording,
   recordedKeys,
   holdToSpeak,
+  widgetMode,
   onStartRecording,
   onStopRecording,
   onHoldToSpeakChange,
+  onWidgetModeChange,
   onSave,
   onHotkeyChange,
 }: TastiTabProps) {
@@ -169,6 +173,72 @@ export default function TastiTab({
               />
             </span>
           </label>
+        </div>
+
+        <hr className="border-none h-px bg-[rgba(255,255,255,0.08)] my-5" />
+
+        {/* Widget Visibility */}
+        <h3 className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.06em] m-0 mb-3">
+          Widget
+        </h3>
+
+        <div className="mb-6">
+          <label className="text-[0.9rem] font-bold text-[#ccc] block mb-1">
+            Visibilità widget
+          </label>
+          <p className="text-[0.95rem] text-[#666] mb-3">
+            Scegli quando mostrare il widget fluttuante in background.
+          </p>
+          <div className="flex gap-3">
+            <button
+              className={`flex-1 py-2.5 px-4 rounded-xl border cursor-pointer transition-all duration-200 font-bold text-[0.85rem] ${
+                widgetMode === "always"
+                  ? "bg-[rgba(255,140,0,0.15)] border-[rgba(255,140,0,0.35)] text-[var(--primary-orange)]"
+                  : "bg-[rgba(0,0,0,0.4)] border-[rgba(255,255,255,0.08)] text-[#888] hover:text-[#ccc] border-[rgba(255,255,255,0.12)]"
+              }`}
+              onClick={() => onWidgetModeChange("always")}
+            >
+              <div className="flex items-center gap-2 justify-center">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-4 h-4 flex-shrink-0"
+                >
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="12" cy="12" r="2" />
+                </svg>
+                <span>Sempre visibile</span>
+              </div>
+            </button>
+            <button
+              className={`flex-1 py-2.5 px-4 rounded-xl border cursor-pointer transition-all duration-200 font-bold text-[0.85rem] ${
+                widgetMode === "recording"
+                  ? "bg-[rgba(255,140,0,0.15)] border-[rgba(255,140,0,0.35)] text-[var(--primary-orange)]"
+                  : "bg-[rgba(0,0,0,0.4)] border-[rgba(255,255,255,0.08)] text-[#888] hover:text-[#ccc] border-[rgba(255,255,255,0.12)]"
+              }`}
+              onClick={() => onWidgetModeChange("recording")}
+            >
+              <div className="flex items-center gap-2 justify-center">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-4 h-4 flex-shrink-0"
+                >
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+                </svg>
+                <span>Solo durante registrazione</span>
+              </div>
+            </button>
+          </div>
         </div>
 
         <hr className="border-none h-px bg-[rgba(255,255,255,0.08)] my-5" />

@@ -16,6 +16,9 @@ function Overlay() {
     const barHeights = new Array(14).fill(3);
     const barTargets = new Array(14).fill(3);
     const bars: HTMLDivElement[] = [];
+    let widgetMode = "always";
+    let isListening = false;
+    let isProcessing = false;
 
     const startSound = new Audio("/assets/sounds/start.wav");
     const stopSound = new Audio("/assets/sounds/stop.wav");
@@ -76,6 +79,22 @@ function Overlay() {
       });
     }
 
+    // ── SHOW / HIDE WINDOW BASED ON WIDGET MODE ──
+    async function syncOverlayVisibility() {
+      if (!window.__TAURI__?.window?.getCurrentWindow) return;
+      const win = window.__TAURI__.window.getCurrentWindow();
+      if (widgetMode === "recording") {
+        // Show only if recording is active
+        if (isListening || isProcessing) {
+          await win.show().catch(() => {});
+        } else {
+          await win.hide().catch(() => {});
+        }
+      }
+      // If mode is "always", visibility is managed by Rust (don't override)
+    }
+
+    // ── MOUSE CLICK (double-click to show main) ──
     widget.addEventListener("mousedown", (e: MouseEvent) => {
       const now = Date.now();
       if (now - lastClick < 300) {
@@ -89,28 +108,60 @@ function Overlay() {
       }
     });
 
+    // ── EVENT LISTENERS ──
     let overlayCancelled = false;
-    let unlisten: (() => void) | null = null;
+    const unlistenFns: (() => void)[] = [];
+
+    // Listen for widget_mode_updated
+    window.__TAURI__.event
+      .listen("widget_mode_updated", (event: { payload: unknown }) => {
+        const mode = event.payload as string;
+        widgetMode = mode === "recording" ? "recording" : "always";
+        syncOverlayVisibility();
+      })
+      .then((fn) => {
+        if (overlayCancelled) fn(); else unlistenFns.push(fn);
+      });
+
+    // Listen for python_output
     window.__TAURI__.event
       .listen("python_output", (event: { payload: unknown }) => {
         try {
           const data = JSON.parse(event.payload as string);
 
           if (data.status === "listening") {
+            isListening = true;
+            isProcessing = false;
             widget.className = "ow rec";
             startSound.currentTime = 0;
             startSound.play().catch(() => {});
+            syncOverlayVisibility();
             setTimeout(resizeToFit, 350);
           } else if (data.status === "processing") {
+            isListening = false;
+            isProcessing = true;
             widget.className = "ow proc";
             targetVolume = 0;
             stopSound.currentTime = 0;
             stopSound.play().catch(() => {});
+            syncOverlayVisibility();
             setTimeout(resizeToFit, 350);
           } else if (data.status === "result" || data.status === "ready") {
+            isListening = false;
+            isProcessing = false;
             if (widget.classList.contains("rec") || widget.classList.contains("proc")) {
               widget.className = "ow";
               targetVolume = 0;
+              syncOverlayVisibility();
+              setTimeout(resizeToFit, 350);
+            }
+          } else if (data.status === "error" || data.status === "rate_limit") {
+            isListening = false;
+            isProcessing = false;
+            if (widget.classList.contains("rec") || widget.classList.contains("proc")) {
+              widget.className = "ow";
+              targetVolume = 0;
+              syncOverlayVisibility();
               setTimeout(resizeToFit, 350);
             }
           } else if (data.status === "volume") {
@@ -119,13 +170,25 @@ function Overlay() {
         } catch (_) {}
       })
       .then((fn) => {
-        if (overlayCancelled) {
-          fn();
-        } else {
-          unlisten = fn;
-        }
+        if (overlayCancelled) fn(); else unlistenFns.push(fn);
       });
 
+    // ── LOAD INITIAL WIDGET MODE ──
+    async function loadInitialMode() {
+      try {
+        if (window.__TAURI__?.core?.invoke) {
+          const s = await window.__TAURI__.core.invoke("load_settings") as { widgetMode?: string };
+          if (s && s.widgetMode === "recording") {
+            widgetMode = "recording";
+          }
+          // Sync visibility with initial mode state
+          await syncOverlayVisibility();
+        }
+      } catch (_) {}
+    }
+    loadInitialMode();
+
+    // ── ANIMATION LOOP ──
     function animate() {
       requestAnimationFrame(animate);
 
@@ -157,7 +220,7 @@ function Overlay() {
 
     return () => {
       overlayCancelled = true;
-      if (unlisten) unlisten();
+      unlistenFns.forEach((fn) => fn());
       if (style.parentNode) style.parentNode.removeChild(style);
     };
   }, []);

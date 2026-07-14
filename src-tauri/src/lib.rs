@@ -94,6 +94,7 @@ pub fn run() {
 
             // Avvio Python sidecar (con health-check e auto-restart)
             let app_handle = app.handle().clone();
+            let app_handle_widget = app_handle.clone();
             let models_dir_str = models_dir.to_string_lossy().to_string();
             #[cfg(debug_assertions)]
             let script_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -213,6 +214,9 @@ pub fn run() {
                 }
             });
 
+            // Emit initial widget mode for the overlay
+            let _ = app_handle_widget.emit("widget_mode_updated", settings.widget_mode.clone());
+
             // Tray Menu
             let show_i = MenuItem::with_id(app, "show", "Mostra", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Esci", true, None::<&str>)?;
@@ -271,6 +275,31 @@ pub fn run() {
 
             // Listen for show_main_window event from overlay
             let app_handle_show = app.handle().clone();
+
+            // Listen for widget_mode updates from save_settings
+            let app_handle_wm = app.handle().clone();
+            app.listen("widget_mode_updated", move |event| {
+                let mode: String = serde_json::from_str(event.payload()).unwrap_or_default();
+                info!("[WidgetMode] Updated to: {}", mode);
+                // If switching to "always", show overlay if main window is hidden
+                if mode == "always" {
+                    if let Some(main_win) = app_handle_wm.get_webview_window("main") {
+                        let is_visible = main_win.is_visible().unwrap_or(false);
+                        if !is_visible {
+                            if let Some(overlay) = app_handle_wm.get_webview_window("overlay") {
+                                let _ = overlay.show();
+                            }
+                        }
+                    }
+                }
+                // If switching to "recording", hide overlay immediately
+                if mode == "recording" {
+                    if let Some(overlay) = app_handle_wm.get_webview_window("overlay") {
+                        let _ = overlay.hide();
+                    }
+                }
+            });
+
             app.listen("show_main_window", move |_| {
                 if let Some(main_win) = app_handle_show.get_webview_window("main") {
                     let _ = main_win.show();
@@ -288,10 +317,16 @@ pub fn run() {
                 if window.label() == "main" {
                     api.prevent_close();
                     let _ = window.hide();
-                    // Show the mini overlay widget
-                    if let Some(overlay) = window.app_handle().get_webview_window("overlay") {
-                        let _ = overlay.show();
-                        let _ = overlay.set_focus();
+                    // Show the mini overlay widget only if widget mode is "always"
+                    let app_handle = window.app_handle();
+                    let settings = load_settings_from_file(
+                        &app_handle.state::<AppState>().settings_path
+                    );
+                    if settings.widget_mode == "always" {
+                        if let Some(overlay) = app_handle.get_webview_window("overlay") {
+                            let _ = overlay.show();
+                            let _ = overlay.set_focus();
+                        }
                     }
                 } else if window.label() == "overlay" {
                     api.prevent_close();
@@ -378,6 +413,7 @@ mod tests {
             hold_to_speak: false,
             groq_api_key: String::new(),
             provider: "local".to_string(),
+            widget_mode: "always".to_string(),
         };
 
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -498,6 +534,7 @@ mod tests {
         assert_eq!(settings.selected_language, "en");
         assert_eq!(settings.compute_device, "cuda");
         assert!(settings.hold_to_speak);
+        assert_eq!(settings.widget_mode, "always");
 
         // Round-trip back to JSON
         let serialized = serde_json::to_string(&settings).unwrap();
@@ -507,6 +544,7 @@ mod tests {
         assert!(serialized.contains("\"computeDevice\""));
         assert!(serialized.contains("\"holdToSpeak\""));
         assert!(serialized.contains("\"autoPaste\""));
+        assert!(serialized.contains("\"widgetMode\""));
     }
 
     #[test]

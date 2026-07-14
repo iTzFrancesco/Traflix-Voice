@@ -9,6 +9,7 @@ export interface AppSettings {
   holdToSpeak: boolean;
   groqApiKey: string;
   provider: string;
+  widgetMode?: string;
 }
 
 export interface AppStats {

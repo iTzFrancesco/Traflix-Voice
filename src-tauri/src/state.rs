@@ -26,6 +26,8 @@ pub struct AppSettings {
     pub groq_api_key: String,
     #[serde(rename = "provider", default = "default_provider")]
     pub provider: String,
+    #[serde(rename = "widgetMode", default = "default_widget_mode")]
+    pub widget_mode: String,
 }
 
 fn default_language() -> String {
@@ -48,6 +50,10 @@ fn default_provider() -> String {
     "local".to_string()
 }
 
+fn default_widget_mode() -> String {
+    "always".to_string()
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
@@ -61,6 +67,7 @@ impl Default for AppSettings {
             hold_to_speak: false,
             groq_api_key: String::new(),
             provider: "local".to_string(),
+            widget_mode: "always".to_string(),
         }
     }
 }

@@ -1,7 +1,7 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::info;
 use std::fs;
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::clipboard::simulate_ctrl_v;
 use crate::hotkey::parse_hotkey;
@@ -30,16 +30,17 @@ pub async fn load_settings(state: State<'_, AppState>) -> Result<AppSettings, St
 /// Salva le impostazioni su disco e aggiorna la hotkey attiva
 #[tauri::command]
 pub async fn save_settings<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<(), String> {
     ensure_app_data_dir(&state.settings_path);
     let data = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     info!(
-        "[save-debug] save_settings WRITING: hotkey={}, hold_to_speak={}, data_len={}",
+        "[save-debug] save_settings WRITING: hotkey={}, hold_to_speak={}, widget_mode={}, data_len={}",
         settings.hotkey,
         settings.hold_to_speak,
+        settings.widget_mode,
         data.len()
     );
     atomic_write(&state.settings_path, &data).map_err(|e| e.to_string())?;
@@ -48,6 +49,9 @@ pub async fn save_settings<R: Runtime>(
     let new_config = parse_hotkey(&settings.hotkey);
     info!("[Hotkey] Aggiornata a: {:?}", new_config);
     *state.hotkey_config.write().unwrap() = new_config;
+
+    // Emit widget mode update for the overlay
+    let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());
 
     Ok(())
 }

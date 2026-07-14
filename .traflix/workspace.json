@@ -1,0 +1,21 @@
+{
+  "id": "7f55a337-8cb2-407d-a855-0a8942c0357f",
+  "name": "Traflix-Voice",
+  "rootPath": "C:\\Users\\Francesco\\OneDrive\\Documenti\\developer\\GitHub\\Traflix-Voice",
+  "layout": {
+    "rows": 1,
+    "cols": 1
+  },
+  "terminals": [
+    {
+      "id": "7648fbf2-bb5e-4d57-8ce7-6aaaf6955959",
+      "shell": "powershell.exe",
+      "agentId": "pi",
+      "command": null,
+      "cwd": "C:\\Users\\Francesco\\OneDrive\\Documenti\\developer\\GitHub\\Traflix-Voice",
+      "title": "PI"
+    }
+  ],
+  "createdAt": "2026-07-14T16:22:28.250Z",
+  "updatedAt": "2026-07-14T16:42:54.068Z"
+}

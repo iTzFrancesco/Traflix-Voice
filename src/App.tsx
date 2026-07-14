@@ -130,6 +130,7 @@ export default function App() {
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
   const [appVersion, setAppVersion] = useState("");
   const [holdToSpeak, setHoldToSpeak] = useState(false);
+  const [widgetMode, setWidgetMode] = useState("always");
   const [groqUsage, setGroqUsage] = useState<GroqUsage | null>(null);
   const [gpuStatus, setGpuStatus] = useState("Dispositivo in uso: CPU");
 
@@ -201,6 +202,7 @@ export default function App() {
         setSelectedLanguage(s.selectedLanguage || "it");
         setComputeDevice(s.computeDevice || "cpu");
         setHoldToSpeak(s.holdToSpeak ?? false);
+        setWidgetMode(s.widgetMode ?? "always");
         return true;
       } catch (err) {
         console.warn("[settings] error:", err);
@@ -882,14 +884,22 @@ export default function App() {
     [settings, persistSettings, selectedModel, showToast]
   );
 
-  // ── HOLD TO SPEAK CHANGE ──
+  // ── HOLD TO SPEAK CHANGE (solo stato locale, nessun salvataggio) ──
   const handleHoldToSpeakChange = useCallback(
     async (value: boolean) => {
       setHoldToSpeak(value);
-      await persistSettings({ holdToSpeak: value });
-      showToast(`Modalità: ${value ? "Tieni premuto" : "Click per toggle"}`, "info");
+      // Non salviamo subito — si salva con "Salva Impostazioni"
     },
-    [persistSettings, showToast]
+    []
+  );
+
+  // ── WIDGET MODE CHANGE (solo stato locale, nessun salvataggio) ──
+  const handleWidgetModeChange = useCallback(
+    async (value: string) => {
+      setWidgetMode(value);
+      // Non salviamo subito — si salva con "Salva Impostazioni"
+    },
+    []
   );
 
   // ── SETTING CHANGE (from SistemaTab) ──
@@ -927,7 +937,7 @@ export default function App() {
     [settings, persistSettings, showToast]
   );
 
-  // ── SAVE HOTKEY ──
+  // ── SAVE HOTKEY (salva hotkey + holdToSpeak + widgetMode) ──
   const handleSaveHotkey = useCallback(async () => {
     const input = document.getElementById("hotkey") as HTMLInputElement;
     if (!input) return;
@@ -939,9 +949,13 @@ export default function App() {
       input.value = "CommandOrControl+Alt";
     }
 
-    await persistSettings({ hotkey: input.value });
-    showToast("Scorciatoia salvata con successo", "success");
-  }, [persistSettings, showToast]);
+    await persistSettings({
+      hotkey: input.value,
+      holdToSpeak,
+      widgetMode,
+    });
+    showToast("Impostazioni salvate con successo", "success");
+  }, [persistSettings, showToast, holdToSpeak, widgetMode]);
 
   // ── EXPORT ──
   const exportText = useCallback(
@@ -1068,9 +1082,11 @@ export default function App() {
             isRecording={isHotkeyRecording}
             recordedKeys={recordedKeys}
             holdToSpeak={holdToSpeak}
+            widgetMode={widgetMode}
             onStartRecording={startRecording}
             onStopRecording={stopRecording}
             onHoldToSpeakChange={handleHoldToSpeakChange}
+            onWidgetModeChange={handleWidgetModeChange}
             onSave={handleSaveHotkey}
             onHotkeyChange={(val) => recordedKeys}
           />
