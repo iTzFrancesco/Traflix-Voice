@@ -1,6 +1,6 @@
 [package]
 name = "Traflix-Voice"
-version = "1.2.4"
+version = "1.2.5"
 description = "Dettatura vocale locale fornita da  OpenAI Whisper."
 authors = ["Francesco | Traflix"]
 edition = "2021"
