@@ -218,8 +218,8 @@ pub fn run() {
             let _ = app_handle_widget.emit("widget_mode_updated", settings.widget_mode.clone());
 
             // Tray Menu
-            let show_i = MenuItem::with_id(app, "show", "Mostra Traflix Voice", true, None)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Esci", true, None)?;
+            let show_i = MenuItem::with_id(app, "show", "Mostra Traflix Voice", true, None::<String>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Esci", true, None::<String>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
             let tray_tooltip = if cfg!(debug_assertions) {
