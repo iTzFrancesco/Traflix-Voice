@@ -26,7 +26,6 @@ export default function TastiTab({
   onHoldToSpeakChange,
   onWidgetModeChange,
   onSave,
-  onHotkeyChange,
 }: TastiTabProps) {
   // Sync recordedKeys with hotkey display
   useEffect(() => {
@@ -38,29 +37,14 @@ export default function TastiTab({
     }
   }, [recordedKeys]);
 
+  // Auto‑save when a hotkey recording completes with a valid combination
+  useEffect(() => {
+    if (!isRecording && recordedKeys && !recordedKeys.includes("...")) {
+      onSave();
+    }
+  }, [isRecording, recordedKeys, onSave]);
+
   const currentHotkey = settings?.hotkey || "CommandOrControl+Space";
-
-  const handleSave = () => {
-    const input = document.getElementById("hotkey") as HTMLInputElement;
-    if (!input) return;
-
-    const value = input.value;
-    const isControlAlt =
-      value === "CommandOrControl+Alt+..." || value === "Control+Alt+...";
-
-    if (value.includes("...") && !isControlAlt) {
-      alert(
-        "La scorciatoia non è completa! Premi un tasto finale (es. Spazio o una lettera) mentre tieni premuto Control/Alt."
-      );
-      return;
-    }
-
-    if (isControlAlt) {
-      input.value = "CommandOrControl+Alt";
-    }
-
-    onSave();
-  };
 
   return (
     <div className="tab-slide-in">
@@ -241,21 +225,7 @@ export default function TastiTab({
           </div>
         </div>
 
-        <hr className="border-none h-px bg-[rgba(255,255,255,0.08)] my-5" />
 
-        {/* Save */}
-        <h3 className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.06em] m-0 mb-3">
-          Salvataggio
-        </h3>
-
-        <button
-          id="save-btn"
-          className="w-full py-3.5 rounded-xl font-extrabold cursor-pointer border-none text-white"
-          style={{ background: "var(--primary-orange)" }}
-          onClick={handleSave}
-        >
-          Salva Impostazioni
-        </button>
       </div>
     </div>
   );

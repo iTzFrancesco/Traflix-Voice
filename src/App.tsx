@@ -884,22 +884,22 @@ export default function App() {
     [settings, persistSettings, selectedModel, showToast]
   );
 
-  // ── HOLD TO SPEAK CHANGE (solo stato locale, nessun salvataggio) ──
+  // ── HOLD TO SPEAK CHANGE (auto‑salvataggio immediato) ──
   const handleHoldToSpeakChange = useCallback(
     async (value: boolean) => {
       setHoldToSpeak(value);
-      // Non salviamo subito — si salva con "Salva Impostazioni"
+      await persistSettings({ holdToSpeak: value });
     },
-    []
+    [persistSettings]
   );
 
-  // ── WIDGET MODE CHANGE (solo stato locale, nessun salvataggio) ──
+  // ── WIDGET MODE CHANGE (auto‑salvataggio immediato) ──
   const handleWidgetModeChange = useCallback(
     async (value: string) => {
       setWidgetMode(value);
-      // Non salviamo subito — si salva con "Salva Impostazioni"
+      await persistSettings({ widgetMode: value });
     },
-    []
+    [persistSettings]
   );
 
   // ── SETTING CHANGE (from SistemaTab) ──
