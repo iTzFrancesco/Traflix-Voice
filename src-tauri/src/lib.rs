@@ -148,8 +148,8 @@ pub fn run() {
 
                     // Send init command (models_dir + compute_device)
                     let (selected_model, compute_device, groq_api_key, provider) = {
-                        let s =
-                            load_settings_from_file(&app_handle.state::<AppState>().settings_path);
+                        let app_state = app_handle.state::<AppState>();
+                        let s = load_settings_from_file(&app_state.settings_path);
                         (s.model, s.compute_device, s.groq_api_key, s.provider)
                     };
                     let init_msg = serde_json::json!({
@@ -319,9 +319,8 @@ pub fn run() {
                     let _ = window.hide();
                     // Show the mini overlay widget only if widget mode is "always"
                     let app_handle = window.app_handle();
-                    let settings = load_settings_from_file(
-                        &app_handle.state::<AppState>().settings_path
-                    );
+                    let app_state = app_handle.state::<AppState>();
+                    let settings = load_settings_from_file(&app_state.settings_path);
                     if settings.widget_mode == "always" {
                         if let Some(overlay) = app_handle.get_webview_window("overlay") {
                             let _ = overlay.show();
