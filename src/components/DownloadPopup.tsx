@@ -47,7 +47,7 @@ export default function DownloadPopup({ download, onClose }: DownloadPopupProps)
       aria-labelledby="download-title"
       aria-modal="true"
     >
-      <div className="bg-[#111] p-8 rounded-3xl border border-[rgba(255,255,255,0.08)] w-[80%] max-w-[400px] text-center">
+      <div className="bg-[#1a1b19] p-7 rounded-3xl border border-[rgba(255,255,255,0.1)] w-[80%] max-w-[400px] text-center shadow-[0_18px_70px_rgba(0,0,0,.5)]">
         <h3
           id="download-title"
           className="text-[#eee] text-lg font-bold m-0 mb-4"

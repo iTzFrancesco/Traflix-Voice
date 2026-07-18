@@ -8,7 +8,7 @@ export default function LoadingOverlay({ show }: { show: boolean }) {
       aria-labelledby="loading-title"
       aria-modal="true"
     >
-      <div className="bg-[#111] p-8 rounded-3xl border border-[rgba(255,255,255,0.08)] w-[80%] max-w-[360px] text-center flex flex-col items-center gap-4">
+      <div className="bg-[#1a1b19] p-7 rounded-3xl border border-[rgba(255,255,255,0.1)] w-[80%] max-w-[360px] text-center flex flex-col items-center gap-4 shadow-[0_18px_70px_rgba(0,0,0,.5)]">
         <div
           className="w-12 h-12 rounded-full animate-[spin_0.8s_linear_infinite]"
           style={{
@@ -21,7 +21,7 @@ export default function LoadingOverlay({ show }: { show: boolean }) {
           Caricamento modello...
         </h3>
         <p className="text-[#666] text-[0.95rem] m-0">
-          Attendi il caricamento del modello prima di iniziare la trascrizione.
+          Attendi un momento: il motore sarà pronto automaticamente.
         </p>
       </div>
     </div>

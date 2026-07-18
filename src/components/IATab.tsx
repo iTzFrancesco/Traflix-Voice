@@ -26,22 +26,11 @@ export default function IATab({
   const hourlyPct = Math.min(100, (hourlySecs / 7200) * 100);
 
   return (
-    <div className="tab-slide-in">
-      <h2 className="text-[#eee] text-[1.4rem] font-bold m-0 mb-4"
-        style={{
-          background: "linear-gradient(135deg, #ff4444 0%, #ff8c00 100%)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          backgroundClip: "text",
-        }}>
-        Modelli Whisper
-      </h2>
-      <p className="text-[#666] text-[0.95rem] m-0 mb-3">
-        Scegli il modello in base alla precisione che vuoi ottenere.
-      </p>
+    <div className="tab-slide-in max-w-[700px] mx-auto w-full">
+      <header className="mb-5"><p className="eyebrow m-0 mb-2">Motore di trascrizione</p><h1 className="page-title m-0">Scegli il tuo motore.</h1><p className="text-[.84rem] text-[var(--muted)] m-0 mt-2">Locale per privacy e controllo; Cloud per la massima velocità.</p></header>
 
       {/* Provider Toggle */}
-      <div className="bg-[rgba(34,34,34,0.6)] p-5 rounded-[20px] border border-[rgba(255,255,255,0.08)] mb-4">
+      <div className="panel p-5 mb-4">
         <div className="flex flex-row justify-between items-center mb-0">
           <div className="flex-1 min-w-0 mr-4">
             <label className="text-[0.9rem] font-bold text-[#ccc] block mb-1">
@@ -100,9 +89,13 @@ export default function IATab({
         )}
       </div>
 
+      {selectedProvider === "cloud" && (
+        <p className="panel-subtle p-3 text-[.76rem] leading-5 text-[var(--muted)] mb-4">Per usare Cloud configura prima la tua chiave Groq in <strong className="text-[var(--ink)]">Sistema</strong>. L'audio viene inviato al provider selezionato.</p>
+      )}
+
       {/* Cloud card */}
       {selectedProvider === "cloud" && (
-        <div className="bg-[rgba(34,34,34,0.6)] p-4 rounded-2xl border border-[var(--primary-orange)] bg-[rgba(255,140,0,0.06)] shadow-[0_4px_20px_rgba(255,140,0,0.1)] flex flex-col gap-3 mb-3">
+        <div className="panel p-4 border-[rgba(255,157,36,.52)] bg-[rgba(255,157,36,.07)] shadow-[0_8px_24px_rgba(255,107,33,.09)] flex flex-col gap-3 mb-3">
           <div className="flex-1 min-w-0">
             <div className="flex justify-between items-start mb-1">
               <div className="flex items-center gap-2 flex-wrap">
@@ -114,7 +107,7 @@ export default function IATab({
                 <span className="text-[0.65rem] text-[#444] whitespace-nowrap">0 GB RAM locale</span>
               </div>
             </div>
-            <p className="m-0 mb-2.5 text-[0.75rem] text-[#666] leading-[1.45]">Massima precisione su Groq LPU. 216x real-time — trascrive 1 minuto di audio in ~0.3 secondi. Supporto multilingua incluso italiano. Nessun download richiesto.</p>
+            <p className="m-0 mb-2.5 text-[0.78rem] text-[var(--muted)] leading-[1.5]">Massima precisione su Groq LPU. 216x real-time — trascrive 1 minuto di audio in ~0.3 secondi. Supporto multilingua incluso italiano. Nessun download richiesto.</p>
             <div className="flex gap-5">
               <div className="flex items-center gap-1.5">
                 <span className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.04em] whitespace-nowrap">Velocità</span>

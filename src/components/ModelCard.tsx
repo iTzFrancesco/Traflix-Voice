@@ -57,17 +57,17 @@ export default function ModelCard({
   return (
     <div
       className={`
-        bg-[rgba(34,34,34,0.6)] p-4 rounded-2xl border transition-all duration-250
+        panel p-4 rounded-2xl border transition-all duration-250
         ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col gap-3
-        ${isActive ? "border-[var(--primary-orange)] bg-[rgba(255,140,0,0.06)] shadow-[0_4px_20px_rgba(255,140,0,0.1)]" : "border-[rgba(255,255,255,0.08)]"}
-        ${!isDownloaded && !isActive ? "opacity-80 grayscale-[40%]" : ""}
+        ${isActive ? "border-[rgba(255,157,36,.52)] bg-[rgba(255,157,36,.07)] shadow-[0_8px_24px_rgba(255,107,33,.09)]" : "border-[rgba(255,255,255,0.08)]"}
+        ${!isDownloaded && !isActive ? "opacity-90" : ""}
       `}
       data-model-id={model.id}
     >
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-start mb-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="m-0 text-[0.95rem] font-bold text-[#eee]">{model.name}</h3>
+            <h3 className="m-0 text-[1rem] font-bold text-[var(--ink)]">Whisper {model.name}</h3>
             {model.tag && (
               <span className="text-[0.62rem] font-bold px-[7px] py-[2px] rounded-full whitespace-nowrap bg-[rgba(255,140,0,0.15)] text-[var(--primary-orange)] border border-[rgba(255,140,0,0.3)]">
                 {model.tag}
@@ -75,22 +75,22 @@ export default function ModelCard({
             )}
           </div>
           <div className="flex flex-col items-end gap-[2px]">
-            <span className="text-[0.72rem] text-[#555] font-semibold whitespace-nowrap">
+            <span className="text-[0.72rem] text-[var(--muted)] font-semibold whitespace-nowrap">
               {model.size}
             </span>
-            <span className="text-[0.65rem] text-[#444] whitespace-nowrap">
+            <span className="text-[0.65rem] text-[var(--quiet)] whitespace-nowrap">
               RAM {model.ram}
             </span>
           </div>
         </div>
 
-        <p className="m-0 mb-2.5 text-[0.75rem] text-[#666] leading-[1.45]">
+        <p className="m-0 mb-2.5 text-[0.78rem] text-[var(--muted)] leading-[1.5]">
           {model.description}
         </p>
 
         <div className="flex gap-5">
           <div className="flex items-center gap-1.5">
-            <span className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.04em] whitespace-nowrap">
+            <span className="text-[0.62rem] text-[var(--quiet)] font-bold uppercase tracking-[0.07em] whitespace-nowrap">
               Velocità
             </span>
             <div className="flex gap-1 items-center">
@@ -98,7 +98,7 @@ export default function ModelCard({
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.04em] whitespace-nowrap">
+            <span className="text-[0.62rem] text-[var(--quiet)] font-bold uppercase tracking-[0.07em] whitespace-nowrap">
               Precisione
             </span>
             <div className="flex gap-1 items-center">

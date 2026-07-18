@@ -47,22 +47,12 @@ export default function TastiTab({
   const currentHotkey = settings?.hotkey || "CommandOrControl+Space";
 
   return (
-    <div className="tab-slide-in">
-      <h2
-        className="text-[#eee] text-[1.4rem] font-bold m-0 mb-6"
-        style={{
-          background: "linear-gradient(135deg, #ff4444 0%, #ff8c00 100%)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          backgroundClip: "text",
-        }}
-      >
-        Scorciatoie
-      </h2>
+    <div className="tab-slide-in max-w-[700px] mx-auto w-full">
+      <header className="mb-6"><p className="eyebrow m-0 mb-2">Controllo globale</p><h1 className="page-title m-0">Scorciatoie</h1><p className="m-0 mt-2 text-[.84rem] text-[var(--muted)]">Configura il gesto che avvia la dettatura anche fuori dall'app.</p></header>
 
-      <div className="bg-[rgba(34,34,34,0.6)] p-6 rounded-[20px] border border-[rgba(255,255,255,0.08)] mb-6">
+      <div className="panel p-5 mb-6">
         {/* Hotkey */}
-        <h3 className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.06em] m-0 mb-3">
+        <h3 className="text-[0.65rem] text-[var(--quiet)] font-bold uppercase tracking-[0.1em] m-0 mb-3">
           Scorciatoia
         </h3>
 
@@ -111,7 +101,7 @@ export default function TastiTab({
               </svg>
             </button>
           </div>
-          <p className="text-[0.95rem] text-[#666] m-0">
+          <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">
             Premi il pulsante per registrare una nuova combinazione. Supporta anche i tasti laterali
             del mouse (Mouse4/Mouse5).
           </p>
@@ -120,7 +110,7 @@ export default function TastiTab({
         <hr className="border-none h-px bg-[rgba(255,255,255,0.08)] my-5" />
 
         {/* Hold to Speak */}
-        <h3 className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.06em] m-0 mb-3">
+        <h3 className="text-[0.65rem] text-[var(--quiet)] font-bold uppercase tracking-[0.1em] m-0 mb-3">
           Modalità
         </h3>
 
@@ -132,7 +122,7 @@ export default function TastiTab({
             >
               Tieni premuto per parlare
             </label>
-            <p className="text-[0.95rem] text-[#666] m-0">
+            <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">
               Se disattivato, premi la scorciatoia una volta per avviare la registrazione e premila
               di nuovo per interromperla.
             </p>
@@ -162,7 +152,7 @@ export default function TastiTab({
         <hr className="border-none h-px bg-[rgba(255,255,255,0.08)] my-5" />
 
         {/* Widget Visibility */}
-        <h3 className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.06em] m-0 mb-3">
+        <h3 className="text-[0.65rem] text-[var(--quiet)] font-bold uppercase tracking-[0.1em] m-0 mb-3">
           Widget
         </h3>
 
@@ -170,8 +160,8 @@ export default function TastiTab({
           <label className="text-[0.9rem] font-bold text-[#ccc] block mb-1">
             Visibilità widget
           </label>
-          <p className="text-[0.95rem] text-[#666] mb-3">
-            Scegli quando mostrare il widget fluttuante in background.
+          <p className="text-[0.84rem] leading-5 text-[var(--muted)] mb-3">
+            Il widget appare quando la console principale è nascosta; puoi limitarlo alla sola attività di registrazione.
           </p>
           <div className="flex gap-3">
             <button

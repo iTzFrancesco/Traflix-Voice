@@ -4,6 +4,7 @@ interface SistemaTabProps {
   settings: AppSettings | null;
   devices: AudioDeviceInfo[];
   appVersion: string;
+  gpuStatus: string;
   onSettingChange: (key: string, value: string | boolean) => void;
 }
 
@@ -11,23 +12,14 @@ export default function SistemaTab({
   settings,
   devices,
   appVersion,
+  gpuStatus,
   onSettingChange,
 }: SistemaTabProps) {
   return (
-    <div className="tab-slide-in">
-      <h2
-        className="text-[#eee] text-[1.4rem] font-bold m-0 mb-6"
-        style={{
-          background: "linear-gradient(135deg, #ff4444 0%, #ff8c00 100%)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          backgroundClip: "text",
-        }}
-      >
-        Configurazione Sistema
-      </h2>
+    <div className="tab-slide-in max-w-[700px] mx-auto w-full">
+      <header className="mb-6"><p className="eyebrow m-0 mb-2">Ambiente di lavoro</p><h1 className="page-title m-0">Sistema</h1><p className="m-0 mt-2 text-[.84rem] text-[var(--muted)]">Audio, lingua, prestazioni e credenziali Cloud.</p></header>
 
-      <div className="bg-[rgba(34,34,34,0.6)] p-6 rounded-[20px] border border-[rgba(255,255,255,0.08)] mb-6">
+      <div className="panel p-5 mb-4">
         {/* Audio Device */}
         <div className="mb-6 flex flex-col gap-2">
           <label className="text-[0.9rem] font-bold text-[#ccc]" htmlFor="audio-device">
@@ -87,8 +79,8 @@ export default function SistemaTab({
             <option value="cuda">GPU (CUDA)</option>
             <option value="auto">Auto-detect</option>
           </select>
-          <p id="gpu-status" className="text-[0.95rem] text-[#666] m-0">
-            Dispositivo in uso: CPU
+          <p id="gpu-status" className="text-[0.82rem] text-[var(--muted)] m-0 leading-5">
+            {gpuStatus}
           </p>
         </div>
 
@@ -121,8 +113,8 @@ export default function SistemaTab({
         </div>
       </div>
 
-      <div className="bg-[rgba(34,34,34,0.6)] p-6 rounded-[20px] border border-[rgba(255,255,255,0.08)] mt-4">
-        <p className="text-[0.95rem] text-center opacity-40 text-[#666] m-0">
+      <div className="panel-subtle p-4 mt-4">
+        <p className="text-[0.75rem] text-center text-[var(--quiet)] m-0">
           Traflix Voice v{appVersion}
         </p>
       </div>

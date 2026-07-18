@@ -1038,14 +1038,11 @@ export default function App() {
   // ── RENDER ──
   return (
     <div
-      className="flex h-dvh w-dvw"
-      style={{
-        background: "radial-gradient(circle at top right, #1d1000 0%, #0a0a0a 100%)",
-      }}
+      className="app-canvas flex h-dvh w-dvw"
     >
-      <Sidebar activeTab={activeTab} onTabChange={handleTabChange} />
+      <Sidebar activeTab={activeTab} onTabChange={handleTabChange} appVersion={appVersion} />
 
-      <main className="flex-1 p-8 overflow-y-auto flex flex-col relative">
+      <main className="flex-1 px-5 py-6 overflow-y-auto flex flex-col relative">
         {activeTab === "home" && (
           <HomeTab
             stats={stats}
@@ -1054,12 +1051,6 @@ export default function App() {
             selectedModel={selectedModel}
             transcriptionStatus={transcriptionStatus}
             groqUsage={groqUsage}
-            currentVolume={targetVolume}
-            activeTranscription={activeTranscription}
-            transcriptionText={transcriptionText}
-            onStartTranscription={() => startTranscription(true)}
-            onStopTranscription={stopTranscription}
-            onClearText={clearText}
 
           />
         )}
@@ -1105,6 +1096,7 @@ export default function App() {
             settings={settings}
             devices={audioDevices}
             appVersion={appVersion}
+            gpuStatus={gpuStatus}
             onSettingChange={handleSettingChange}
           />
         )}
