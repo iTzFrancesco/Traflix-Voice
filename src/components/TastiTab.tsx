@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { AppSettings } from "../types";
 
 interface TastiTabProps {
@@ -27,6 +27,7 @@ export default function TastiTab({
   onWidgetModeChange,
   onSave,
 }: TastiTabProps) {
+  const lastSavedHotkeyRef = useRef<string | null>(null);
   // Sync recordedKeys with hotkey display
   useEffect(() => {
     if (recordedKeys) {
@@ -39,7 +40,13 @@ export default function TastiTab({
 
   // Auto‑save when a hotkey recording completes with a valid combination
   useEffect(() => {
-    if (!isRecording && recordedKeys && !recordedKeys.includes("...")) {
+    if (
+      !isRecording &&
+      recordedKeys &&
+      !recordedKeys.includes("...") &&
+      lastSavedHotkeyRef.current !== recordedKeys
+    ) {
+      lastSavedHotkeyRef.current = recordedKeys;
       onSave();
     }
   }, [isRecording, recordedKeys, onSave]);

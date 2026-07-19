@@ -27,8 +27,8 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-log = "2"
 log = "0.4"
 tauri-plugin-updater = "2"
+tauri-plugin-single-instance = "2"
 cpal = "0.15"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse"] }
-
