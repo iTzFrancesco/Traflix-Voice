@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useHotkey } from "../hooks/useHotkey";
 import type { AppSettings } from "../types";
 
 interface TastiTabProps {
@@ -12,6 +13,7 @@ interface TastiTabProps {
   onHoldToSpeakChange: (value: boolean) => void;
   onWidgetModeChange: (value: string) => void;
   onSave: () => void;
+  onSecondarySave: (value: string) => void;
   onHotkeyChange: (value: string) => void;
 }
 
@@ -26,8 +28,11 @@ export default function TastiTab({
   onHoldToSpeakChange,
   onWidgetModeChange,
   onSave,
+  onSecondarySave,
 }: TastiTabProps) {
   const lastSavedHotkeyRef = useRef<string | null>(null);
+  const secondary = useHotkey();
+  const secondarySavedRef = useRef<string | null>(null);
   // Sync recordedKeys with hotkey display
   useEffect(() => {
     if (recordedKeys) {
@@ -50,6 +55,25 @@ export default function TastiTab({
       onSave();
     }
   }, [isRecording, recordedKeys, onSave]);
+
+  useEffect(() => {
+    if (secondary.recordedKeys) {
+      const input = document.getElementById("secondary-hotkey") as HTMLInputElement;
+      if (input) input.value = secondary.recordedKeys;
+    }
+  }, [secondary.recordedKeys]);
+
+  useEffect(() => {
+    if (
+      !secondary.isRecording &&
+      secondary.recordedKeys &&
+      !secondary.recordedKeys.includes("...") &&
+      secondarySavedRef.current !== secondary.recordedKeys
+    ) {
+      secondarySavedRef.current = secondary.recordedKeys;
+      onSecondarySave(secondary.recordedKeys);
+    }
+  }, [secondary.isRecording, secondary.recordedKeys, onSecondarySave]);
 
   const currentHotkey = settings?.hotkey || "CommandOrControl+Space";
 
@@ -111,6 +135,33 @@ export default function TastiTab({
           <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">
             Premi il pulsante per registrare una nuova combinazione. Supporta anche i tasti laterali
             del mouse (Mouse4/Mouse5).
+          </p>
+        </div>
+
+        <div className="mb-6 flex flex-col gap-2">
+          <label className="text-[0.9rem] font-bold text-[#ccc]" htmlFor="secondary-hotkey">
+            Seconda hotkey (opzionale)
+          </label>
+          <div className="flex gap-2.5 items-center">
+            <input
+              type="text"
+              id="secondary-hotkey"
+              placeholder={secondary.isRecording ? "Registrazione..." : "Nessuna"}
+              readOnly
+              defaultValue={settings?.secondaryHotkey || ""}
+              className="flex-1 w-full font-mono font-bold text-[0.95rem] tracking-[0.08em] px-3.5 py-3 rounded-xl outline-none bg-[rgba(0,0,0,0.6)] border border-[rgba(255,255,255,0.08)] text-[#eee]"
+              aria-label="Seconda combinazione tasti"
+            />
+            <button
+              className="w-11 h-11 flex items-center justify-center rounded-xl border bg-[#222] border-[rgba(255,255,255,0.08)] text-[#777] hover:text-[#ccc]"
+              aria-label="Registra seconda combinazione tasti"
+              onClick={secondary.isRecording ? secondary.stopRecording : secondary.startRecording}
+            >
+              ⌨
+            </button>
+          </div>
+          <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">
+            Entrambe le shortcut avviano e fermano la dettatura allo stesso modo.
           </p>
         </div>
 

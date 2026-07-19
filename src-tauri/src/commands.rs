@@ -46,9 +46,14 @@ pub async fn save_settings<R: Runtime>(
     atomic_write(&state.settings_path, &data).map_err(|e| e.to_string())?;
     info!("[save-debug] save_settings WRITE OK");
 
-    let new_config = parse_hotkey(&settings.hotkey);
-    info!("[Hotkey] Aggiornata a: {:?}", new_config);
-    *state.hotkey_config.write().unwrap() = new_config;
+    let new_configs = [settings.hotkey.as_str(), settings.secondary_hotkey.as_str()]
+        .into_iter()
+        .filter(|hotkey| !hotkey.trim().is_empty())
+        .map(parse_hotkey)
+        .filter(|config| !config.vk_codes.is_empty())
+        .collect::<Vec<_>>();
+    info!("[Hotkey] Aggiornate: {:?}", new_configs);
+    *state.hotkey_config.write().unwrap() = new_configs;
 
     // Emit widget mode update for the overlay
     let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());

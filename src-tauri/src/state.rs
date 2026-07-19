@@ -9,6 +9,8 @@ use tauri_plugin_shell::process::CommandChild;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     pub hotkey: String,
+    #[serde(rename = "secondaryHotkey", default)]
+    pub secondary_hotkey: String,
     pub model: String,
     #[serde(rename = "autoPaste", default)]
     pub auto_paste: Option<bool>,
@@ -58,6 +60,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
             hotkey: "XBUTTON2".to_string(),
+            secondary_hotkey: String::new(),
             model: "small".to_string(),
             auto_paste: None,
             minimize_tray: true,
@@ -128,7 +131,7 @@ pub struct AppState {
     #[allow(dead_code)]
     pub models_dir: PathBuf,
     pub groq_usage_path: PathBuf,
-    pub hotkey_config: Arc<RwLock<HotkeyConfig>>,
+    pub hotkey_config: Arc<RwLock<Vec<HotkeyConfig>>>,
     pub is_shutting_down: AtomicBool,
 }
 

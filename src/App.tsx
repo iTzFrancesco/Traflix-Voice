@@ -938,8 +938,8 @@ export default function App() {
   );
 
   // ── SAVE HOTKEY (salva hotkey + holdToSpeak + widgetMode) ──
-  const handleSaveHotkey = useCallback(async () => {
-    const input = document.getElementById("hotkey") as HTMLInputElement;
+  const handleSaveHotkey = useCallback(async (slot: "primary" | "secondary" = "primary", secondaryValue?: string) => {
+    const input = document.getElementById(slot === "primary" ? "hotkey" : "secondary-hotkey") as HTMLInputElement;
     if (!input) return;
     const value = input.value;
 
@@ -950,7 +950,7 @@ export default function App() {
     }
 
     await persistSettings({
-      hotkey: input.value,
+      ...(slot === "primary" ? { hotkey: input.value } : { secondaryHotkey: secondaryValue ?? input.value }),
       holdToSpeak,
       widgetMode,
     });
@@ -1079,6 +1079,7 @@ export default function App() {
             onHoldToSpeakChange={handleHoldToSpeakChange}
             onWidgetModeChange={handleWidgetModeChange}
             onSave={handleSaveHotkey}
+            onSecondarySave={(value) => handleSaveHotkey("secondary", value)}
             onHotkeyChange={(val) => recordedKeys}
           />
         )}

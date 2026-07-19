@@ -43,8 +43,13 @@ pub fn run() {
             let _ = fs::create_dir_all(&models_dir);
 
             let settings = load_settings_from_file(&settings_path);
-            let initial_config = parse_hotkey(&settings.hotkey);
-            info!("[Hotkey] Configurata: {:?}", initial_config);
+            let initial_config = [settings.hotkey.as_str(), settings.secondary_hotkey.as_str()]
+                .into_iter()
+                .filter(|hotkey| !hotkey.trim().is_empty())
+                .map(parse_hotkey)
+                .filter(|config| !config.vk_codes.is_empty())
+                .collect::<Vec<_>>();
+            info!("[Hotkey] Configurate: {:?}", initial_config);
             let hotkey_config = Arc::new(RwLock::new(initial_config));
 
             app.manage(AppState {
@@ -69,11 +74,13 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_millis(16));
 
                     let config = hotkey_config.read().unwrap();
-                    if config.vk_codes.is_empty() {
+                    if config.is_empty() {
                         drop(config);
                         continue;
                     }
-                    let all_pressed = config.vk_codes.iter().all(|&vk| is_key_pressed(vk));
+                    let all_pressed = config
+                        .iter()
+                        .any(|hotkey| hotkey.vk_codes.iter().all(|&vk| is_key_pressed(vk)));
                     drop(config);
 
                     if all_pressed
@@ -413,6 +420,7 @@ mod tests {
         // Write test settings
         let original = AppSettings {
             hotkey: "XBUTTON2".to_string(),
+            secondary_hotkey: String::new(),
             model: "small".to_string(),
             auto_paste: None,
             minimize_tray: true,

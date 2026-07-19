@@ -1,5 +1,6 @@
 export interface AppSettings {
   hotkey: string;
+  secondaryHotkey?: string;
   model: string;
   autoPaste?: boolean | null;
   minimizeTray: boolean;
