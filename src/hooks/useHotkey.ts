@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 
-function formatKey(key: string): string {
+function formatKey(key: string, code: string): string {
   const map: Record<string, string> = {
     Control: "CommandOrControl",
     Alt: "Alt",
@@ -8,6 +8,12 @@ function formatKey(key: string): string {
     " ": "Space",
     Meta: "Super",
   };
+  // Use the physical key code for layout-independent shortcuts. On an
+  // Italian keyboard, for example, e.key may be "ù" while e.code is "KeyU".
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F(?:[1-9]|1[0-2])$/.test(code)) return code;
+
   return map[key] || key.charAt(0).toUpperCase() + key.slice(1);
 }
 
@@ -38,6 +44,14 @@ export function useHotkey() {
       if (!recordingRef.current) return;
       e.preventDefault();
 
+      // AltGr is reported as Ctrl+Alt by Windows/browser layouts, but it is
+      // also a distinct physical key. Keep it as a standalone shortcut.
+      if (e.key === "AltGraph" || e.code === "AltRight") {
+        setRecordedKeys("AltGraph");
+        setIsRecording(false);
+        return;
+      }
+
       const keys: string[] = [];
       if (e.ctrlKey) keys.push("CommandOrControl");
       if (e.altKey) keys.push("Alt");
@@ -47,7 +61,7 @@ export function useHotkey() {
       const isModifier = ["Control", "Alt", "Shift", "Meta"].includes(e.key);
 
       if (!isModifier) {
-        keys.push(formatKey(e.key));
+        keys.push(formatKey(e.key, e.code));
         setRecordedKeys(keys.join("+"));
         setIsRecording(false);
       } else {

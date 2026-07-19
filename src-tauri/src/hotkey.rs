@@ -17,6 +17,7 @@ pub fn str_to_vk(s: &str) -> Option<i32> {
     match s {
         "CommandOrControl" | "Control" | "Ctrl" => Some(0x11), // VK_CONTROL
         "Alt" => Some(0x12),                                   // VK_MENU
+        "AltGraph" => Some(0xA5),                              // VK_RMENU (right Alt / AltGr)
         "Shift" => Some(0x10),                                 // VK_SHIFT
         "Super" | "Meta" => Some(0x5B),                        // VK_LWIN
         "Space" => Some(0x20),                                 // VK_SPACE
@@ -62,6 +63,9 @@ pub fn str_to_vk(s: &str) -> Option<i32> {
         "S" => Some(0x53),
         "T" => Some(0x54),
         "U" => Some(0x55),
+        // Italian layout key next to M (VK_OEM_102 / ISO backslash key).
+        // Older versions stored its localized label as "Ù".
+        "Ù" => Some(0xE2),
         "V" => Some(0x56),
         "W" => Some(0x57),
         "X" => Some(0x58),

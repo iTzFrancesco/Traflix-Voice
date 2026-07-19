@@ -153,11 +153,28 @@ export default function TastiTab({
               aria-label="Seconda combinazione tasti"
             />
             <button
-              className="w-11 h-11 flex items-center justify-center rounded-xl border bg-[#222] border-[rgba(255,255,255,0.08)] text-[#777] hover:text-[#ccc]"
+              id="secondary-record-btn"
+              className={`w-11 h-11 flex items-center justify-center rounded-xl border cursor-pointer transition-all duration-200 ${
+                secondary.isRecording
+                  ? "bg-[rgba(255,68,68,0.15)] border-[rgba(255,68,68,0.3)] text-[#ff4444]"
+                  : "bg-[#222] border-[rgba(255,255,255,0.08)] text-[#777] hover:text-[#ccc]"
+              }`}
               aria-label="Registra seconda combinazione tasti"
               onClick={secondary.isRecording ? secondary.stopRecording : secondary.startRecording}
             >
-              ⌨
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-5 h-5"
+                aria-hidden="true"
+              >
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M6 16h12" />
+              </svg>
             </button>
           </div>
           <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">

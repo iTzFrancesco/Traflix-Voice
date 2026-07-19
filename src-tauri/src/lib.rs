@@ -383,10 +383,12 @@ mod tests {
     fn test_str_to_vk() {
         assert_eq!(str_to_vk("Control"), Some(0x11));
         assert_eq!(str_to_vk("Alt"), Some(0x12));
+        assert_eq!(str_to_vk("AltGraph"), Some(0xA5));
         assert_eq!(str_to_vk("Space"), Some(0x20));
         assert_eq!(str_to_vk("A"), Some(0x41));
         assert_eq!(str_to_vk("XBUTTON2"), Some(0x06));
         assert_eq!(str_to_vk("F1"), Some(0x70));
+        assert_eq!(str_to_vk("Ù"), Some(0xE2));
         assert_eq!(str_to_vk("Nonexistent"), None);
     }
 
