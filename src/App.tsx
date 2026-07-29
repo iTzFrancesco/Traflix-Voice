@@ -5,6 +5,7 @@ import IATab from "./components/IATab";
 import TastiTab from "./components/TastiTab";
 import CronologiaTab from "./components/CronologiaTab";
 import SistemaTab from "./components/SistemaTab";
+import DictionaryTab from "./components/DictionaryTab";
 import ToastContainer from "./components/Toast";
 import LoadingOverlay from "./components/LoadingOverlay";
 import DownloadPopup from "./components/DownloadPopup";
@@ -18,6 +19,7 @@ import type {
   Provider,
   Toast,
   PythonEvent,
+  DictionaryEntry,
 } from "./types";
 import { WHISPER_MODELS } from "./types";
 
@@ -133,6 +135,22 @@ export default function App() {
   const [widgetMode, setWidgetMode] = useState("always");
   const [groqUsage, setGroqUsage] = useState<GroqUsage | null>(null);
   const [gpuStatus, setGpuStatus] = useState("Dispositivo in uso: CPU");
+  const lastCloudPasteRef = useRef<{
+    id: string;
+    text: string;
+    pastedAt: number;
+    expiresAt: number;
+  } | null>(null);
+  const transformRequestRef = useRef<{
+    requestId: string;
+    pasteId: string;
+    original: string;
+  } | null>(null);
+  const lastTransformRef = useRef<{
+    pasteId: string;
+    original: string;
+    transformed: string;
+  } | null>(null);
 
   const toastIdRef = useRef(0);
   const volumeThrottleRef = useRef(0);
@@ -329,6 +347,35 @@ export default function App() {
     }
   }, []);
 
+  const requestTransform = useCallback(async () => {
+    const lastPaste = lastCloudPasteRef.current;
+    if (!lastPaste || Date.now() > lastPaste.expiresAt) {
+      showToast("La trasformazione è disponibile per 15 secondi dopo l’incolla", "info");
+      window.__TAURI__?.event?.emit("transform_finished", {}).catch(() => {});
+      return;
+    }
+    if (transformRequestRef.current) return;
+    const requestId = crypto.randomUUID();
+    transformRequestRef.current = {
+      requestId,
+      pasteId: lastPaste.id,
+      original: lastPaste.text,
+    };
+    try {
+      await window.__TAURI__.core.invoke("send_to_python", {
+        message: JSON.stringify({
+          command: "transform_prompt",
+          text: lastPaste.text,
+          request_id: requestId,
+        }),
+      });
+    } catch {
+      transformRequestRef.current = null;
+      showToast("Trasformazione non disponibile", "error");
+      window.__TAURI__?.event?.emit("transform_finished", {}).catch(() => {});
+    }
+  }, [showToast]);
+
   // ── HISTORY ──
   const loadHistory = useCallback(async () => {
     if (!window.__TAURI__?.core?.invoke) return;
@@ -437,7 +484,6 @@ export default function App() {
       .listen("python_output", async (event: { payload: unknown }) => {
         try {
           const data = JSON.parse(event.payload as string) as PythonEvent;
-
           // Update modelReady and loading overlay
           if (data.status === "starting" || data.status === "loading_model") {
             setModelReady(false);
@@ -451,7 +497,7 @@ export default function App() {
             setShowLoading(false);
           }
 
-          if (["starting", "loading_model", "listening", "processing", "ready", "result", "error", "rate_limit"].includes(data.status || "")) {
+          if (["starting", "loading_model", "listening", "processing", "transforming", "transformed", "ready", "result", "error", "rate_limit"].includes(data.status || "")) {
             setTranscriptionStatus(data.status);
           }
 
@@ -572,13 +618,47 @@ export default function App() {
             }
           }
 
+          if (data.status === "transformed" && data.text) {
+            const request = transformRequestRef.current;
+            if (request && request.requestId === data.request_id && window.__TAURI__?.core?.invoke) {
+              try {
+                await window.__TAURI__.core.invoke("replace_last_paste", {
+                  text: data.text,
+                  pasteId: request.pasteId,
+                });
+                lastTransformRef.current = {
+                  pasteId: request.pasteId,
+                  original: request.original,
+                  transformed: data.text,
+                };
+                showToast("Testo trasformato. Puoi ripristinarlo dal widget.", "success");
+                window.__TAURI__?.event?.emit("transform_result", {
+                  original: request.original,
+                  transformed: data.text,
+                }).catch(() => {});
+              } catch {
+                await navigator.clipboard.writeText(data.text).catch(() => {});
+                showToast("Target non sicuro: risultato copiato negli appunti", "info");
+                window.__TAURI__?.event?.emit("transform_finished", {}).catch(() => {});
+              }
+            }
+            transformRequestRef.current = null;
+            lastCloudPasteRef.current = null;
+          }
+          if (data.status === "transform_error") {
+            if (!data.request_id || data.request_id === transformRequestRef.current?.requestId) {
+              transformRequestRef.current = null;
+              showToast(data.message || "Impossibile trasformare il testo", "error");
+              window.__TAURI__?.event?.emit("transform_finished", {}).catch(() => {});
+            }
+          }
           // Log messages
           if (data.status === "info" && data.message) {
             console.log("[Python]", data.message);
           }
           if (data.status === "warning" && data.message) {
             console.warn("[Python]", data.message);
-            showToast(data.message, "error");
+            showToast(data.message, "info");
           }
 
           // Result with transcription text
@@ -634,17 +714,34 @@ export default function App() {
               } catch {}
             }
 
-            // Execute paste
-            console.log("[RESULT] executing paste...");
-            if (window.__TAURI__?.core?.invoke) {
+            // Execute paste only when enabled; otherwise keep the result in the clipboard.
+            const shouldAutoPaste = settings?.autoPaste ?? true;
+            if (window.__TAURI__?.core?.invoke && shouldAutoPaste) {
               try {
+                const pasteId = crypto.randomUUID();
                 await window.__TAURI__.core.invoke("execute_paste", {
                   text: data.text,
+                  pasteId,
                 });
                 console.log("[RESULT] paste executed OK");
+                if (selectedProvider === "cloud") {
+                  const pastedAt = Date.now();
+                  lastCloudPasteRef.current = {
+                    id: pasteId,
+                    text: data.text,
+                    pastedAt,
+                    expiresAt: pastedAt + 15_000,
+                  };
+                  window.__TAURI__?.event?.emit("transform_available", {
+                    expiresAt: pastedAt + 15_000,
+                  }).catch(() => {});
+                }
               } catch (e) {
                 console.error("[RESULT] paste error:", e);
               }
+            } else if (!shouldAutoPaste) {
+              await navigator.clipboard.writeText(data.text).catch(() => {});
+              showToast("Trascrizione copiata negli appunti", "success");
             }
 
             // Groq usage tracking
@@ -672,6 +769,35 @@ export default function App() {
       if (unlisten) unlisten();
     };
   }, [selectedProvider, settings]);
+
+  // ── OVERLAY TRANSFORMS ──
+  useEffect(() => {
+    if (!window.__TAURI__?.event?.listen) return;
+    const unlisteners: (() => void)[] = [];
+    Promise.all([
+      window.__TAURI__.event.listen("enhance_prompt_request", () => {
+        requestTransform();
+      }),
+      window.__TAURI__.event.listen("restore_transform_request", async () => {
+        const previous = lastTransformRef.current;
+        if (!previous) return;
+        try {
+          await window.__TAURI__.core.invoke("replace_last_paste", {
+            text: previous.original,
+            pasteId: previous.pasteId,
+          });
+          lastTransformRef.current = null;
+          showToast("Testo originale ripristinato", "success");
+          window.__TAURI__?.event?.emit("transform_finished", {}).catch(() => {});
+        } catch {
+          showToast("Impossibile ripristinare automaticamente", "error");
+        }
+      }),
+    ]).then((items) => unlisteners.push(...items));
+    return () => {
+      for (const unlisten of unlisteners) unlisten();
+    };
+  }, [requestTransform, showToast]);
 
   // ── HOTKEY EVENT LISTENERS (with refs to avoid re-registration) ──
   useEffect(() => {
@@ -727,25 +853,41 @@ export default function App() {
 
   // ── LOCAL FALLBACK HOTKEY (Ctrl+Alt) ──
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isControlAlt = e.ctrlKey && e.altKey;
-      if (!isControlAlt) return;
+    let chordTimer: ReturnType<typeof setTimeout> | null = null;
+    let chordConsumed = false;
+    const triggerFallback = () => {
       if (!modelReadyRef.current) {
         showToast("Caricamento modello in corso, attendere...", "info");
         return;
       }
-      if (holdToSpeakRef.current) {
-        startFnRef.current();
-      } else {
-        if (activeTranscriptionRef.current) {
-          stopFnRef.current();
-        } else {
-          startFnRef.current();
-        }
+      if (holdToSpeakRef.current) startFnRef.current();
+      else if (activeTranscriptionRef.current) stopFnRef.current();
+      else startFnRef.current();
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isControlAlt = e.ctrlKey && e.altKey;
+      if (!isControlAlt) return;
+      const isModifier = e.key === "Control" || e.key === "Alt";
+      if (!isModifier) {
+        chordConsumed = true;
+        if (chordTimer) clearTimeout(chordTimer);
+        chordTimer = null;
+        return;
+      }
+      if (!chordTimer) {
+        chordConsumed = false;
+        chordTimer = setTimeout(() => {
+          chordTimer = null;
+          if (!chordConsumed) triggerFallback();
+        }, 220);
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Control" || e.key === "Alt") {
+        if (chordTimer) clearTimeout(chordTimer);
+        chordTimer = null;
+      }
       if (holdToSpeakRef.current && (e.key === "Control" || e.key === "Alt")) {
         stopFnRef.current();
       }
@@ -756,8 +898,9 @@ export default function App() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
+      if (chordTimer) clearTimeout(chordTimer);
     };
-  }, []);
+  }, [showToast]);
 
   // ── TRANSCRIPTION CONTROL ──
   const transcriptionLockRef = useRef(false);
@@ -770,6 +913,10 @@ export default function App() {
     if (now - transcriptionCooldownRef.current < 300) { console.log("[REC] start BLOCKED: cooldown"); return; }
     transcriptionCooldownRef.current = now;
     transcriptionLockRef.current = true;
+    lastCloudPasteRef.current = null;
+    transformRequestRef.current = null;
+    lastTransformRef.current = null;
+    window.__TAURI__?.event?.emit("transform_finished", {}).catch(() => {});
     isTestRecordingRef.current = !!isTest;
     const recId = ++recIdCounterRef.current;
     console.log(`[REC] #${recId} startTranscription called, isTest=${!!isTest}`);
@@ -804,6 +951,11 @@ export default function App() {
               : settings?.selectedDevice,
           language: selectedLanguage,
           provider: selectedProvider,
+          post_processing: {
+            enabled: selectedProvider === "cloud" && !!settings?.cloudPostProcessing,
+            remove_fillers: settings?.removeFillers ?? true,
+            dictionary_entries: settings?.dictionaryEntries ?? [],
+          },
         }),
       });
       console.log(`[REC] #${recId} transcribe command sent OK`);
@@ -938,8 +1090,9 @@ export default function App() {
   );
 
   // ── SAVE HOTKEY (salva hotkey + holdToSpeak + widgetMode) ──
-  const handleSaveHotkey = useCallback(async (slot: "primary" | "secondary" = "primary", secondaryValue?: string) => {
-    const input = document.getElementById(slot === "primary" ? "hotkey" : "secondary-hotkey") as HTMLInputElement;
+  const handleSaveHotkey = useCallback(async (slot: "primary" | "secondary" = "primary", explicitValue?: string) => {
+    const inputId = slot === "primary" ? "hotkey" : "secondary-hotkey";
+    const input = document.getElementById(inputId) as HTMLInputElement;
     if (!input) return;
     const value = input.value;
 
@@ -950,7 +1103,9 @@ export default function App() {
     }
 
     await persistSettings({
-      ...(slot === "primary" ? { hotkey: input.value } : { secondaryHotkey: secondaryValue ?? input.value }),
+      ...(slot === "primary"
+        ? { hotkey: input.value }
+        : { secondaryHotkey: explicitValue ?? input.value }),
       holdToSpeak,
       widgetMode,
     });
@@ -1089,6 +1244,16 @@ export default function App() {
             entries={historyEntries}
             onClear={clearHistory}
             onEntryClick={handleHistoryClick}
+          />
+        )}
+
+        {activeTab === "dictionary" && (
+          <DictionaryTab
+            entries={settings?.dictionaryEntries ?? []}
+            enabled={!!settings?.cloudPostProcessing}
+            removeFillers={settings?.removeFillers ?? true}
+            onChange={(dictionaryEntries: DictionaryEntry[]) => persistSettings({ dictionaryEntries })}
+            onSettingChange={(key, value) => persistSettings({ [key]: value })}
           />
         )}
 

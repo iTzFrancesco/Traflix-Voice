@@ -27,6 +27,7 @@ sys.modules["pywhispercpp.model"] = MagicMock()
 from whisper_engine.engine import WhisperEngine
 from whisper_engine.constants import SAMPLE_RATE, BLOCK_SIZE
 from whisper_engine.audio import audio_callback as _ac
+from whisper_engine.transcriber import apply_dictionary, improve_cloud_text, enhance_prompt
 
 
 class TestWhisperEngineInit(unittest.TestCase):
@@ -527,6 +528,82 @@ class TestConstants(unittest.TestCase):
 
     def test_block_size(self):
         self.assertEqual(BLOCK_SIZE, 4000)
+
+
+class TestCloudTextProcessing(unittest.TestCase):
+    def _fake_groq_module(self, output):
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = output
+        response.usage.prompt_tokens = 12
+        response.usage.completion_tokens = 8
+        client = MagicMock()
+        client.chat.completions.create.return_value = response
+        module = MagicMock()
+        module.Groq.return_value = client
+        return module
+
+    def test_dictionary_is_case_insensitive_and_respects_word_boundaries(self):
+        entries = [
+            {"spoken": "git", "replacement": "Git"},
+            {"spoken": "traflix", "replacement": "Traflix Voice"},
+        ]
+        result = apply_dictionary("uso GIT con traflix, non legittimo", entries)
+        self.assertEqual(result, "uso Git con Traflix Voice, non legittimo")
+
+    def test_cloud_cleanup_returns_llm_text_and_applies_dictionary(self):
+        fake_groq = self._fake_groq_module("Scrivo con traflix.")
+        logs = []
+        settings = {
+            "enabled": True,
+            "remove_fillers": True,
+            "dictionary_entries": [
+                {"spoken": "traflix", "replacement": "Traflix Voice"}
+            ],
+        }
+        with patch.dict(sys.modules, {"groq": fake_groq}), patch(
+            "whisper_engine.transcriber.httpx.Client"
+        ) as http_client:
+            http_client.return_value.__enter__.return_value = MagicMock()
+            result = improve_cloud_text("ehm scrivo con traflix", "gsk_test", settings, logs.append)
+        self.assertEqual(result, "Scrivo con Traflix Voice.")
+        self.assertTrue(any(item["status"] == "post_processed" for item in logs))
+
+    def test_dictionary_alone_still_uses_llm_for_phonetic_variants(self):
+        fake_groq = self._fake_groq_module("Uso Traflix Voice.")
+        logs = []
+        settings = {
+            "enabled": False,
+            "dictionary_entries": [
+                {
+                    "spoken": "Traflix Voice",
+                    "replacement": "Traflix Voice",
+                }
+            ],
+        }
+        with patch.dict(sys.modules, {"groq": fake_groq}), patch(
+            "whisper_engine.transcriber.httpx.Client"
+        ) as http_client:
+            http_client.return_value.__enter__.return_value = MagicMock()
+            result = improve_cloud_text("Uso traffic voice.", "gsk_test", settings, logs.append)
+        self.assertEqual(result, "Uso Traflix Voice.")
+
+    def test_prompt_transform_echoes_request_metadata(self):
+        fake_groq = self._fake_groq_module("Prompt migliorato")
+        logs = []
+        with patch.dict(sys.modules, {"groq": fake_groq}), patch(
+            "whisper_engine.transcriber.httpx.Client"
+        ) as http_client:
+            http_client.return_value.__enter__.return_value = MagicMock()
+            enhance_prompt("fai una pagina", "gsk_test", logs.append, "req-1")
+        self.assertEqual(
+            logs[-1],
+            {
+                "status": "transformed",
+                "text": "Prompt migliorato",
+                "request_id": "req-1",
+            },
+        )
 
 
 if __name__ == "__main__":

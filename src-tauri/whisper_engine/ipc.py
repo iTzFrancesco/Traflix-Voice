@@ -44,7 +44,16 @@ def handle_command(cmd, data, engine):
     elif cmd == "transcribe":
         engine.provider = data.get("provider", "local")
         threading.Thread(target=engine.transcribe,
-                         args=(data.get("device"), data.get("model", "small"), data.get("language", "it"))).start()
+                         args=(data.get("device"), data.get("model", "small"), data.get("language", "it"), data.get("post_processing", {}))).start()
+    elif cmd == "transform_prompt":
+        threading.Thread(
+            target=engine.transform_prompt,
+            args=(
+                data.get("text", ""),
+                data.get("request_id", ""),
+            ),
+            daemon=True,
+        ).start()
     elif cmd == "stop":
         engine.is_recording = False
     elif cmd == "set_device":

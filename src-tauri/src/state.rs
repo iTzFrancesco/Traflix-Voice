@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 use tauri_plugin_shell::process::CommandChild;
 
 // ─── STRUTTURE DATI ──────────────────────────────────────────────────────────
@@ -30,12 +31,24 @@ pub struct AppSettings {
     pub provider: String,
     #[serde(rename = "widgetMode", default = "default_widget_mode")]
     pub widget_mode: String,
+    #[serde(rename = "cloudPostProcessing", default)]
+    pub cloud_post_processing: bool,
+    #[serde(rename = "removeFillers", default = "default_remove_fillers")]
+    pub remove_fillers: bool,
+    #[serde(rename = "dictionaryEntries", default)]
+    pub dictionary_entries: Vec<DictionaryEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DictionaryEntry {
+    pub id: String,
+    pub spoken: String,
+    pub replacement: String,
 }
 
 fn default_language() -> String {
     "it".to_string()
 }
-
 fn default_compute_device() -> String {
     "cpu".to_string()
 }
@@ -55,6 +68,9 @@ fn default_provider() -> String {
 fn default_widget_mode() -> String {
     "always".to_string()
 }
+fn default_remove_fillers() -> bool {
+    true
+}
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -71,6 +87,9 @@ impl Default for AppSettings {
             groq_api_key: String::new(),
             provider: "local".to_string(),
             widget_mode: "always".to_string(),
+            cloud_post_processing: false,
+            remove_fillers: true,
+            dictionary_entries: Vec::new(),
         }
     }
 }
@@ -120,6 +139,19 @@ pub struct AudioDeviceInfo {
     pub name: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct LastPasteTarget {
+    pub paste_id: String,
+    pub window_handle: isize,
+    pub created_at: Instant,
+}
+
+impl LastPasteTarget {
+    pub fn can_replace(&self, paste_id: &str, max_age: std::time::Duration) -> bool {
+        self.paste_id == paste_id && self.created_at.elapsed() <= max_age
+    }
+}
+
 // ─── STATO APP ───────────────────────────────────────────────────────────────
 
 pub struct AppState {
@@ -131,6 +163,7 @@ pub struct AppState {
     #[allow(dead_code)]
     pub models_dir: PathBuf,
     pub groq_usage_path: PathBuf,
+    pub last_paste_target: Mutex<Option<LastPasteTarget>>,
     pub hotkey_config: Arc<RwLock<Vec<HotkeyConfig>>>,
     pub is_shutting_down: AtomicBool,
 }
@@ -138,4 +171,27 @@ pub struct AppState {
 #[derive(Debug, Clone)]
 pub struct HotkeyConfig {
     pub vk_codes: Vec<i32>,
+}
+
+#[cfg(test)]
+mod last_paste_tests {
+    use super::LastPasteTarget;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn replacement_requires_matching_id_and_fresh_target() {
+        let fresh = LastPasteTarget {
+            paste_id: "paste-1".to_string(),
+            window_handle: 42,
+            created_at: Instant::now(),
+        };
+        assert!(fresh.can_replace("paste-1", Duration::from_secs(60)));
+        assert!(!fresh.can_replace("paste-2", Duration::from_secs(60)));
+
+        let expired = LastPasteTarget {
+            created_at: Instant::now() - Duration::from_secs(61),
+            ..fresh
+        };
+        assert!(!expired.can_replace("paste-1", Duration::from_secs(60)));
+    }
 }

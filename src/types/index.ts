@@ -11,6 +11,15 @@ export interface AppSettings {
   groqApiKey: string;
   provider: string;
   widgetMode?: string;
+  cloudPostProcessing?: boolean;
+  removeFillers?: boolean;
+  dictionaryEntries?: DictionaryEntry[];
+}
+
+export interface DictionaryEntry {
+  id: string;
+  spoken: string;
+  replacement: string;
 }
 
 export interface AppStats {
@@ -64,6 +73,7 @@ export interface PythonEvent {
   current_device?: string;
   device_name?: string;
   cuda_available?: boolean;
+  request_id?: string;
 }
 
 export type Provider = "local" | "cloud";
