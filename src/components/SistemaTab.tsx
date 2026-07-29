@@ -20,6 +20,24 @@ export default function SistemaTab({
       <header className="mb-6"><p className="eyebrow m-0 mb-2">Ambiente di lavoro</p><h1 className="page-title m-0">Sistema</h1><p className="m-0 mt-2 text-[.84rem] text-[var(--muted)]">Audio, lingua, prestazioni e credenziali Cloud.</p></header>
 
       <div className="panel p-5 mb-4">
+        <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-white/[.08] bg-black/20 p-4">
+          <div>
+            <label className="text-[0.9rem] font-bold text-[#ccc]" htmlFor="auto-paste">
+              Incolla automaticamente
+            </label>
+            <p className="m-0 mt-1 text-[.78rem] leading-5 text-[var(--muted)]">
+              Necessario per sostituire il testo con Prompt Engineer. Se disattivato, la trascrizione viene solo copiata.
+            </p>
+          </div>
+          <input
+            id="auto-paste"
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--accent)]"
+            checked={settings?.autoPaste ?? true}
+            onChange={(event) => onSettingChange("autoPaste", event.target.checked)}
+          />
+        </div>
+
         {/* Audio Device */}
         <div className="mb-6 flex flex-col gap-2">
           <label className="text-[0.9rem] font-bold text-[#ccc]" htmlFor="audio-device">
