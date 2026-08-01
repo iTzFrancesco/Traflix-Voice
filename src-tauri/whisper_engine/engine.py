@@ -66,9 +66,9 @@ class WhisperEngine:
     def audio_callback(self, indata, frames, time, status):
         audio_module.audio_callback(indata, frames, time, status, self.audio_queue, self.is_recording, self.log)
 
-    def _transcribe_cloud(self, recording, language, recording_duration, post_processing):
+    def _transcribe_cloud(self, recording, language, recording_duration):
         transcriber.transcribe_cloud(recording, language, recording_duration, self.groq_api_key,
-                                     self._shutting_down, self.log, self.models_dir, post_processing)
+                                     self._shutting_down, self.log, self.models_dir)
 
     def _transcribe_local(self, recording, model_size, language, recording_duration):
         with self._model_lock:
@@ -79,7 +79,7 @@ class WhisperEngine:
         transcriber.transcribe_local(model, recording, language, recording_duration,
                                      self._shutting_down, self.log)
 
-    def transcribe(self, device_id, model_size, language="it", post_processing=None):
+    def transcribe(self, device_id, model_size, language="it"):
         try:
             if self.provider == "local":
                 self.load_model(model_size)
@@ -113,23 +113,12 @@ class WhisperEngine:
             recording = np.concatenate(audio_data, axis=0).flatten().astype(np.float32)
 
             if self.provider == "cloud":
-                self._transcribe_cloud(recording, language, recording_duration, post_processing or {})
+                self._transcribe_cloud(recording, language, recording_duration)
             else:
                 self._transcribe_local(recording, model_size, language, recording_duration)
 
         except Exception as e:
             self.log({"status": "error", "message": str(e)})
-
-    def transform_prompt(self, text, request_id=""):
-        if not self.groq_api_key:
-            self.log({
-                "status": "transform_error",
-                "message": "Groq API key non configurata.",
-                "request_id": request_id,
-            })
-            return
-        self.log({"status": "transforming", "message": "Prompt Engineer in corso..."})
-        transcriber.enhance_prompt(text, self.groq_api_key, self.log, request_id)
 
     def run(self):
         self.log({"status": "starting", "message": "Avvio motore vocale..."})

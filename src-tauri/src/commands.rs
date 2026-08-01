@@ -3,12 +3,11 @@ use log::info;
 use std::fs;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
-use crate::clipboard::{focus_window, foreground_window, simulate_ctrl_v, simulate_ctrl_z};
+use crate::clipboard::simulate_ctrl_v;
 use crate::hotkey::parse_hotkey;
 use crate::settings::{atomic_write, ensure_app_data_dir, load_settings_from_file};
 use crate::state::{
-    AppSettings, AppState, AppStats, AudioDeviceInfo, GroqUsage, LastPasteTarget,
-    TranscriptionEntry,
+    AppSettings, AppState, AppStats, AudioDeviceInfo, GroqUsage, TranscriptionEntry,
 };
 
 // ─── COMANDI TAURI ───────────────────────────────────────────────────────────
@@ -136,17 +135,11 @@ pub async fn send_to_python(state: State<'_, AppState>, message: String) -> Resu
 
 /// Copia il testo negli appunti, simula Ctrl+V, poi ripristina il contenuto precedente
 #[tauri::command]
-pub async fn execute_paste<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, AppState>,
-    text: String,
-    paste_id: String,
-) -> Result<(), String> {
+pub async fn execute_paste<R: Runtime>(app: AppHandle<R>, text: String) -> Result<(), String> {
     use std::{thread, time::Duration};
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
     let previous = app.clipboard().read_text().ok();
-    let target_window = foreground_window();
 
     app.clipboard()
         .write_text(text)
@@ -155,11 +148,6 @@ pub async fn execute_paste<R: Runtime>(
     thread::sleep(Duration::from_millis(50));
 
     simulate_ctrl_v();
-    *state.last_paste_target.lock().unwrap() = Some(LastPasteTarget {
-        paste_id,
-        window_handle: target_window,
-        created_at: std::time::Instant::now(),
-    });
 
     thread::sleep(Duration::from_millis(100));
 
@@ -167,47 +155,6 @@ pub async fn execute_paste<R: Runtime>(
         let _ = app.clipboard().write_text(prev);
     }
 
-    Ok(())
-}
-
-/// Replaces the immediately preceding Traflix paste. Callers must enforce a short safety window.
-#[tauri::command]
-pub async fn replace_last_paste<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, AppState>,
-    text: String,
-    paste_id: String,
-) -> Result<(), String> {
-    use std::{thread, time::Duration};
-    use tauri_plugin_clipboard_manager::ClipboardExt;
-    let target = state
-        .last_paste_target
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| "Nessuna incollatura Traflix sostituibile".to_string())?;
-    if target.paste_id != paste_id {
-        return Err("La dettatura non è più quella attiva".to_string());
-    }
-    if !target.can_replace(&paste_id, Duration::from_secs(60)) {
-        *state.last_paste_target.lock().unwrap() = None;
-        return Err("La finestra di sostituzione è scaduta".to_string());
-    }
-    if !focus_window(target.window_handle) {
-        return Err("La finestra di destinazione non è più disponibile".to_string());
-    }
-    thread::sleep(Duration::from_millis(80));
-    let previous = app.clipboard().read_text().ok();
-    app.clipboard()
-        .write_text(text)
-        .map_err(|e| e.to_string())?;
-    simulate_ctrl_z();
-    thread::sleep(Duration::from_millis(90));
-    simulate_ctrl_v();
-    thread::sleep(Duration::from_millis(100));
-    if let Some(previous) = previous {
-        let _ = app.clipboard().write_text(previous);
-    }
     Ok(())
 }
 

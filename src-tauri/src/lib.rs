@@ -60,7 +60,6 @@ pub fn run() {
                 history_path,
                 models_dir: models_dir.clone(),
                 groq_usage_path: groq_usage_path.clone(),
-                last_paste_target: Mutex::new(None),
                 hotkey_config: hotkey_config.clone(),
                 is_shutting_down: AtomicBool::new(false),
             });
@@ -74,11 +73,15 @@ pub fn run() {
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(16));
 
-                    let all_pressed = hotkey_config
-                        .read()
-                        .unwrap()
+                    let config = hotkey_config.read().unwrap();
+                    if config.is_empty() {
+                        drop(config);
+                        continue;
+                    }
+                    let all_pressed = config
                         .iter()
                         .any(|hotkey| hotkey.vk_codes.iter().all(|&vk| is_key_pressed(vk)));
+                    drop(config);
 
                     if all_pressed
                         && !hotkey_active
@@ -361,7 +364,6 @@ pub fn run() {
             send_to_python,
             check_model_exists,
             execute_paste,
-            replace_last_paste,
             save_transcription,
             get_history,
             clear_history,
@@ -431,9 +433,6 @@ mod tests {
             groq_api_key: String::new(),
             provider: "local".to_string(),
             widget_mode: "always".to_string(),
-            cloud_post_processing: false,
-            remove_fillers: true,
-            dictionary_entries: Vec::new(),
         };
 
         let json = serde_json::to_string_pretty(&original).unwrap();

@@ -15,8 +15,6 @@ const statusMeta: Record<string, { label: string; tone: string }> = {
   loading_model: { label: "Caricamento modello", tone: "#ff9d24" },
   listening: { label: "Registrazione in corso", tone: "#ff626b" },
   processing: { label: "Elaborazione trascrizione", tone: "#ff9d24" },
-  transforming: { label: "Trasformazione testo", tone: "#ff9d24" },
-  transformed: { label: "Pronto", tone: "#55d89b" },
   ready: { label: "Pronto", tone: "#55d89b" },
   result: { label: "Pronto", tone: "#55d89b" },
   error: { label: "Errore del motore", tone: "#ff626b" },
