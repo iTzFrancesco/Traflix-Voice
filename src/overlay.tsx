@@ -29,15 +29,16 @@ function Overlay() {
     const style = document.createElement("style");
     style.textContent = `
       * { margin:0; padding:0; box-sizing:border-box; }
-      html,body { background:transparent; overflow:hidden; user-select:none; -webkit-user-select:none; }
+      html,body { width:100%; height:100%; background:transparent; overflow:hidden; user-select:none; -webkit-user-select:none; }
+      #overlay-root { width:100%; height:100%; display:flex; align-items:center; justify-content:flex-start; }
       @keyframes spin { to { transform:rotate(360deg); } }
-      .ow { height:38px; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; transition:all 0.3s cubic-bezier(0.4,0,0.2,1); }
+      .ow { height:38px; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; transition:border-color 0.3s cubic-bezier(0.4,0,0.2,1),box-shadow 0.3s cubic-bezier(0.4,0,0.2,1); }
       .ow:active { cursor:grabbing; }
       .ow:hover { border-color:rgba(255,140,0,0.5); box-shadow:0 0 10px rgba(255,140,0,0.1); }
       .ow.rec { border-color:rgba(255,140,0,0.5); box-shadow:0 0 12px rgba(255,140,0,0.12); }
       .ow.proc { border-color:rgba(255,140,0,0.3); }
-      .lbl { font-size:0.82rem; font-weight:800; white-space:nowrap; letter-spacing:0.3px; background:linear-gradient(135deg,#ff8c00 0%,#ffb347 50%,#ff8c00 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; transition:opacity 0.25s ease,width 0.3s ease,margin 0.3s ease; overflow:hidden; }
-      .ow.rec .lbl, .ow.proc .lbl { opacity:0; width:0px !important; margin:0; }
+      .lbl { font-size:0.82rem; font-weight:800; white-space:nowrap; letter-spacing:0.3px; background:linear-gradient(135deg,#ff8c00 0%,#ffb347 50%,#ff8c00 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; max-width:90px; transition:opacity 0.25s ease,max-width 0.3s cubic-bezier(0.4,0,0.2,1),margin 0.3s ease; overflow:hidden; flex-shrink:0; }
+      .ow.rec .lbl, .ow.proc .lbl { opacity:0; max-width:0; margin:0; }
       .spw { display:flex; align-items:center; justify-content:center; width:0px; overflow:hidden; opacity:0; transition:width 0.3s cubic-bezier(0.4,0,0.2,1),opacity 0.25s ease; }
       .ow.proc .spw { width:20px; opacity:1; }
       .spr { width:16px; height:16px; border:2px solid transparent; border-top-color:#ff8c00; border-right-color:rgba(255,140,0,0.3); border-radius:50%; animation:spin 0.9s cubic-bezier(0.4,0,0.2,1) infinite; flex-shrink:0; }
@@ -62,7 +63,6 @@ function Overlay() {
 
     const widget = root.firstElementChild as HTMLDivElement;
     const vizWrap = widget.querySelector(".vw") as HTMLDivElement;
-    const lbl = widget.querySelector(".lbl") as HTMLSpanElement;
     const versionMeta = widget.querySelector("#version-meta") as HTMLSpanElement;
 
     if (window.__TAURI__?.app?.getVersion) {
@@ -78,32 +78,69 @@ function Overlay() {
       bars.push(bar);
     }
 
-    function resizeToFit() {
-      requestAnimationFrame(() => {
-        const w = widget.offsetWidth + 4;
-        const h = widget.offsetHeight + 4;
-        if (window.__TAURI__?.window?.getCurrentWindow) {
-          const aw = window.__TAURI__.window.getCurrentWindow();
-          if (window.__TAURI__.window?.LogicalSize) {
-            aw.setSize(new window.__TAURI__.window.LogicalSize(w, h)).catch(() => {});
-          }
-        }
-      });
+    // ── SHOW / HIDE WINDOW BASED ON WIDGET MODE ──
+    let requestedVisibility: boolean | null = null;
+    let visibilityQueue = Promise.resolve();
+
+    function syncOverlayVisibility() {
+      if (!window.__TAURI__?.window?.getCurrentWindow) return;
+
+      // In "always" mode Rust owns visibility. Invalidating the requested
+      // target prevents an older queued hide/show from winning after a mode
+      // switch.
+      if (widgetMode !== "recording") {
+        requestedVisibility = null;
+        return;
+      }
+
+      const shouldShow = isListening || isProcessing;
+      if (requestedVisibility === shouldShow) return;
+      requestedVisibility = shouldShow;
+
+      const win = window.__TAURI__.window.getCurrentWindow();
+      visibilityQueue = visibilityQueue
+        .catch(() => {})
+        .then(async () => {
+          // A newer state may have superseded this request while it waited in
+          // the queue. The newer request will perform the native operation.
+          if (widgetMode !== "recording" || requestedVisibility !== shouldShow) return;
+          if (shouldShow) await win.show();
+          else await win.hide();
+        })
+        .catch(() => {});
     }
 
-    // ── SHOW / HIDE WINDOW BASED ON WIDGET MODE ──
-    async function syncOverlayVisibility() {
-      if (!window.__TAURI__?.window?.getCurrentWindow) return;
-      const win = window.__TAURI__.window.getCurrentWindow();
-      if (widgetMode === "recording") {
-        // Show only if recording is active
-        if (isListening || isProcessing) {
-          await win.show().catch(() => {});
-        } else {
-          await win.hide().catch(() => {});
-        }
+    type WidgetVisualState = "idle" | "recording" | "processing";
+    let visualState: WidgetVisualState = "idle";
+
+    function applyVisualState(nextState: WidgetVisualState) {
+      const stateChanged = visualState !== nextState;
+      visualState = nextState;
+      isListening = nextState === "recording";
+      isProcessing = nextState === "processing";
+      targetVolume = nextState === "recording" ? targetVolume : 0;
+
+      if (!stateChanged) {
+        // Duplicate events must not replay sounds or trigger native work.
+        return;
       }
-      // If mode is "always", visibility is managed by Rust (don't override)
+
+      if (nextState === "recording") {
+        widget.className = "ow rec";
+        widget.setAttribute("aria-label", "Traflix Voice. Registrazione in corso. Doppio clic per aprire la console");
+        startSound.currentTime = 0;
+        startSound.play().catch(() => {});
+      } else if (nextState === "processing") {
+        widget.className = "ow proc";
+        widget.setAttribute("aria-label", "Traflix Voice. Elaborazione della trascrizione. Doppio clic per aprire la console");
+        stopSound.currentTime = 0;
+        stopSound.play().catch(() => {});
+      } else {
+        widget.className = "ow";
+        widget.setAttribute("aria-label", "Traflix Voice pronta. Doppio clic per aprire la console");
+      }
+
+      syncOverlayVisibility();
     }
 
     // ── MOUSE CLICK (double-click to show main) ──
@@ -135,6 +172,7 @@ function Overlay() {
       .listen("widget_mode_updated", (event: { payload: unknown }) => {
         const mode = event.payload as string;
         widgetMode = mode === "recording" ? "recording" : "always";
+        requestedVisibility = null;
         syncOverlayVisibility();
       })
       .then((fn) => {
@@ -148,44 +186,11 @@ function Overlay() {
           const data = JSON.parse(event.payload as string);
 
           if (data.status === "listening") {
-            isListening = true;
-            isProcessing = false;
-            widget.className = "ow rec";
-            widget.setAttribute("aria-label", "Traflix Voice. Registrazione in corso. Doppio clic per aprire la console");
-            startSound.currentTime = 0;
-            startSound.play().catch(() => {});
-            syncOverlayVisibility();
-            setTimeout(resizeToFit, 350);
+            applyVisualState("recording");
           } else if (data.status === "processing") {
-            isListening = false;
-            isProcessing = true;
-            widget.className = "ow proc";
-            widget.setAttribute("aria-label", "Traflix Voice. Elaborazione della trascrizione. Doppio clic per aprire la console");
-            targetVolume = 0;
-            stopSound.currentTime = 0;
-            stopSound.play().catch(() => {});
-            syncOverlayVisibility();
-            setTimeout(resizeToFit, 350);
-          } else if (data.status === "result" || data.status === "ready") {
-            isListening = false;
-            isProcessing = false;
-            if (widget.classList.contains("rec") || widget.classList.contains("proc")) {
-              widget.className = "ow";
-              widget.setAttribute("aria-label", "Traflix Voice pronta. Doppio clic per aprire la console");
-              targetVolume = 0;
-              syncOverlayVisibility();
-              setTimeout(resizeToFit, 350);
-            }
-          } else if (data.status === "error" || data.status === "rate_limit") {
-            isListening = false;
-            isProcessing = false;
-            if (widget.classList.contains("rec") || widget.classList.contains("proc")) {
-              widget.className = "ow";
-              widget.setAttribute("aria-label", "Traflix Voice pronta. Doppio clic per aprire la console");
-              targetVolume = 0;
-              syncOverlayVisibility();
-              setTimeout(resizeToFit, 350);
-            }
+            applyVisualState("processing");
+          } else if (data.status === "result" || data.status === "ready" || data.status === "error" || data.status === "rate_limit") {
+            applyVisualState("idle");
           } else if (data.status === "volume") {
             targetVolume = data.value;
           }
@@ -238,7 +243,6 @@ function Overlay() {
     }
 
     animate();
-    resizeToFit();
 
     return () => {
       overlayCancelled = true;

@@ -12,14 +12,12 @@ declare global {
       };
       window: {
         getCurrentWindow: () => {
-          setSize: (size: { width: number; height: number }) => Promise<void>;
           startDragging: () => Promise<void>;
           show: () => Promise<void>;
           hide: () => Promise<void>;
           center: () => Promise<void>;
           setFocus: () => Promise<void>;
         };
-        LogicalSize: new (width: number, height: number) => { width: number; height: number };
       };
       app: {
         getVersion: () => Promise<string>;
