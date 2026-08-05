@@ -2,7 +2,6 @@ mod commands;
 mod hotkey;
 mod settings;
 mod state;
-mod voice_bridge;
 
 #[cfg(windows)]
 mod clipboard;
@@ -32,8 +31,6 @@ use tauri_plugin_shell::ShellExt;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let space_integration_mode =
-                std::env::args().any(|argument| argument == "--space-integration");
             let app_data_dir = app
                 .path()
                 .app_data_dir()
@@ -66,8 +63,6 @@ pub fn run() {
                 hotkey_config: hotkey_config.clone(),
                 is_shutting_down: AtomicBool::new(false),
             });
-            app.manage(voice_bridge::VoiceBridgeState::new());
-            voice_bridge::start(app.handle().clone());
 
             // Hotkey polling via GetAsyncKeyState (~60Hz, no hooks, no message pump)
             let app_handle_kb = app.handle().clone();
@@ -194,9 +189,8 @@ pub fn run() {
                     // Read stdout until the process exits (rx channel closes)
                     while let Some(event) = rx.blocking_recv() {
                         if let tauri_plugin_shell::process::CommandEvent::Stdout(line) = event {
-                            let line = String::from_utf8_lossy(&line).to_string();
-                            let _ = app_handle.emit("python_output", line.clone());
-                            voice_bridge::publish_python_output(&app_handle, &line);
+                            let _ = app_handle
+                                .emit("python_output", String::from_utf8_lossy(&line).to_string());
                         }
                     }
 
@@ -299,10 +293,7 @@ pub fn run() {
                 if mode == "always" {
                     if let Some(main_win) = app_handle_wm.get_webview_window("main") {
                         let is_visible = main_win.is_visible().unwrap_or(false);
-                        let bridge_attached = app_handle_wm
-                            .state::<voice_bridge::VoiceBridgeState>()
-                            .is_attached();
-                        if !is_visible && !bridge_attached {
+                        if !is_visible {
                             if let Some(overlay) = app_handle_wm.get_webview_window("overlay") {
                                 let _ = overlay.show();
                             }
@@ -327,17 +318,6 @@ pub fn run() {
                 }
             });
 
-            // Space integration is opt-in. It only changes initial visibility;
-            // Voice keeps the normal tray, hotkey, settings and engine paths.
-            if space_integration_mode {
-                if let Some(main_win) = app.get_webview_window("main") {
-                    let _ = main_win.hide();
-                }
-                if let Some(overlay) = app.get_webview_window("overlay") {
-                    let _ = overlay.hide();
-                }
-            }
-
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -349,10 +329,7 @@ pub fn run() {
                     let app_handle = window.app_handle();
                     let app_state = app_handle.state::<AppState>();
                     let settings = load_settings_from_file(&app_state.settings_path);
-                    let bridge_attached = app_handle
-                        .state::<voice_bridge::VoiceBridgeState>()
-                        .is_attached();
-                    if settings.widget_mode == "always" && !bridge_attached {
+                    if settings.widget_mode == "always" {
                         if let Some(overlay) = app_handle.get_webview_window("overlay") {
                             let _ = overlay.show();
                             let _ = overlay.set_focus();
@@ -369,15 +346,10 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            let integration_mode = args.iter().any(|arg| arg == "--space-integration");
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(main_win) = app.get_webview_window("main") {
-                if integration_mode {
-                    let _ = main_win.hide();
-                } else {
-                    let _ = main_win.show();
-                    let _ = main_win.set_focus();
-                }
+                let _ = main_win.show();
+                let _ = main_win.set_focus();
             }
             if let Some(overlay) = app.get_webview_window("overlay") {
                 let _ = overlay.hide();
