@@ -121,7 +121,7 @@ pub fn check_model_exists(app: AppHandle, model_id: String) -> bool {
 
 /// Invia un comando al processo Python
 #[tauri::command]
-pub async fn send_to_python(state: State<'_, AppState>, message: String) -> Result<(), String> {
+pub fn send_to_python(state: State<'_, AppState>, message: String) -> Result<(), String> {
     let mut payload = message.into_bytes();
     payload.push(b'\n');
     write_to_python(state, &payload)
