@@ -21,6 +21,27 @@ _TRAF_DEBUG = os.environ.get("TRAF_DEBUG") == "1"
 _GROQ_CLIENT = None
 _GROQ_CLIENT_KEY = None
 _GROQ_CLIENT_LOCK = threading.Lock()
+_MULTIPART_BOUNDARY = GROQ_MULTIPART_BOUNDARY.encode("ascii")
+_MODEL_FIELD = (
+    b"--" + _MULTIPART_BOUNDARY + b"\r\n"
+    b'Content-Disposition: form-data; name="model"\r\n\r\n'
+    + GROQ_MODEL.encode("ascii")
+    + b"\r\n"
+)
+_RESPONSE_FORMAT_FIELD = (
+    b"--" + _MULTIPART_BOUNDARY + b"\r\n"
+    b'Content-Disposition: form-data; name="response_format"\r\n\r\ntext\r\n'
+)
+_LANGUAGE_FIELD_PREFIX = (
+    b"--" + _MULTIPART_BOUNDARY + b"\r\n"
+    b'Content-Disposition: form-data; name="language"\r\n\r\n'
+)
+_FILE_FIELD_PREFIX = (
+    b"--" + _MULTIPART_BOUNDARY + b"\r\n"
+    b'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n'
+    b"Content-Type: audio/wav\r\n\r\n"
+)
+_MULTIPART_SUFFIX = b"\r\n--" + _MULTIPART_BOUNDARY + b"--\r\n"
 
 
 def create_groq_client(groq_api_key):
@@ -103,41 +124,11 @@ def encode_wav(recording):
 
 def encode_cloud_multipart(wav_buffer, language):
     """Build the fixed cloud multipart envelope without HTTPX re-encoding it."""
-    boundary = GROQ_MULTIPART_BOUNDARY.encode("ascii")
-    parts = []
-
-    for name, value in (
-        ("model", GROQ_MODEL),
-        ("response_format", "text"),
-    ):
-        parts.extend(
-            (
-                b"--" + boundary + b"\r\n",
-                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(
-                    "ascii"
-                ),
-                value.encode("ascii") + b"\r\n",
-            )
-        )
-
+    parts = [_MODEL_FIELD, _RESPONSE_FORMAT_FIELD]
     if language:
-        parts.extend(
-            (
-                b"--" + boundary + b"\r\n",
-                b'Content-Disposition: form-data; name="language"\r\n\r\n',
-                language.encode("utf-8") + b"\r\n",
-            )
-        )
+        parts.extend((_LANGUAGE_FIELD_PREFIX, language.encode("utf-8") + b"\r\n"))
 
-    parts.extend(
-        (
-            b"--" + boundary + b"\r\n",
-            b'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n',
-            b"Content-Type: audio/wav\r\n\r\n",
-            wav_buffer.getvalue(),
-            b"\r\n--" + boundary + b"--\r\n",
-        )
-    )
+    parts.extend((_FILE_FIELD_PREFIX, wav_buffer.getvalue(), _MULTIPART_SUFFIX))
     return b"".join(parts)
 
 
