@@ -27,6 +27,8 @@ use tauri_plugin_shell::ShellExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    const HOTKEY_POLL_INTERVAL_MS: u64 = 8;
+
     tauri::Builder::default()
         .setup(|app| {
             let app_data_dir = app
@@ -69,7 +71,7 @@ pub fn run() {
                 let mut last_emit: std::time::Instant = std::time::Instant::now();
 
                 loop {
-                    std::thread::sleep(std::time::Duration::from_millis(16));
+                    std::thread::sleep(std::time::Duration::from_millis(HOTKEY_POLL_INTERVAL_MS));
 
                     let config = hotkey_config.read().unwrap();
                     if config.is_empty() {
