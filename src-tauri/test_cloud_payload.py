@@ -32,8 +32,15 @@ class TestCloudPayload(unittest.TestCase):
         self.assertGreater(trimmed.size, quiet_speech.size)
         self.assertTrue(np.any(trimmed == 0.005))
 
-    def test_trim_cloud_silence_leaves_empty_audio_unchanged(self):
+    def test_trim_cloud_silence_returns_empty_view_for_silence(self):
         recording = np.zeros(4000, dtype=np.float32)
+        trimmed = trim_cloud_silence(recording)
+
+        self.assertEqual(trimmed.size, 0)
+        self.assertFalse(trimmed.flags.owndata)
+
+    def test_trim_cloud_silence_leaves_empty_input_unchanged(self):
+        recording = np.array([], dtype=np.float32)
         self.assertIs(trim_cloud_silence(recording), recording)
 
     def test_encode_wav_matches_groq_audio_contract(self):

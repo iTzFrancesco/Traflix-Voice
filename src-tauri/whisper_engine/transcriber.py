@@ -146,7 +146,7 @@ def trim_cloud_silence(recording):
         return recording
 
     if not np.any(recording >= threshold) and not np.any(recording <= -threshold):
-        return recording
+        return recording[:0]
 
     active = (recording >= threshold) | (recording <= -threshold)
     padding = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
@@ -195,12 +195,9 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
 
     try:
         cloud_recording = trim_cloud_silence(recording)
-        if cloud_recording is recording:
-            has_positive = np.any(recording >= CLOUD_SILENCE_THRESHOLD)
-            has_negative = np.any(recording <= -CLOUD_SILENCE_THRESHOLD)
-            if not has_positive and not has_negative:
-                log_func({"status": "ready", "message": "Nessun audio riconosciuto."})
-                return
+        if cloud_recording.size == 0:
+            log_func({"status": "ready", "message": "Nessun audio riconosciuto."})
+            return
 
         buffer = encode_cloud_multipart(
             encode_wav(cloud_recording),
