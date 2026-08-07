@@ -155,7 +155,9 @@ pub async fn execute_paste<R: Runtime>(app: AppHandle<R>, text: String) -> Resul
         .write_text(text)
         .map_err(|e| e.to_string())?;
 
-    thread::sleep(Duration::from_millis(50));
+    // ClipboardManager::write_text is synchronous; a short settle window is
+    // enough before SendInput and avoids adding 30 ms to every paste.
+    thread::sleep(Duration::from_millis(20));
 
     simulate_ctrl_v();
 
