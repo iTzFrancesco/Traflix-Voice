@@ -6,7 +6,12 @@ import httpx
 import numpy as np
 import concurrent.futures
 
-from whisper_engine.constants import SAMPLE_RATE, TRANSCRIPTION_TIMEOUT, GROQ_MODEL
+from whisper_engine.constants import (
+    GROQ_MODEL,
+    GROQ_TRANSCRIPTION_URL,
+    SAMPLE_RATE,
+    TRANSCRIPTION_TIMEOUT,
+)
 from whisper_engine.groq_tracker import record_groq_usage
 
 _TRAF_DEBUG = os.environ.get("TRAF_DEBUG") == "1"
@@ -16,24 +21,19 @@ _GROQ_CLIENT_LOCK = threading.Lock()
 
 
 def create_groq_client(groq_api_key):
-    """Create one configured client; callers can safely reuse it."""
-    from groq import Groq
-
-    return Groq(
-        api_key=groq_api_key,
-        http_client=httpx.Client(
-            timeout=httpx.Timeout(30.0, connect=10.0, read=25.0),
-            limits=httpx.Limits(
-                max_connections=2,
-                max_keepalive_connections=1,
-                keepalive_expiry=60.0,
-            ),
+    """Create one persistent HTTP client for the Groq endpoint."""
+    return httpx.Client(
+        timeout=httpx.Timeout(30.0, connect=10.0, read=25.0),
+        limits=httpx.Limits(
+            max_connections=2,
+            max_keepalive_connections=1,
+            keepalive_expiry=60.0,
         ),
     )
 
 
 def get_groq_client(groq_api_key):
-    """Return a keep-alive client, rebuilding it only when the key changes."""
+    """Return a keep-alive HTTP client, rebuilding it only when the key changes."""
     global _GROQ_CLIENT, _GROQ_CLIENT_KEY
 
     with _GROQ_CLIENT_LOCK:
@@ -134,15 +134,22 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
         client = get_groq_client(groq_api_key)
         lang_param = language if language != "auto" else None
 
-        transcription = client.audio.transcriptions.create(
-            model=GROQ_MODEL,
-            file=("audio.wav", buffer, "audio/wav"),
-            language=lang_param,
-            response_format="text",
-        )
+        form_data = {
+            "model": GROQ_MODEL,
+            "response_format": "text",
+        }
+        if lang_param:
+            form_data["language"] = lang_param
 
-        text = transcription if isinstance(transcription, str) else transcription.text
-        text = text.strip()
+        response = client.post(
+            GROQ_TRANSCRIPTION_URL,
+            headers={"Authorization": f"Bearer {groq_api_key}"},
+            files={"file": ("audio.wav", buffer, "audio/wav")},
+            data=form_data,
+        )
+        response.raise_for_status()
+
+        text = response.text.strip()
 
         if _TRAF_DEBUG:
             import sys as _sys

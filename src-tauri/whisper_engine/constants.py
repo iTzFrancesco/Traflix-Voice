@@ -4,6 +4,7 @@ SAMPLE_RATE = 16000
 BLOCK_SIZE = 2048
 TRANSCRIPTION_TIMEOUT = 60
 GROQ_MODEL = "whisper-large-v3-turbo"
+GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 # Meter calibration shared by every audio block. Keeping the thresholds in dB
 # makes the reported value independent from the number of samples in a block.

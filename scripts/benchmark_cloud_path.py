@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Benchmark the Cloud/Groq request path without making a network request.
 
-The fake Groq adapter keeps the measurement focused on client construction and
-audio payload preparation. Network latency must be measured separately with a
-real API key and is intentionally not part of this deterministic benchmark.
+The fake HTTP transport keeps the measurement focused on client construction
+and audio payload preparation. Network latency must be measured separately
+with a real API key and is intentionally not part of this deterministic
+benchmark.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import time
 import types
 from pathlib import Path
 
+import httpx
 import numpy as np
 
 
@@ -42,6 +44,16 @@ fake_groq.Groq = _FakeGroq
 sys.modules["groq"] = fake_groq
 
 from whisper_engine import transcriber  # noqa: E402
+
+
+def _fake_http_client(_api_key):
+    def handler(request):
+        return httpx.Response(200, text="testo simulato", request=request)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+transcriber.create_groq_client = _fake_http_client
 
 
 def run_once(recording: np.ndarray) -> None:

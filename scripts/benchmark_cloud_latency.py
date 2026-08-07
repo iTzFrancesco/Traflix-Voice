@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Measure stop-to-request latency through the Python Cloud path.
 
-The audio stream and Groq response are deterministic fakes, but the benchmark
-uses the real engine, IPC stop command, queue drain, WAV preparation, cached
-client and result handling. It intentionally excludes network time.
+The audio stream and Groq HTTP response are deterministic fakes, but the
+benchmark uses the real engine, IPC stop command, queue drain, WAV
+preparation, cached client and result handling. It intentionally excludes
+network time.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import time
 import types
 from pathlib import Path
 
+import httpx
 import numpy as np
 
 
@@ -56,6 +58,18 @@ from whisper_engine import engine as engine_module  # noqa: E402
 from whisper_engine import transcriber  # noqa: E402
 from whisper_engine.constants import BLOCK_SIZE  # noqa: E402
 from whisper_engine.ipc import handle_command  # noqa: E402
+
+
+def _fake_http_client(_api_key):
+    def handler(request):
+        if _request_event is not None:
+            _request_event.set()
+        return httpx.Response(200, text="testo simulato", request=request)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+transcriber.create_groq_client = _fake_http_client
 
 
 class _FakeInputStream:
