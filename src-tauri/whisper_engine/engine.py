@@ -95,11 +95,15 @@ class WhisperEngine:
 
     def start_transcription(self, device_id, model_size, language="it"):
         """Dispatch recording without paying per-session thread startup."""
+        capture_queue = queue.SimpleQueue()
+        self.audio_queue = capture_queue
+        self.is_recording = True
         return self._transcription_executor.submit(
             self.transcribe,
             device_id,
             model_size,
             language,
+            capture_queue,
         )
 
     def close_transcription_worker(self):
@@ -121,13 +125,18 @@ class WhisperEngine:
         transcriber.transcribe_local(model, recording, language, recording_duration,
                                      self._shutting_down, self.log)
 
-    def transcribe(self, device_id, model_size, language="it"):
+    def transcribe(self, device_id, model_size, language="it", capture_queue=None):
         try:
+            if capture_queue is None:
+                capture_queue = queue.SimpleQueue()
+                self.audio_queue = capture_queue
+                self.is_recording = True
+
             if self.provider == "local":
                 self.load_model(model_size)
 
-            self.audio_queue = queue.SimpleQueue()
-            self.is_recording = True
+            if not self.is_recording:
+                return
             audio_data = []
 
             self.log({"status": "listening", "message": "In ascolto... parla ora."})
@@ -138,15 +147,8 @@ class WhisperEngine:
             with sd.InputStream(device=device_id, channels=1, callback=self.audio_callback,
                                 samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE,
                                 dtype="float32"):
-                while self.is_recording:
-                    try:
-                        data = self.audio_queue.get(timeout=0.05)
-                    except queue.Empty:
-                        # Keep compatibility with stream adapters that stop
-                        # by changing the flag without sending a sentinel.
-                        if not self.is_recording:
-                            break
-                        continue
+                while True:
+                    data = capture_queue.get()
                     if data is None:
                         break
                     audio_data.append(data)
@@ -159,9 +161,7 @@ class WhisperEngine:
                 self.log({"status": "ready", "message": "Nessun audio catturato."})
                 return
 
-            # InputStream is configured for one channel. Selecting that
-            # column directly keeps the flattened recording as a view.
-            recording = np.concatenate(audio_data, axis=0)[:, 0]
+            recording = np.concatenate(audio_data, axis=0)
             if recording.dtype != np.float32:
                 recording = recording.astype(np.float32, copy=False)
 

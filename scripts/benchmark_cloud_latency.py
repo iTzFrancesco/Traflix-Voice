@@ -81,7 +81,7 @@ class _FakeInputStream:
     def __enter__(self):
         # Keep the fixture above the cloud silence threshold so this benchmark
         # measures the request path rather than the intentional no-op path.
-        block = np.full((BLOCK_SIZE, 1), 0.03, dtype=np.float32)
+        block = np.full(BLOCK_SIZE, 0.03, dtype=np.float32)
         for _ in range(self.blocks):
             self.engine.audio_queue.put(block)
         self.ready_event.set()

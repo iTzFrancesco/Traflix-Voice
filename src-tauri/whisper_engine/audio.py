@@ -34,14 +34,20 @@ def calculate_volume(indata):
 def audio_callback(indata, frames, time, status, audio_queue, is_recording, log_func):
     if status:
         log_func({"status": "warning", "message": str(status)})
-    audio_queue.put(indata.copy())
-    if is_recording:
-        current_time = pytime.monotonic()
-        if current_time - audio_callback._last_vol_time <= 0.05:
-            return
-        level = calculate_volume(indata)
-        log_func({"status": "volume", "value": level})
-        audio_callback._last_vol_time = current_time
+    if not is_recording:
+        return
+
+    # InputStream is mono. Queue only the channel itself so the stop path can
+    # concatenate a flat recording without creating a second view later.
+    mono = indata[:, 0] if indata.ndim > 1 else indata
+    audio_queue.put(mono.copy())
+
+    current_time = pytime.monotonic()
+    if current_time - audio_callback._last_vol_time <= 0.05:
+        return
+    level = calculate_volume(indata)
+    log_func({"status": "volume", "value": level})
+    audio_callback._last_vol_time = current_time
 
 
 audio_callback._last_vol_time = 0

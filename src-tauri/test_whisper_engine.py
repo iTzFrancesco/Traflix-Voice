@@ -279,6 +279,7 @@ class TestAudioCallback(unittest.TestCase):
         indata = np.zeros((BLOCK_SIZE, 1), dtype=np.float32)
         self.engine.audio_callback(indata, BLOCK_SIZE, None, None)
         self.assertFalse(self.engine.audio_queue.empty())
+        self.assertEqual(self.engine.audio_queue.get_nowait().ndim, 1)
 
     def test_enqueued_data_is_copy(self):
         """Enqueued array must be independent of the original buffer."""
@@ -314,6 +315,7 @@ class TestAudioCallback(unittest.TestCase):
         self.engine.is_recording = False
         indata = np.ones((BLOCK_SIZE, 1), dtype=np.float32)
         self.engine.audio_callback(indata, BLOCK_SIZE, None, None)
+        self.assertTrue(self.engine.audio_queue.empty())
         raw = mock_stdout.getvalue().strip()
         if raw:
             for line in raw.split("\n"):
@@ -416,13 +418,14 @@ class TestTranscriptionFlow(unittest.TestCase):
         def fake_enter(self_inner):
             if audio_blocks:
                 for block in audio_blocks:
-                    engine.audio_queue.put(block.copy())
+                    mono = block[:, 0] if block.ndim > 1 else block
+                    engine.audio_queue.put(mono.copy())
                 def stop_later():
                     import time; time.sleep(0.15)
-                    engine.is_recording = False
+                    engine.stop_recording()
                 threading.Thread(target=stop_later, daemon=True).start()
             else:
-                engine.is_recording = False
+                engine.stop_recording()
             return MagicMock()
         sd.InputStream.return_value.__enter__ = fake_enter
         sd.InputStream.return_value.__exit__ = MagicMock(return_value=False)
