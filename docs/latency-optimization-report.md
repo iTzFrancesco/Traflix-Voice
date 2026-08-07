@@ -3,7 +3,37 @@
 Data del report: 2026-08-08  
 Percorso analizzato: hotkey → Rust/Tauri → sidecar Python → cattura audio → WAV/multipart → Groq → evento risultato → paste/UI.
 
-## Risultato finale
+## Stato finale dopo i 10 round aggiuntivi (R39–R48)
+
+La baseline è stata acquisita prima di R39 e le misure finali dopo R48, con lo
+stesso ambiente e gli stessi script. I valori locali escludono rete e inferenza
+per rendere confrontabile il codice dell'applicazione.
+
+| Misura | Prima di R39 | Dopo R48 | Variazione |
+|---|---:|---:|---:|
+| Stop → richiesta, mediana | 0,469 ms | 0,328 ms | −30,1% |
+| Stop → richiesta, p95 | 0,592 ms | 0,417 ms | −29,6% |
+| Stop → risultato, mediana | 0,470 ms | 0,329 ms | −30,0% |
+| Stop → risultato, p95 | 0,593 ms | 0,418 ms | −29,5% |
+| Cloud path deterministico, mediana | 0,457 ms | 0,220 ms | −51,9% |
+| Cloud path deterministico, p95 | 0,760 ms | 0,322 ms | −57,6% |
+| Groq reale, mediana | 194,3 ms | 188,6 ms | −2,9%* |
+| Groq reale, media | 180,0 ms | 178,3 ms | −0,9%* |
+
+\* La rete e il servizio remoto dominano la misura live. Tutte le 11 chiamate
+finali (1 warm-up + 10 misurate) hanno restituito `result`. Il p95 live è salito
+da 196,9 a 312,0 ms per un singolo spike (massimo 276,9 ms, quantile interpolato
+su soli 10 campioni), mentre minimo e massimo finali sono stati 119,2 e 276,9 ms.
+Il dato viene riportato per completezza e non attribuito al codice locale.
+
+La prima misura storica del progetto era 50,340 ms stop→request: il valore
+finale di 0,328 ms rappresenta una riduzione complessiva di circa −99,35%, ossia
+un percorso locale circa 153 volte più rapido. La precedente baseline finale
+stabile era 0,264 ms sul solo cloud path; il nuovo 0,220 ms aggiunge un ulteriore
+−16,7%. La baseline di 0,457 ms congelata a inizio ciclo include la normale
+varianza della macchina condivisa, ma è riportata senza selezionare i campioni.
+
+## Risultato del ciclo precedente da 20 round
 
 La baseline isolata all’inizio di questo ciclo era:
 
@@ -120,3 +150,52 @@ Il primo smoke test reale del sidecar Linux non poteva caricare PortAudio perch�
 La chiave Groq è stata usata soltanto nei processi di benchmark e non compare in questo report, nel codice o nei commit. Il file locale `.env` resta ignorato da Git e non viene pubblicato.
 
 Il backend resta Python + Rust: il percorso locale misurato è già sotto il millisecondo, quindi una riscrittura completa in C/C++/Rust non porterebbe vantaggi proporzionati rispetto al tempo di rete e inferenza Groq.
+
+## I 10 round aggiuntivi profondi
+
+| Round | Commit | Modifica | Misura osservata |
+|---:|---|---|---|
+| 39 | `137d446` | Il trimming restituisce esplicitamente “nessun parlato” ed elimina il secondo scan | Caso pienamente attivo 166,9 → 146,1 µs (−12,4%) |
+| 40 | `07579a6` | Scan adattivo: una maschera per clip brevi, blocchi limitati per dettati lunghi | 30 s con margini 762 → 394 µs; 3 min 6,08 → 1,28 ms |
+| 41 | `87e6659` | Prefissi multipart precompilati per tutte le lingue della UI | Builder italiano 2,26 → 2,06 µs |
+| 42 | `44d819e` | PCM normalizzato scritto direttamente in `int16`, con fallback di clipping | Clip da 30 s circa 389 → 56 µs nel test isolato |
+| 43 | `342f801` | CookieJar escluso dal client bearer stateless | Tratto HTTP isolato 101,7 → 54,4 µs |
+| 44 | `f29d540` | `httpx.Request` + `Client.send` evita merge ripetuti | Cloud path 0,221 → 0,211 ms nel confronto del round |
+| 45 | `be75b4d` | Rimossi header `Connection` e compressione ridondanti | Tratto HTTP 50,9 → 49,4 µs |
+| 46 | `cab7faf` | Worker di trascrizione unico, seriale e pre-riscaldato | Dispatch 134,3 → 35,9 µs (−73,3%) |
+| 47 | `89a0258` | Blocchi mono 1D, coda bloccante con sentinel e niente copie dopo stop | `SimpleQueue.get`: 299 → 207 ns; stop su 64 blocchi 0,464 → 0,462 ms |
+| 48 | `e054c81` | IPC stop prima dello stato React e rimozione log dal percorso critico | Bundle principale 55.464 → 54.332 byte; nessun lavoro UI prima dell'invoke |
+
+## Esperimenti profondi scartati in questo ciclo
+
+- Fast path del client senza lock: soltanto 343 → 332 ns, non sufficiente a
+  giustificare una semantica concorrente più complessa.
+- Payload WAV/multipart completamente fuso: migliorava i clip lunghi, ma
+  peggiorava il caso breve comune da 7,33 a 10,20 µs; non integrato.
+- Chiamata diretta al transport HTTPX: il mock scendeva a circa 33 µs, ma
+  avrebbe bypassato comportamento pubblico del client, proxy, auth e redirect;
+  il risparmio locale non giustifica il rischio di compatibilità.
+- HTTP/2 e preconnessioni artificiali restano esclusi: nelle prove precedenti
+  non avevano ridotto in modo ripetibile la latenza live.
+
+## Regressione finale dopo R48
+
+- 54 test Python passati;
+- payload WAV e multipart verificati, inclusi fast path PCM, clipping, lingua e
+  auto-detect;
+- silenzio breve/lungo, campioni non finiti e trimming con padding verificati;
+- worker caldo riutilizzato sullo stesso thread e shutdown verificato;
+- callback mono, sentinel immediato e nessuna coda tardiva dopo stop verificati;
+- benchmark deterministico finale: 5.000 iterazioni stop e 10.000 cloud path;
+- benchmark Groq reale: 11/11 risposte `result`, nessuna chiave stampata;
+- build TypeScript/Vite passata;
+- `cargo fmt --check` passato;
+- 9 test Rust passati;
+- `cargo clippy -- -D warnings` passato;
+- smoke test sidecar `init → get_status → quit` passato con stub PortAudio;
+- working tree e file ignorati controllati prima della pubblicazione.
+
+La chiave Groq non è presente nel codice, nel report o nei commit. `.env` resta
+ignorato da Git. Anche dopo questi round non conviene riscrivere il backend cloud
+in C/C++/Rust: il tratto locale è 0,220–0,329 ms, mentre la mediana live è
+188,6 ms; il limite residuo è quasi interamente rete/provider.
