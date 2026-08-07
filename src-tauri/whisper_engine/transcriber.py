@@ -1,6 +1,7 @@
 import io
 import wave
 import os
+import threading
 import httpx
 import numpy as np
 import concurrent.futures
@@ -9,6 +10,57 @@ from whisper_engine.constants import SAMPLE_RATE, TRANSCRIPTION_TIMEOUT, GROQ_MO
 from whisper_engine.groq_tracker import record_groq_usage
 
 _TRAF_DEBUG = os.environ.get("TRAF_DEBUG") == "1"
+_GROQ_CLIENT = None
+_GROQ_CLIENT_KEY = None
+_GROQ_CLIENT_LOCK = threading.Lock()
+
+
+def create_groq_client(groq_api_key):
+    """Create one configured client; callers can safely reuse it."""
+    from groq import Groq
+
+    return Groq(
+        api_key=groq_api_key,
+        http_client=httpx.Client(
+            timeout=httpx.Timeout(30.0, connect=10.0, read=25.0)
+        ),
+    )
+
+
+def get_groq_client(groq_api_key):
+    """Return a keep-alive client, rebuilding it only when the key changes."""
+    global _GROQ_CLIENT, _GROQ_CLIENT_KEY
+
+    with _GROQ_CLIENT_LOCK:
+        if _GROQ_CLIENT is not None and _GROQ_CLIENT_KEY == groq_api_key:
+            return _GROQ_CLIENT
+
+        old_client = _GROQ_CLIENT
+        client = create_groq_client(groq_api_key)
+        _GROQ_CLIENT = client
+        _GROQ_CLIENT_KEY = groq_api_key
+
+        if old_client is not None:
+            close = getattr(old_client, "close", None)
+            if callable(close):
+                close()
+
+        return client
+
+
+def close_groq_client():
+    """Close the cached client during sidecar shutdown."""
+    global _GROQ_CLIENT, _GROQ_CLIENT_KEY
+
+    with _GROQ_CLIENT_LOCK:
+        client = _GROQ_CLIENT
+        _GROQ_CLIENT = None
+        _GROQ_CLIENT_KEY = None
+
+    if client is not None:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
 
 
 def transcribe_local(model, recording, language, recording_duration, shutting_down, log_func):
@@ -48,8 +100,6 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
         return
 
     try:
-        from groq import Groq
-
         audio_int16 = (np.clip(recording, -1.0, 1.0) * 32767).astype(np.int16)
 
         buffer = io.BytesIO()
@@ -60,10 +110,7 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
             wf.writeframes(audio_int16.tobytes())
         buffer.seek(0)
 
-        client = Groq(
-            api_key=groq_api_key,
-            http_client=httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0, read=25.0)),
-        )
+        client = get_groq_client(groq_api_key)
         lang_param = language if language != "auto" else None
 
         transcription = client.audio.transcriptions.create(

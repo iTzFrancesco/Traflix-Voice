@@ -63,6 +63,9 @@ class WhisperEngine:
     def download_model(self, size):
         model_module.download_model(self.models_dir, size, self.log)
 
+    def close_groq_client(self):
+        transcriber.close_groq_client()
+
     def audio_callback(self, indata, frames, time, status):
         audio_module.audio_callback(indata, frames, time, status, self.audio_queue, self.is_recording, self.log)
 

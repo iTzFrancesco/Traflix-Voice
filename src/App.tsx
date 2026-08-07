@@ -124,7 +124,6 @@ export default function App() {
     isError?: boolean;
   } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [targetVolume, setTargetVolume] = useState(0);
   const [transcriptionText, setTranscriptionText] = useState("");
   const [historyEntries, setHistoryEntries] = useState<TranscriptionEntry[]>([]);
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
@@ -135,7 +134,6 @@ export default function App() {
   const [gpuStatus, setGpuStatus] = useState("Dispositivo in uso: CPU");
 
   const toastIdRef = useRef(0);
-  const volumeThrottleRef = useRef(0);
   const activeTranscriptionRef = useRef(false);
   const isTestRecordingRef = useRef(false);
   const startSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -563,14 +561,10 @@ export default function App() {
             setGpuStatus(`Dispositivo in uso: ${deviceLabel} | ${cudaLabel}`);
           }
 
-          // Volume for oscilloscope (throttled to ~10Hz max to prevent 20Hz re-renders)
-          if (data.status === "volume") {
-            const now = Date.now();
-            if (now - volumeThrottleRef.current > 100) {
-              volumeThrottleRef.current = now;
-              setTargetVolume(data.value || 0);
-            }
-          }
+          // Volume is consumed directly by the overlay. Keeping it out of
+          // React state prevents the full main window from rerendering while
+          // the user is speaking.
+          if (data.status === "volume") return;
 
           // Log messages
           if (data.status === "info" && data.message) {
@@ -585,7 +579,6 @@ export default function App() {
           if (data.status === "result" && data.text) {
             const resultText = data.text;
             console.log("[RESULT] received text length:", resultText.length, "duration:", data.duration);
-            setTargetVolume(0);
             if (isTestRecordingRef.current) {
               isTestRecordingRef.current = false;
               setTranscriptionText((prev) => {
@@ -928,7 +921,16 @@ export default function App() {
         }
       }
       if (key === "groqApiKey") {
-        // Save with a small debounce
+        try {
+          await window.__TAURI__.core.invoke("send_to_python", {
+            message: JSON.stringify({
+              command: "set_groq_api_key",
+              api_key: value,
+            }),
+          });
+        } catch (err) {
+          console.warn("[groq] API key update error:", err);
+        }
       }
 
       await persistSettings(updated);

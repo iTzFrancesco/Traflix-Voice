@@ -50,8 +50,11 @@ def handle_command(cmd, data, engine):
     elif cmd == "set_device":
         engine.compute_device = data.get("device", "cpu")
         engine.log({"status": "info", "message": f"Dispositivo di calcolo impostato a: {engine.compute_device}"})
+    elif cmd == "set_groq_api_key":
+        engine.groq_api_key = data.get("api_key") or None
     elif cmd == "quit":
         engine._shutting_down = True
         engine.is_recording = False
+        engine.close_groq_client()
         return True
     return False
