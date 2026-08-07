@@ -6,7 +6,7 @@ from whisper_engine.constants import GROQ_MODEL
 
 
 def log(data):
-    print(json.dumps(data))
+    sys.stdout.write(json.dumps(data) + "\n")
     sys.stdout.flush()
 
 
