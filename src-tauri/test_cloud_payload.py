@@ -64,7 +64,7 @@ class TestCloudPayload(unittest.TestCase):
         transcriber.close_groq_client()
         with patch.object(transcriber, "create_groq_client", return_value=client):
             transcriber.transcribe_cloud(
-                np.zeros(160, dtype=np.float32),
+                np.full(160, 0.03, dtype=np.float32),
                 "it",
                 0.01,
                 "fake-key",
@@ -83,6 +83,22 @@ class TestCloudPayload(unittest.TestCase):
         )
         self.assertIn(b"whisper-large-v3-turbo", request.content)
         self.assertEqual(events[-1]["text"], "ciao")
+
+    def test_silent_cloud_recording_skips_network_request(self):
+        events = []
+        with patch.object(transcriber, "get_groq_client") as get_client:
+            transcriber.transcribe_cloud(
+                np.zeros(16000, dtype=np.float32),
+                "it",
+                1.0,
+                "fake-key",
+                False,
+                events.append,
+                None,
+            )
+
+        get_client.assert_not_called()
+        self.assertEqual(events[-1]["status"], "ready")
 
 
 if __name__ == "__main__":

@@ -199,8 +199,16 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
         return
 
     try:
+        cloud_recording = trim_cloud_silence(recording)
+        if cloud_recording is recording:
+            has_positive = np.any(recording >= CLOUD_SILENCE_THRESHOLD)
+            has_negative = np.any(recording <= -CLOUD_SILENCE_THRESHOLD)
+            if not has_positive and not has_negative:
+                log_func({"status": "ready", "message": "Nessun audio riconosciuto."})
+                return
+
         buffer = encode_cloud_multipart(
-            encode_wav(trim_cloud_silence(recording)),
+            encode_wav(cloud_recording),
             language if language != "auto" else None,
         )
 
