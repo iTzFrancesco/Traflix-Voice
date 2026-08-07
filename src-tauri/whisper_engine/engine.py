@@ -115,7 +115,8 @@ class WhisperEngine:
             start_time = pytime.time()
 
             with sd.InputStream(device=device_id, channels=1, callback=self.audio_callback,
-                                samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE):
+                                samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE,
+                                dtype="float32"):
                 while self.is_recording:
                     try:
                         data = self.audio_queue.get(timeout=0.05)
