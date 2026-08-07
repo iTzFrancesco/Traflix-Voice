@@ -129,7 +129,7 @@ pub async fn send_to_python(state: State<'_, AppState>, message: String) -> Resu
 
 /// Fast path for the most latency-sensitive command in the recording flow.
 #[tauri::command]
-pub async fn stop_python(state: State<'_, AppState>) -> Result<(), String> {
+pub fn stop_python(state: State<'_, AppState>) -> Result<(), String> {
     write_to_python(state, b"{\"command\":\"stop\"}\n")
 }
 
