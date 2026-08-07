@@ -213,7 +213,9 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
         if response.status_code != 200:
             response.raise_for_status()
 
-        text = response.text.strip()
+        # Groq returns UTF-8 text; decoding the already-buffered body avoids
+        # HTTPX charset detection on the success path.
+        text = response.content.decode("utf-8").strip()
 
         if _TRAF_DEBUG:
             import sys as _sys
