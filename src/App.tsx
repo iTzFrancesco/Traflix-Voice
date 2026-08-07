@@ -655,7 +655,7 @@ export default function App() {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [selectedProvider, settings]);
+  }, [selectedProvider]);
 
   // ── HOTKEY EVENT LISTENERS (with refs to avoid re-registration) ──
   useEffect(() => {
