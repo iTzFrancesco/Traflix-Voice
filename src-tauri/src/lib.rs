@@ -29,7 +29,7 @@ use tauri_plugin_shell::ShellExt;
 pub fn run() {
     const HOTKEY_POLL_INTERVAL_MS: u64 = 8;
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .setup(|app| {
             let app_data_dir = app
                 .path()
@@ -345,17 +345,22 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(main_win) = app.get_webview_window("main") {
-                let _ = main_win.show();
-                let _ = main_win.set_focus();
-            }
-            if let Some(overlay) = app.get_webview_window("overlay") {
-                let _ = overlay.hide();
-            }
-        }))
+        .plugin(tauri_plugin_opener::init());
+
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(main_win) = app.get_webview_window("main") {
+            let _ = main_win.show();
+            let _ = main_win.set_focus();
+        }
+        if let Some(overlay) = app.get_webview_window("overlay") {
+            let _ = overlay.hide();
+        }
+    }));
+
+    builder
         .invoke_handler(tauri::generate_handler![
+            is_dev,
             load_settings,
             save_settings,
             get_stats,

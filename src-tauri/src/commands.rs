@@ -12,6 +12,11 @@ use crate::state::{
 
 // ─── COMANDI TAURI ───────────────────────────────────────────────────────────
 
+#[tauri::command]
+pub fn is_dev() -> bool {
+    cfg!(debug_assertions)
+}
+
 /// Legge e restituisce le impostazioni salvate (o i valori di default)
 #[tauri::command]
 pub async fn load_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {

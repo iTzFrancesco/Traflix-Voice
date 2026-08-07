@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import ReactDOM from "react-dom/client";
 
-const IS_DEV = import.meta.env.DEV;
+const IS_DEV = import.meta.env.DEV || ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
 function responsiveVolume(value: number): number {
   const normalized = Math.min(1, Math.max(0, value / 100));
@@ -57,6 +57,8 @@ function Overlay() {
       .hint { position:absolute; top:calc(100% + 7px); left:0; display:flex; align-items:center; gap:6px; color:rgba(245,243,239,.72); font:600 10px/1 "Segoe UI",sans-serif; letter-spacing:.03em; white-space:nowrap; opacity:0; transform:translateY(-2px); pointer-events:none; transition:opacity .18s ease,transform .18s ease; text-shadow:0 1px 5px #000; }
       .ow:hover .hint { opacity:1; transform:translateY(0); }
       .devbadge { color:#ff626b; background:rgba(255,98,107,.15); border-radius:4px; padding:3px 5px; font-weight:800; letter-spacing:.12em; box-shadow:0 0 10px rgba(255,98,107,.16); }
+      .dev-slot { display:inline-flex; align-items:center; justify-content:center; height:100%; }
+      .widget-devbadge { background:transparent; color:#ff7b83; font:800 9px/1 "Segoe UI",sans-serif; letter-spacing:.1em; padding:0 1px; text-shadow:0 0 6px rgba(255,98,107,.45); }
     `;
     document.head.appendChild(style);
 
@@ -64,15 +66,28 @@ function Overlay() {
       <div class="ow" id="w" role="button" aria-label="Traflix Voice. Doppio clic per aprire la console" tabindex="0">
         <div style="width:26px;height:26px;flex-shrink:0"><img src="/assets/logo.png" alt="Traflix" draggable="false" style="width:26px;height:26px;border-radius:6px" /></div>
         <span class="lbl">Traflix Voice</span>
+        <span class="dev-slot">${IS_DEV ? '<span class="devbadge widget-devbadge">DEV</span>' : ""}</span>
         <div class="spw"><div class="spr"></div></div>
         <div class="vw" id="vw"></div>
-        <span class="hint">${IS_DEV ? '<span class="devbadge">DEV</span>' : ""}<span id="version-meta">v…</span><span>· Doppio clic per aprire</span></span>
+        <span class="hint"><span id="version-meta">v…</span><span>· Doppio clic per aprire</span></span>
       </div>
     `;
 
     const widget = root.firstElementChild as HTMLDivElement;
     const vizWrap = widget.querySelector(".vw") as HTMLDivElement;
     const versionMeta = widget.querySelector("#version-meta") as HTMLSpanElement;
+
+    if (!IS_DEV && window.__TAURI__?.core?.invoke) {
+      window.__TAURI__.core.invoke("is_dev").then((isDev: unknown) => {
+        if (isDev !== true) return;
+        const slot = widget.querySelector(".dev-slot");
+        if (!slot || slot.querySelector(".devbadge")) return;
+        const badge = document.createElement("span");
+        badge.className = "devbadge widget-devbadge";
+        badge.textContent = "DEV";
+        slot.appendChild(badge);
+      }).catch(() => {});
+    }
 
     if (window.__TAURI__?.app?.getVersion) {
       window.__TAURI__.app.getVersion().then((version: string) => {
