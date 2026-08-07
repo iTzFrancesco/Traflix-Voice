@@ -592,12 +592,9 @@ export default function App() {
             // Paste first: stats/history are local persistence work and must
             // not add latency before the text reaches the active application.
             if (pastePromise) {
-              try {
-                await pastePromise;
-                console.log("[RESULT] paste executed OK");
-              } catch (e) {
-                console.error("[RESULT] paste error:", e);
-              }
+              void pastePromise
+                .then(() => console.log("[RESULT] paste executed OK"))
+                .catch((e) => console.error("[RESULT] paste error:", e));
             }
 
             // Update stats
@@ -608,15 +605,15 @@ export default function App() {
             if (wordCount > 0 && data.duration) {
               const wpm = Math.round((wordCount / data.duration) * 60);
               if (window.__TAURI__?.core?.invoke) {
-                try {
-                  await window.__TAURI__.core.invoke("update_stats", {
+                void window.__TAURI__.core
+                  .invoke("update_stats", {
                     words: wordCount,
                     wpm,
                     timeDelta: data.duration / 60,
-                  });
-                } catch {}
+                  })
+                  .then(() => loadStats())
+                  .catch(() => {});
               }
-              loadStats();
             }
 
             // Save to history
@@ -629,13 +626,13 @@ export default function App() {
               second: "2-digit",
             });
             if (window.__TAURI__?.core?.invoke) {
-              try {
-                await window.__TAURI__.core.invoke("save_transcription", {
+              void window.__TAURI__.core
+                .invoke("save_transcription", {
                   text: data.text.trim(),
                   timestamp: historyTimestamp,
                   wordCount,
-                });
-              } catch {}
+                })
+                .catch(() => {});
             }
 
             // Groq usage tracking
