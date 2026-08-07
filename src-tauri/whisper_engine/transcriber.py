@@ -118,9 +118,21 @@ def close_groq_client():
 
 def encode_wav(recording):
     """Encode mono float32 samples as the PCM WAV payload Groq accepts."""
-    clipped = np.clip(recording, -1.0, 1.0)
-    np.multiply(clipped, 32767.0, out=clipped)
-    audio_int16 = clipped.astype(np.int16)
+    if (
+        recording.size >= SAMPLE_RATE * 2
+        and recording.max() <= 1.0
+        and recording.min() >= -1.0
+    ):
+        # PortAudio's float32 contract is already normalized. For normal
+        # dictations, write directly into the target dtype and avoid a second
+        # recording-sized float buffer. Keep the exact clipping path for
+        # synthetic/out-of-range or non-finite inputs.
+        audio_int16 = np.empty(recording.size, dtype=np.int16)
+        np.multiply(recording, 32767.0, out=audio_int16, casting="unsafe")
+    else:
+        clipped = np.clip(recording, -1.0, 1.0)
+        np.multiply(clipped, 32767.0, out=clipped)
+        audio_int16 = clipped.astype(np.int16)
     pcm_data = audio_int16.tobytes()
     data_size = len(pcm_data)
     wav_header = _WAV_HEADER.pack(

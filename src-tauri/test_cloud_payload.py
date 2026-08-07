@@ -63,7 +63,7 @@ class TestCloudPayload(unittest.TestCase):
         self.assertEqual(trim_cloud_silence(recording).size, 0)
 
     def test_encode_wav_matches_groq_audio_contract(self):
-        samples = np.array([-1.0, -0.25, 0.0, 0.25, 1.0], dtype=np.float32)
+        samples = np.array([-2.0, -1.0, -0.25, 0.0, 0.25, 1.0, 2.0], dtype=np.float32)
         payload = encode_wav(samples).getvalue()
 
         with wave.open(io.BytesIO(payload), "rb") as wav:
@@ -71,6 +71,20 @@ class TestCloudPayload(unittest.TestCase):
             self.assertEqual(wav.getsampwidth(), 2)
             self.assertEqual(wav.getframerate(), SAMPLE_RATE)
             self.assertEqual(wav.getnframes(), len(samples))
+            pcm = np.frombuffer(wav.readframes(len(samples)), dtype="<i2")
+        np.testing.assert_array_equal(
+            pcm,
+            np.array([-32767, -32767, -8191, 0, 8191, 32767, 32767], dtype=np.int16),
+        )
+
+    def test_encode_wav_normalized_fast_path_preserves_samples(self):
+        samples = np.linspace(-0.9, 0.9, SAMPLE_RATE * 2, dtype=np.float32)
+        payload = encode_wav(samples).getvalue()
+
+        with wave.open(io.BytesIO(payload), "rb") as wav:
+            pcm = np.frombuffer(wav.readframes(len(samples)), dtype="<i2")
+
+        np.testing.assert_array_equal(pcm, (samples * 32767.0).astype(np.int16))
 
     def test_cloud_request_uses_direct_transcription_endpoint(self):
         captured = {}
