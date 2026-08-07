@@ -150,10 +150,10 @@ def trim_cloud_silence(recording):
     if abs(recording[0]) >= threshold and abs(recording[-1]) >= threshold:
         return recording
 
-    active = (recording >= threshold) | (recording <= -threshold)
-    if not active.any():
+    if not np.any(recording >= threshold) and not np.any(recording <= -threshold):
         return recording
 
+    active = (recording >= threshold) | (recording <= -threshold)
     padding = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
     first_active = int(np.argmax(active))
     last_active = recording.size - 1 - int(np.argmax(active[::-1]))
