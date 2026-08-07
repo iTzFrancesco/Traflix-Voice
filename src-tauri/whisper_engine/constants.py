@@ -1,7 +1,7 @@
 SAMPLE_RATE = 16000
-# 128 ms keeps stop-to-upload latency low while leaving enough work per audio
-# callback for inexpensive NumPy metering.
-BLOCK_SIZE = 2048
+# 64 ms keeps the meter responsive and bounds the amount of audio waiting
+# behind a stop command without making callback overhead significant.
+BLOCK_SIZE = 1024
 TRANSCRIPTION_TIMEOUT = 60
 GROQ_MODEL = "whisper-large-v3-turbo"
 GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
