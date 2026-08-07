@@ -93,3 +93,8 @@ pub fn str_to_vk(s: &str) -> Option<i32> {
 pub fn is_key_pressed(vk: i32) -> bool {
     unsafe { GetAsyncKeyState(vk) & (0x8000u16 as i16) != 0 }
 }
+
+#[cfg(not(windows))]
+pub fn is_key_pressed(_vk: i32) -> bool {
+    false
+}

@@ -3,12 +3,10 @@ mod hotkey;
 mod settings;
 mod state;
 
-#[cfg(windows)]
 mod clipboard;
 
 // Re-exports for compatibility — tests use `use super::*` and run() needs direct access
 pub use commands::*;
-#[cfg(windows)]
 pub use hotkey::is_key_pressed;
 pub use hotkey::{parse_hotkey, str_to_vk};
 pub use settings::*;

@@ -30,3 +30,6 @@ pub fn simulate_ctrl_v() {
         SendInput(4, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
     }
 }
+
+#[cfg(not(windows))]
+pub fn simulate_ctrl_v() {}
