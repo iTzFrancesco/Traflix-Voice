@@ -135,6 +135,7 @@ export default function App() {
 
   const toastIdRef = useRef(0);
   const activeTranscriptionRef = useRef(false);
+  const selectedProviderRef = useRef<Provider>("local");
   const isTestRecordingRef = useRef(false);
   const startSoundRef = useRef<HTMLAudioElement | null>(null);
   const stopSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -146,6 +147,7 @@ export default function App() {
   const stopFnRef = useRef<() => Promise<void>>(async () => {});
   modelReadyRef.current = modelReady;
   holdToSpeakRef.current = holdToSpeak;
+  selectedProviderRef.current = selectedProvider;
 
   // ── HOTKEY RECORDING ──
   const {
@@ -636,7 +638,7 @@ export default function App() {
             }
 
             // Groq usage tracking
-            if (selectedProvider === "cloud") {
+            if (selectedProviderRef.current === "cloud") {
               recordGroqUsage(data.duration || 0);
             }
 
@@ -659,7 +661,7 @@ export default function App() {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [selectedProvider]);
+  }, []);
 
   // ── HOTKEY EVENT LISTENERS (with refs to avoid re-registration) ──
   useEffect(() => {
