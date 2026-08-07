@@ -526,7 +526,7 @@ class TestConstants(unittest.TestCase):
         self.assertEqual(SAMPLE_RATE, 16000)
 
     def test_block_size(self):
-        self.assertEqual(BLOCK_SIZE, 4000)
+        self.assertEqual(BLOCK_SIZE, 2048)
 
 
 if __name__ == "__main__":

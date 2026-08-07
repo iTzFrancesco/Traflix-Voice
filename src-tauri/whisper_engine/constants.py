@@ -1,5 +1,7 @@
 SAMPLE_RATE = 16000
-BLOCK_SIZE = 4000
+# 128 ms keeps stop-to-upload latency low while leaving enough work per audio
+# callback for inexpensive NumPy metering.
+BLOCK_SIZE = 2048
 TRANSCRIPTION_TIMEOUT = 60
 GROQ_MODEL = "whisper-large-v3-turbo"
 

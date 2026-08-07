@@ -100,7 +100,7 @@ class WhisperEngine:
                                 samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE):
                 while self.is_recording:
                     try:
-                        data = self.audio_queue.get(timeout=0.1)
+                        data = self.audio_queue.get(timeout=0.05)
                         audio_data.append(data)
                     except queue.Empty:
                         continue
