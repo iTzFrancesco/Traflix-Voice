@@ -589,6 +589,20 @@ export default function App() {
               console.log("[RESULT] NOT test recording, skipping textarea append");
             }
 
+            // Paste first: stats/history are local persistence work and must
+            // not add latency before the text reaches the active application.
+            console.log("[RESULT] executing paste...");
+            if (window.__TAURI__?.core?.invoke) {
+              try {
+                await window.__TAURI__.core.invoke("execute_paste", {
+                  text: data.text,
+                });
+                console.log("[RESULT] paste executed OK");
+              } catch (e) {
+                console.error("[RESULT] paste error:", e);
+              }
+            }
+
             // Update stats
             const wordCount = resultText
               .trim()
@@ -625,19 +639,6 @@ export default function App() {
                   wordCount,
                 });
               } catch {}
-            }
-
-            // Execute paste
-            console.log("[RESULT] executing paste...");
-            if (window.__TAURI__?.core?.invoke) {
-              try {
-                await window.__TAURI__.core.invoke("execute_paste", {
-                  text: data.text,
-                });
-                console.log("[RESULT] paste executed OK");
-              } catch (e) {
-                console.error("[RESULT] paste error:", e);
-              }
             }
 
             // Groq usage tracking
