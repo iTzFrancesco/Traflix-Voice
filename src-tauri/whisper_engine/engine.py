@@ -66,6 +66,12 @@ class WhisperEngine:
     def close_groq_client(self):
         transcriber.close_groq_client()
 
+    def stop_recording(self):
+        self.is_recording = False
+        # Wake the capture loop immediately instead of waiting for its poll
+        # timeout. The sentinel is consumed after blocks already queued.
+        self.audio_queue.put(None)
+
     def audio_callback(self, indata, frames, time, status):
         audio_module.audio_callback(indata, frames, time, status, self.audio_queue, self.is_recording, self.log)
 
@@ -101,9 +107,15 @@ class WhisperEngine:
                 while self.is_recording:
                     try:
                         data = self.audio_queue.get(timeout=0.05)
-                        audio_data.append(data)
                     except queue.Empty:
+                        # Keep compatibility with stream adapters that stop
+                        # by changing the flag without sending a sentinel.
+                        if not self.is_recording:
+                            break
                         continue
+                    if data is None:
+                        break
+                    audio_data.append(data)
 
             recording_duration = pytime.time() - start_time
 

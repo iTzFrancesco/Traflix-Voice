@@ -165,6 +165,7 @@ class TestRunCommandParsing(unittest.TestCase):
         with patch("sys.stdin", io.StringIO("".join(lines))):
             engine.run()
         self.assertFalse(engine.is_recording)
+        self.assertIsNone(engine.audio_queue.get_nowait())
 
     # -- quit ---------------------------------------------------------------
     @patch("sys.stdout", new_callable=io.StringIO)

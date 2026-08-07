@@ -46,7 +46,7 @@ def handle_command(cmd, data, engine):
         threading.Thread(target=engine.transcribe,
                          args=(data.get("device"), data.get("model", "small"), data.get("language", "it"))).start()
     elif cmd == "stop":
-        engine.is_recording = False
+        engine.stop_recording()
     elif cmd == "set_device":
         engine.compute_device = data.get("device", "cpu")
         engine.log({"status": "info", "message": f"Dispositivo di calcolo impostato a: {engine.compute_device}"})
@@ -54,7 +54,7 @@ def handle_command(cmd, data, engine):
         engine.groq_api_key = data.get("api_key") or None
     elif cmd == "quit":
         engine._shutting_down = True
-        engine.is_recording = False
+        engine.stop_recording()
         engine.close_groq_client()
         return True
     return False
