@@ -170,8 +170,8 @@ export default function App() {
   }, []);
 
   // ── LOAD SETTINGS WITH RETRY ──
-  const loadSettings = useCallback(async (): Promise<boolean> => {
-    if (!window.__TAURI__?.core?.invoke) return false;
+  const loadSettings = useCallback(async (): Promise<AppSettings | null> => {
+    if (!window.__TAURI__?.core?.invoke) return null;
 
     for (let attempt = 0; attempt < 4; attempt++) {
       if (attempt > 0) {
@@ -201,12 +201,12 @@ export default function App() {
         setComputeDevice(s.computeDevice || "cpu");
         setHoldToSpeak(s.holdToSpeak ?? false);
         setWidgetMode(s.widgetMode ?? "always");
-        return true;
+        return s;
       } catch (err) {
         console.warn("[settings] error:", err);
       }
     }
-    return false;
+    return null;
   }, []);
 
   // ── PERSIST SETTINGS ──
@@ -364,36 +364,26 @@ export default function App() {
 
     const init = async () => {
       // Load settings
-      await loadSettings();
+      const initialSettings = await loadSettings();
 
       // Load stats
       loadStats();
 
-      // Get app version
-      if (window.__TAURI__?.app?.getVersion) {
-        try {
-          const ver = await window.__TAURI__.app.getVersion();
-          setAppVersion(ver);
-        } catch {}
-      }
-
-      // Load audio devices
-      await loadAudioDevices();
-
-      // Re-sync audio device after populating
-      if (window.__TAURI__?.core?.invoke) {
-        try {
-          const s = (await window.__TAURI__.core.invoke("load_settings")) as AppSettings;
-          if (s?.selectedDevice) {
-            setSettings((prev) =>
-              prev ? { ...prev, selectedDevice: s.selectedDevice } : prev
-            );
-          }
-        } catch {}
-      }
-
-      // Load models
-      await refreshAllModelStatus();
+      // These startup tasks are independent. Cloud users do not need local
+      // model probes at all, so avoid touching the model catalog in that mode.
+      const versionTask = (async () => {
+        if (window.__TAURI__?.app?.getVersion) {
+          try {
+            const ver = await window.__TAURI__.app.getVersion();
+            setAppVersion(ver);
+          } catch {}
+        }
+      })();
+      const modelTask =
+        initialSettings?.provider === "cloud"
+          ? Promise.resolve()
+          : refreshAllModelStatus();
+      await Promise.all([versionTask, loadAudioDevices(), modelTask]);
 
       // Load groq usage
       setGroqUsage(loadGroqUsageFromStorage());
