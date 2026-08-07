@@ -150,6 +150,7 @@ function Overlay() {
       }
 
       syncOverlayVisibility();
+      scheduleAnimation();
     }
 
     // ── MOUSE CLICK (double-click to show main) ──
@@ -202,6 +203,7 @@ function Overlay() {
             applyVisualState("idle");
           } else if (data.status === "volume") {
             targetVolume = data.value;
+            scheduleAnimation();
           }
         } catch (_) {}
       })
@@ -225,8 +227,12 @@ function Overlay() {
     loadInitialMode();
 
     // ── ANIMATION LOOP ──
+    function scheduleAnimation() {
+      if (!animationFrame) animationFrame = requestAnimationFrame(animate);
+    }
+
     function animate() {
-      animationFrame = requestAnimationFrame(animate);
+      animationFrame = 0;
 
       currentVolume += (targetVolume - currentVolume) * 0.2;
       if (currentVolume < 0.5) currentVolume = 0;
@@ -249,9 +255,11 @@ function Overlay() {
         const glow = (h / maxH) * 6;
         bars[i].style.boxShadow = `0 0 ${glow}px rgba(255, 140, 0, ${0.3 + (h / maxH) * 0.4})`;
       }
-    }
 
-    animate();
+      if (visualState !== "idle" || currentVolume >= 0.5) {
+        scheduleAnimation();
+      }
+    }
 
     return () => {
       overlayCancelled = true;
