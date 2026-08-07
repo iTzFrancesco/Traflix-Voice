@@ -47,6 +47,9 @@ _FILE_FIELD_PREFIX = (
 _MULTIPART_SUFFIX = b"\r\n--" + _MULTIPART_BOUNDARY + b"--\r\n"
 _WAV_HEADER = struct.Struct("<4sI4s4sIHHIIHH4sI")
 _GROQ_TRANSCRIPTION_URL = httpx.URL(GROQ_TRANSCRIPTION_URL)
+_CLOUD_SILENCE_PADDING_SAMPLES = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
+_CLOUD_TRIM_MASK_LIMIT = SAMPLE_RATE * 8
+_CLOUD_TRIM_SCAN_CHUNK = SAMPLE_RATE
 
 
 def create_groq_client(groq_api_key):
@@ -145,15 +148,42 @@ def trim_cloud_silence(recording):
     if abs(recording[0]) >= threshold and abs(recording[-1]) >= threshold:
         return recording
 
-    if not np.any(recording >= threshold) and not np.any(recording <= -threshold):
-        return recording[:0]
+    if recording.size <= _CLOUD_TRIM_MASK_LIMIT:
+        active = np.abs(recording) >= threshold
+        if not active.any():
+            return recording[:0]
+        first_active = int(active.argmax())
+        last_active = recording.size - 1 - int(active[::-1].argmax())
+    else:
+        # Avoid allocating a recording-sized mask for long dictations. The
+        # min/max check makes long silence cheap; edge scans allocate at most
+        # one second of temporary booleans at a time.
+        if recording.max() < threshold and recording.min() > -threshold:
+            return recording[:0]
 
-    active = (recording >= threshold) | (recording <= -threshold)
-    padding = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
-    first_active = int(np.argmax(active))
-    last_active = recording.size - 1 - int(np.argmax(active[::-1]))
-    start = max(0, first_active - padding)
-    end = min(recording.size, last_active + padding + 1)
+        first_active = None
+        for chunk_start in range(0, recording.size, _CLOUD_TRIM_SCAN_CHUNK):
+            chunk = recording[chunk_start : chunk_start + _CLOUD_TRIM_SCAN_CHUNK]
+            active = np.abs(chunk) >= threshold
+            if active.any():
+                first_active = chunk_start + int(active.argmax())
+                break
+        if first_active is None:
+            return recording[:0]
+
+        for chunk_end in range(recording.size, first_active, -_CLOUD_TRIM_SCAN_CHUNK):
+            chunk_start = max(first_active, chunk_end - _CLOUD_TRIM_SCAN_CHUNK)
+            chunk = recording[chunk_start:chunk_end]
+            active = np.abs(chunk) >= threshold
+            if active.any():
+                last_active = chunk_end - 1 - int(active[::-1].argmax())
+                break
+
+    start = max(0, first_active - _CLOUD_SILENCE_PADDING_SAMPLES)
+    end = min(
+        recording.size,
+        last_active + _CLOUD_SILENCE_PADDING_SAMPLES + 1,
+    )
     return recording[start:end]
 
 

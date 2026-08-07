@@ -43,6 +43,20 @@ class TestCloudPayload(unittest.TestCase):
         recording = np.array([], dtype=np.float32)
         self.assertIs(trim_cloud_silence(recording), recording)
 
+    def test_trim_cloud_silence_scans_long_recording_without_losing_edges(self):
+        recording = np.zeros(320000, dtype=np.float32)
+        recording[120000:200000] = -0.005
+
+        trimmed = trim_cloud_silence(recording)
+
+        padding = int(SAMPLE_RATE * 0.16)
+        self.assertEqual(trimmed.size, 80000 + padding * 2)
+        self.assertAlmostEqual(float(trimmed[padding]), -0.005)
+
+    def test_trim_cloud_silence_ignores_non_finite_samples(self):
+        recording = np.full(160000, np.nan, dtype=np.float32)
+        self.assertEqual(trim_cloud_silence(recording).size, 0)
+
     def test_encode_wav_matches_groq_audio_contract(self):
         samples = np.array([-1.0, -0.25, 0.0, 0.25, 1.0], dtype=np.float32)
         payload = encode_wav(samples).getvalue()
