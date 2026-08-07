@@ -425,6 +425,16 @@ export default function App() {
       .listen("python_output", async (event: { payload: unknown }) => {
         try {
           const data = JSON.parse(event.payload as string) as PythonEvent;
+          let pastePromise: Promise<unknown> | null = null;
+
+          // Start the native paste before any React state updates or local
+          // bookkeeping can yield the event handler.
+          if (data.status === "result" && data.text && window.__TAURI__?.core?.invoke) {
+            console.log("[RESULT] starting paste immediately...");
+            pastePromise = window.__TAURI__.core.invoke("execute_paste", {
+              text: data.text,
+            });
+          }
 
           // Update modelReady and loading overlay
           if (data.status === "starting" || data.status === "loading_model") {
@@ -581,12 +591,9 @@ export default function App() {
 
             // Paste first: stats/history are local persistence work and must
             // not add latency before the text reaches the active application.
-            console.log("[RESULT] executing paste...");
-            if (window.__TAURI__?.core?.invoke) {
+            if (pastePromise) {
               try {
-                await window.__TAURI__.core.invoke("execute_paste", {
-                  text: data.text,
-                });
+                await pastePromise;
                 console.log("[RESULT] paste executed OK");
               } catch (e) {
                 console.error("[RESULT] paste error:", e);
