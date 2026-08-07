@@ -210,7 +210,8 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
             _GROQ_TRANSCRIPTION_URL,
             content=buffer,
         )
-        response.raise_for_status()
+        if response.status_code != 200:
+            response.raise_for_status()
 
         text = response.text.strip()
 
