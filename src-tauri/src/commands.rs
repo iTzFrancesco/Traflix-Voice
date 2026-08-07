@@ -122,11 +122,21 @@ pub fn check_model_exists(app: AppHandle, model_id: String) -> bool {
 /// Invia un comando al processo Python
 #[tauri::command]
 pub async fn send_to_python(state: State<'_, AppState>, message: String) -> Result<(), String> {
+    let mut payload = message.into_bytes();
+    payload.push(b'\n');
+    write_to_python(state, &payload)
+}
+
+/// Fast path for the most latency-sensitive command in the recording flow.
+#[tauri::command]
+pub async fn stop_python(state: State<'_, AppState>) -> Result<(), String> {
+    write_to_python(state, b"{\"command\":\"stop\"}\n")
+}
+
+fn write_to_python(state: State<'_, AppState>, payload: &[u8]) -> Result<(), String> {
     let mut process_lock = state.python_process.lock().unwrap();
     if let Some(child) = process_lock.as_mut() {
-        child
-            .write(format!("{}\n", message).as_bytes())
-            .map_err(|e| e.to_string())?;
+        child.write(payload).map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Motore Python non avviato".to_string())

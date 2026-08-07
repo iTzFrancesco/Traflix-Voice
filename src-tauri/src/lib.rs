@@ -360,6 +360,7 @@ pub fn run() {
             update_stats,
             get_audio_devices,
             send_to_python,
+            stop_python,
             check_model_exists,
             execute_paste,
             save_transcription,

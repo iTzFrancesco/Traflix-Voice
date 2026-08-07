@@ -809,9 +809,7 @@ export default function App() {
     transcriptionLockRef.current = false;
     setActiveTranscription(false);
     try {
-      await window.__TAURI__.core.invoke("send_to_python", {
-        message: JSON.stringify({ command: "stop" }),
-      });
+      await window.__TAURI__.core.invoke("stop_python");
       console.log("[REC] stop command sent OK");
     } catch (err) {
       console.error("[REC] stop error:", err);
