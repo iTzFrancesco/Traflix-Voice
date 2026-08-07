@@ -1,7 +1,7 @@
 {
   "name": "traflix-voice",
   "private": true,
-  "version": "1.4.3",
+  "version": "1.5.0",
   "type": "module",
   "description": "Dettatura vocale locale professionale alimentata da OpenAI Whisper.",
   "scripts": {
