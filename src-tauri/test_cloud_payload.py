@@ -8,10 +8,26 @@ import numpy as np
 
 from whisper_engine import transcriber
 from whisper_engine.constants import GROQ_TRANSCRIPTION_URL, SAMPLE_RATE
-from whisper_engine.transcriber import encode_wav
+from whisper_engine.transcriber import encode_wav, trim_cloud_silence
 
 
 class TestCloudPayload(unittest.TestCase):
+    def test_trim_cloud_silence_keeps_quiet_speech_and_padding(self):
+        quiet_speech = np.full(8000, 0.005, dtype=np.float32)
+        recording = np.concatenate(
+            [np.zeros(16000, dtype=np.float32), quiet_speech, np.zeros(16000, dtype=np.float32)]
+        )
+
+        trimmed = trim_cloud_silence(recording)
+
+        self.assertLess(trimmed.size, recording.size)
+        self.assertGreater(trimmed.size, quiet_speech.size)
+        self.assertTrue(np.any(trimmed == 0.005))
+
+    def test_trim_cloud_silence_leaves_empty_audio_unchanged(self):
+        recording = np.zeros(4000, dtype=np.float32)
+        self.assertIs(trim_cloud_silence(recording), recording)
+
     def test_encode_wav_matches_groq_audio_contract(self):
         samples = np.array([-1.0, -0.25, 0.0, 0.25, 1.0], dtype=np.float32)
         payload = encode_wav(samples).getvalue()

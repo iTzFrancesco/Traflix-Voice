@@ -10,3 +10,5 @@ GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 # makes the reported value independent from the number of samples in a block.
 VOLUME_FLOOR_DB = -58.0
 VOLUME_CEILING_DB = -12.0
+CLOUD_SILENCE_THRESHOLD = 0.003
+CLOUD_SILENCE_PADDING_SECONDS = 0.16

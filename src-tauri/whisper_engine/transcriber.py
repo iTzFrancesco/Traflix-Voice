@@ -9,6 +9,8 @@ import concurrent.futures
 from whisper_engine.constants import (
     GROQ_MODEL,
     GROQ_TRANSCRIPTION_URL,
+    CLOUD_SILENCE_PADDING_SECONDS,
+    CLOUD_SILENCE_THRESHOLD,
     SAMPLE_RATE,
     TRANSCRIPTION_TIMEOUT,
 )
@@ -95,6 +97,21 @@ def encode_wav(recording):
     return io.BytesIO(wav_header + pcm_data)
 
 
+def trim_cloud_silence(recording):
+    """Remove only leading/trailing near-silence before a cloud upload."""
+    if recording.size == 0:
+        return recording
+
+    active_samples = np.flatnonzero(np.abs(recording) >= CLOUD_SILENCE_THRESHOLD)
+    if active_samples.size == 0:
+        return recording
+
+    padding = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
+    start = max(0, int(active_samples[0]) - padding)
+    end = min(recording.size, int(active_samples[-1]) + padding + 1)
+    return recording[start:end]
+
+
 def transcribe_local(model, recording, language, recording_duration, shutting_down, log_func):
     if shutting_down:
         return
@@ -132,7 +149,7 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
         return
 
     try:
-        buffer = encode_wav(recording)
+        buffer = encode_wav(trim_cloud_silence(recording))
 
         client = get_groq_client(groq_api_key)
         lang_param = language if language != "auto" else None
