@@ -125,7 +125,9 @@ class WhisperEngine:
                 self.log({"status": "ready", "message": "Nessun audio catturato."})
                 return
 
-            recording = np.concatenate(audio_data, axis=0).flatten().astype(np.float32)
+            recording = np.concatenate(audio_data, axis=0).ravel()
+            if recording.dtype != np.float32:
+                recording = recording.astype(np.float32, copy=False)
 
             if self.provider == "cloud":
                 self._transcribe_cloud(recording, language, recording_duration)

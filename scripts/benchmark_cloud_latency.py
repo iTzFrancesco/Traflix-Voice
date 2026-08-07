@@ -59,12 +59,15 @@ from whisper_engine.ipc import handle_command  # noqa: E402
 
 
 class _FakeInputStream:
-    def __init__(self, engine, ready_event):
+    def __init__(self, engine, ready_event, blocks):
         self.engine = engine
         self.ready_event = ready_event
+        self.blocks = blocks
 
     def __enter__(self):
-        self.engine.audio_queue.put(np.zeros((BLOCK_SIZE, 1), dtype=np.float32))
+        block = np.zeros((BLOCK_SIZE, 1), dtype=np.float32)
+        for _ in range(self.blocks):
+            self.engine.audio_queue.put(block)
         self.ready_event.set()
         return self
 
@@ -72,7 +75,7 @@ class _FakeInputStream:
         return False
 
 
-def run_once() -> tuple[float, float]:
+def run_once(blocks: int) -> tuple[float, float]:
     global _request_event
 
     request_event = threading.Event()
@@ -91,7 +94,7 @@ def run_once() -> tuple[float, float]:
             result_event.set()
 
     engine.log = log
-    stream_factory = lambda **_kwargs: _FakeInputStream(engine, ready_event)
+    stream_factory = lambda **_kwargs: _FakeInputStream(engine, ready_event, blocks)
 
     original_stream = engine_module.sd.InputStream
     engine_module.sd.InputStream = stream_factory
@@ -142,16 +145,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=50)
+    parser.add_argument("--blocks", type=int, default=1)
     args = parser.parse_args()
 
     transcriber.close_groq_client()
     for _ in range(args.warmup):
-        run_once()
+        run_once(args.blocks)
 
     request_samples = []
     result_samples = []
     for _ in range(args.iterations):
-        requested, resulted = run_once()
+        requested, resulted = run_once(args.blocks)
         request_samples.append(requested)
         result_samples.append(resulted)
 
