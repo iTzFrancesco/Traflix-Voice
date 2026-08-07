@@ -83,6 +83,11 @@ def create_groq_client(groq_api_key):
             keepalive_expiry=60.0,
         ),
     )
+    # HTTP/1.1 is persistent by default, and Groq's tiny text response does
+    # not benefit from content compression. Omitting both defaults reduces
+    # request header normalization/wire bytes without changing semantics.
+    client.headers.pop("Connection", None)
+    client.headers.pop("Accept-Encoding", None)
     # The transcription API is stateless and authenticates every request via
     # Authorization. Skipping CookieJar extraction avoids urllib's relatively
     # expensive response-header conversion on every successful call.

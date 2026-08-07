@@ -66,6 +66,15 @@ class TestGroqClientCache(unittest.TestCase):
         self.assertEqual(len(created.cookies), 0)
         created.close()
 
+    def test_client_omits_redundant_transport_headers(self):
+        client = httpx.Client(transport=httpx.MockTransport(lambda request: None))
+        with patch.object(transcriber.httpx, "Client", return_value=client):
+            created = transcriber.create_groq_client("key-a")
+
+        self.assertNotIn("connection", created.headers)
+        self.assertNotIn("accept-encoding", created.headers)
+        created.close()
+
 
 if __name__ == "__main__":
     unittest.main()
