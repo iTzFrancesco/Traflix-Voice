@@ -71,7 +71,9 @@ def close_groq_client():
 
 def encode_wav(recording):
     """Encode mono float32 samples as the PCM WAV payload Groq accepts."""
-    audio_int16 = (np.clip(recording, -1.0, 1.0) * 32767).astype(np.int16)
+    clipped = np.clip(recording, -1.0, 1.0)
+    np.multiply(clipped, 32767.0, out=clipped)
+    audio_int16 = clipped.astype(np.int16)
     pcm_data = audio_int16.tobytes()
     data_size = len(pcm_data)
     wav_header = struct.pack(
