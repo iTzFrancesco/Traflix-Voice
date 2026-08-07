@@ -432,7 +432,6 @@ export default function App() {
           // Start the native paste before any React state updates or local
           // bookkeeping can yield the event handler.
           if (data.status === "result" && data.text && window.__TAURI__?.core?.invoke) {
-            console.log("[RESULT] starting paste immediately...");
             pastePromise = window.__TAURI__.core.invoke("execute_paste", {
               text: data.text,
             });
@@ -457,16 +456,12 @@ export default function App() {
 
           // Play sounds + UI state (only for test recordings)
           if (data.status === "listening") {
-            console.log("[PYTHON] listening → active=true, lock=false");
             activeTranscriptionRef.current = true;
             transcriptionLockRef.current = false;
             if (isTestRecordingRef.current) {
               setActiveTranscription(true);
             }
-          } else if (data.status === "processing") {
-            console.log("[PYTHON] processing (transcribing...)");
           } else if (data.status === "result" || data.status === "ready") {
-            console.log("[PYTHON]", data.status, "→ active=false, lock=false");
             if (isTestRecordingRef.current) setActiveTranscription(false);
             activeTranscriptionRef.current = false;
             transcriptionLockRef.current = false;
@@ -580,23 +575,15 @@ export default function App() {
           // Result with transcription text
           if (data.status === "result" && data.text) {
             const resultText = data.text;
-            console.log("[RESULT] received text length:", resultText.length, "duration:", data.duration);
             if (isTestRecordingRef.current) {
               isTestRecordingRef.current = false;
-              setTranscriptionText((prev) => {
-                console.log("[RESULT] appending to textarea, prev length:", prev.length);
-                return prev + resultText.trim() + "\n";
-              });
-            } else {
-              console.log("[RESULT] NOT test recording, skipping textarea append");
+              setTranscriptionText((prev) => prev + resultText.trim() + "\n");
             }
 
             // Paste first: stats/history are local persistence work and must
             // not add latency before the text reaches the active application.
             if (pastePromise) {
-              void pastePromise
-                .then(() => console.log("[RESULT] paste executed OK"))
-                .catch((e) => console.error("[RESULT] paste error:", e));
+              void pastePromise.catch((e) => console.error("[RESULT] paste error:", e));
             }
 
             // Update stats
@@ -675,7 +662,6 @@ export default function App() {
 
     Promise.all([
       window.__TAURI__.event.listen("hotkey_pressed", () => {
-        console.log("[HOTKEY] pressed received, holdToSpeak:", holdToSpeakRef.current, "active:", activeTranscriptionRef.current);
         if (!modelReadyRef.current) {
           showToast("Caricamento modello in corso, attendere...", "info");
           return;
@@ -691,7 +677,6 @@ export default function App() {
         }
       }),
       window.__TAURI__.event.listen("hotkey_released", () => {
-        console.log("[HOTKEY] released received, holdToSpeak:", holdToSpeakRef.current);
         if (holdToSpeakRef.current) {
           stopFnRef.current();
         }
@@ -752,17 +737,13 @@ export default function App() {
   // ── TRANSCRIPTION CONTROL ──
   const transcriptionLockRef = useRef(false);
   const transcriptionCooldownRef = useRef(0);
-  const recIdCounterRef = useRef(0);
-
   const startTranscription = useCallback(async (isTest?: boolean) => {
-    if (activeTranscriptionRef.current || transcriptionLockRef.current) { console.log("[REC] start BLOCKED: active=", activeTranscriptionRef.current, "lock=", transcriptionLockRef.current); return; }
+    if (activeTranscriptionRef.current || transcriptionLockRef.current) return;
     const now = Date.now();
-    if (now - transcriptionCooldownRef.current < 300) { console.log("[REC] start BLOCKED: cooldown"); return; }
+    if (now - transcriptionCooldownRef.current < 300) return;
     transcriptionCooldownRef.current = now;
     transcriptionLockRef.current = true;
     isTestRecordingRef.current = !!isTest;
-    const recId = ++recIdCounterRef.current;
-    console.log(`[REC] #${recId} startTranscription called, isTest=${!!isTest}`);
     if (!modelReady) {
       showToast("Caricamento modello in corso, attendere...", "info");
       transcriptionLockRef.current = false;
@@ -783,7 +764,6 @@ export default function App() {
     if (isTest) setActiveTranscription(true);
 
     try {
-      console.log(`[REC] #${recId} sending transcribe command...`);
       await window.__TAURI__.core.invoke("send_to_python", {
         message: JSON.stringify({
           command: "transcribe",
@@ -796,9 +776,8 @@ export default function App() {
           provider: selectedProvider,
         }),
       });
-      console.log(`[REC] #${recId} transcribe command sent OK`);
     } catch (err) {
-      console.error(`[REC] #${recId} Error:`, err);
+      console.error("[REC] start error:", err);
       activeTranscriptionRef.current = false;
       setActiveTranscription(false);
     } finally {
@@ -809,11 +788,9 @@ export default function App() {
   startFnRef.current = startTranscription;
 
   const stopTranscription = useCallback(() => {
-    if (!activeTranscriptionRef.current) { console.log("[REC] stop: not active, skipping"); return; }
-    console.log("[REC] stopTranscription called, sending stop...");
+    if (!activeTranscriptionRef.current) return;
     activeTranscriptionRef.current = false;
     transcriptionLockRef.current = false;
-    setActiveTranscription(false);
     try {
       void window.__TAURI__.core.invoke("stop_python").catch((err: unknown) => {
         console.error("[REC] stop error:", err);
@@ -821,6 +798,7 @@ export default function App() {
     } catch (err) {
       console.error("[REC] stop error:", err);
     }
+    setActiveTranscription(false);
   }, []);
   stopFnRef.current = stopTranscription;
 
