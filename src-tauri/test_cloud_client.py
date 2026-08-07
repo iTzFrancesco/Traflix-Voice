@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import httpx
+
 from whisper_engine import transcriber
 
 
@@ -46,6 +48,23 @@ class TestGroqClientCache(unittest.TestCase):
                 "Content-Type": "multipart/form-data; boundary=------------------------traflix-voice-8c4e9b",
             },
         )
+
+    def test_client_ignores_irrelevant_response_cookies(self):
+        def handler(request):
+            return httpx.Response(
+                200,
+                text="ok",
+                headers={"Set-Cookie": "unused=value"},
+                request=request,
+            )
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        with patch.object(transcriber.httpx, "Client", return_value=client):
+            created = transcriber.create_groq_client("key-a")
+
+        created.post("https://api.groq.com/test")
+        self.assertEqual(len(created.cookies), 0)
+        created.close()
 
 
 if __name__ == "__main__":

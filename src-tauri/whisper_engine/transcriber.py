@@ -64,9 +64,14 @@ _CLOUD_TRIM_MASK_LIMIT = SAMPLE_RATE * 8
 _CLOUD_TRIM_SCAN_CHUNK = SAMPLE_RATE
 
 
+def _ignore_response_cookies(_response):
+    """Groq uses bearer auth; response cookies are irrelevant to this client."""
+    return None
+
+
 def create_groq_client(groq_api_key):
     """Create one persistent HTTP client for the Groq endpoint."""
-    return httpx.Client(
+    client = httpx.Client(
         headers={
             "Authorization": f"Bearer {groq_api_key}",
             "Content-Type": f"multipart/form-data; boundary={GROQ_MULTIPART_BOUNDARY}",
@@ -78,6 +83,11 @@ def create_groq_client(groq_api_key):
             keepalive_expiry=60.0,
         ),
     )
+    # The transcription API is stateless and authenticates every request via
+    # Authorization. Skipping CookieJar extraction avoids urllib's relatively
+    # expensive response-header conversion on every successful call.
+    client.cookies.extract_cookies = _ignore_response_cookies
+    return client
 
 
 def get_groq_client(groq_api_key):
