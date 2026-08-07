@@ -15,7 +15,10 @@ class WhisperEngine:
     def __init__(self):
         self.model = None
         self.current_model_size = None
-        self.audio_queue = queue.Queue()
+        # Audio blocks are only transferred between the callback and the
+        # transcription worker. SimpleQueue avoids the task-tracking and
+        # condition bookkeeping that Queue adds to this hot path.
+        self.audio_queue = queue.SimpleQueue()
         self.is_recording = False
         self.models_dir = None
         self._shutting_down = False
@@ -102,7 +105,7 @@ class WhisperEngine:
             if self.provider == "local":
                 self.load_model(model_size)
 
-            self.audio_queue = queue.Queue()
+            self.audio_queue = queue.SimpleQueue()
             self.is_recording = True
             audio_data = []
 

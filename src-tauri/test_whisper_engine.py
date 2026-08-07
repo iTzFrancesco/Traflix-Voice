@@ -38,7 +38,7 @@ class TestWhisperEngineInit(unittest.TestCase):
         self.assertIsNone(engine.current_model_size)
         self.assertIsNone(engine.models_dir)
         self.assertFalse(engine.is_recording)
-        self.assertIsInstance(engine.audio_queue, queue.Queue)
+        self.assertIsInstance(engine.audio_queue, queue.SimpleQueue)
         self.assertEqual(engine.current_device, "cpu")
         self.assertEqual(engine.compute_device, "cpu")
 
