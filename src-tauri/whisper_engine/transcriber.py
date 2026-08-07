@@ -271,10 +271,13 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
 
         client = get_groq_client(groq_api_key)
 
-        response = client.post(
+        request = httpx.Request(
+            "POST",
             _GROQ_TRANSCRIPTION_URL,
+            headers=client.headers,
             content=buffer,
         )
+        response = client.send(request)
         if response.status_code != 200:
             response.raise_for_status()
 
