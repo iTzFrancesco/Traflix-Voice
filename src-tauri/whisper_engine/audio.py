@@ -36,11 +36,12 @@ def audio_callback(indata, frames, time, status, audio_queue, is_recording, log_
         log_func({"status": "warning", "message": str(status)})
     audio_queue.put(indata.copy())
     if is_recording:
+        current_time = pytime.monotonic()
+        if current_time - audio_callback._last_vol_time <= 0.05:
+            return
         level = calculate_volume(indata)
-        current_time = pytime.time()
-        if current_time - audio_callback._last_vol_time > 0.05:
-            log_func({"status": "volume", "value": level})
-            audio_callback._last_vol_time = current_time
+        log_func({"status": "volume", "value": level})
+        audio_callback._last_vol_time = current_time
 
 
 audio_callback._last_vol_time = 0
