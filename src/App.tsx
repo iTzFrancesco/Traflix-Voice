@@ -144,7 +144,7 @@ export default function App() {
   const modelReadyRef = useRef(false);
   const holdToSpeakRef = useRef(false);
   const startFnRef = useRef<(isTest?: boolean) => Promise<void>>(async () => {});
-  const stopFnRef = useRef<() => Promise<void>>(async () => {});
+  const stopFnRef = useRef<() => void>(() => {});
   modelReadyRef.current = modelReady;
   holdToSpeakRef.current = holdToSpeak;
   selectedProviderRef.current = selectedProvider;
@@ -808,15 +808,16 @@ export default function App() {
 
   startFnRef.current = startTranscription;
 
-  const stopTranscription = useCallback(async () => {
+  const stopTranscription = useCallback(() => {
     if (!activeTranscriptionRef.current) { console.log("[REC] stop: not active, skipping"); return; }
     console.log("[REC] stopTranscription called, sending stop...");
     activeTranscriptionRef.current = false;
     transcriptionLockRef.current = false;
     setActiveTranscription(false);
     try {
-      await window.__TAURI__.core.invoke("stop_python");
-      console.log("[REC] stop command sent OK");
+      void window.__TAURI__.core.invoke("stop_python").catch((err: unknown) => {
+        console.error("[REC] stop error:", err);
+      });
     } catch (err) {
       console.error("[REC] stop error:", err);
     }
