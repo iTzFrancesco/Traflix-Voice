@@ -3,6 +3,15 @@ import ReactDOM from "react-dom/client";
 
 const IS_DEV = import.meta.env.DEV;
 
+function responsiveVolume(value: number): number {
+  const normalized = Math.min(1, Math.max(0, value / 100));
+  if (normalized === 0) return 0;
+
+  // A sub-linear curve makes quiet speech visible while preserving headroom
+  // for louder peaks instead of clipping the bars immediately.
+  return Math.min(1, Math.pow(normalized, 0.68) * 1.12);
+}
+
 function Overlay() {
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -222,8 +231,8 @@ function Overlay() {
       currentVolume += (targetVolume - currentVolume) * 0.2;
       if (currentVolume < 0.5) currentVolume = 0;
 
-      const volNorm = currentVolume / 100;
-      const maxH = 20;
+      const volNorm = responsiveVolume(currentVolume);
+      const maxH = 30;
       const minH = 3;
 
       for (let i = 0; i < 14; i++) {
@@ -232,7 +241,7 @@ function Overlay() {
         const bellFactor = 1 - dist * 0.5;
         const jitter = 0.6 + Math.random() * 0.4;
 
-        barTargets[i] = minH + volNorm * maxH * bellFactor * jitter;
+        barTargets[i] = minH + volNorm * (maxH - minH) * bellFactor * jitter;
         barHeights[i] += (barTargets[i] - barHeights[i]) * 0.25;
 
         const h = Math.max(minH, Math.min(maxH, barHeights[i]));
