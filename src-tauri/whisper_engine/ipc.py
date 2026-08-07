@@ -20,6 +20,7 @@ def handle_command(cmd, data, engine):
         if engine.provider == "local":
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
         else:
+            threading.Thread(target=engine.prepare_groq_client, daemon=True).start()
             engine.log({"status": "ready", "message": f"Pronto (cloud: {GROQ_MODEL})."})
     elif cmd == "download":
         threading.Thread(target=engine.download_model, args=(data.get("model"),), daemon=True).start()
@@ -38,6 +39,7 @@ def handle_command(cmd, data, engine):
         engine.provider = new_provider
         if new_provider == "cloud" and old_provider == "local":
             engine.unload_model()
+            threading.Thread(target=engine.prepare_groq_client, daemon=True).start()
         elif new_provider == "local":
             preload_model = data.get("model", "small")
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
@@ -52,6 +54,8 @@ def handle_command(cmd, data, engine):
         engine.log({"status": "info", "message": f"Dispositivo di calcolo impostato a: {engine.compute_device}"})
     elif cmd == "set_groq_api_key":
         engine.groq_api_key = data.get("api_key") or None
+        if engine.provider == "cloud":
+            threading.Thread(target=engine.prepare_groq_client, daemon=True).start()
     elif cmd == "quit":
         engine._shutting_down = True
         engine.stop_recording()

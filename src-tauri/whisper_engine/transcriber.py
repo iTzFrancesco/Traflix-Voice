@@ -22,7 +22,12 @@ def create_groq_client(groq_api_key):
     return Groq(
         api_key=groq_api_key,
         http_client=httpx.Client(
-            timeout=httpx.Timeout(30.0, connect=10.0, read=25.0)
+            timeout=httpx.Timeout(30.0, connect=10.0, read=25.0),
+            limits=httpx.Limits(
+                max_connections=2,
+                max_keepalive_connections=1,
+                keepalive_expiry=60.0,
+            ),
         ),
     )
 

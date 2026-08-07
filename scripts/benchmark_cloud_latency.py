@@ -75,7 +75,7 @@ class _FakeInputStream:
         return False
 
 
-def run_once(blocks: int) -> tuple[float, float]:
+def run_once(blocks: int, prewarm: bool = False) -> tuple[float, float]:
     global _request_event
 
     request_event = threading.Event()
@@ -86,6 +86,8 @@ def run_once(blocks: int) -> tuple[float, float]:
     engine = engine_module.WhisperEngine()
     engine.provider = "cloud"
     engine.groq_api_key = "fake-key"
+    if prewarm:
+        engine.prepare_groq_client()
 
     def log(event):
         if event.get("status") == "error":
@@ -146,16 +148,17 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=50)
     parser.add_argument("--blocks", type=int, default=1)
+    parser.add_argument("--prewarm", action="store_true")
     args = parser.parse_args()
 
     transcriber.close_groq_client()
     for _ in range(args.warmup):
-        run_once(args.blocks)
+        run_once(args.blocks, args.prewarm)
 
     request_samples = []
     result_samples = []
     for _ in range(args.iterations):
-        requested, resulted = run_once(args.blocks)
+        requested, resulted = run_once(args.blocks, args.prewarm)
         request_samples.append(requested)
         result_samples.append(resulted)
 

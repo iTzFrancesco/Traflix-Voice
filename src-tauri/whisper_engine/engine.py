@@ -66,6 +66,15 @@ class WhisperEngine:
     def close_groq_client(self):
         transcriber.close_groq_client()
 
+    def prepare_groq_client(self):
+        if self.groq_api_key:
+            try:
+                transcriber.get_groq_client(self.groq_api_key)
+            except Exception:
+                # The normal transcription path reports configuration/import
+                # errors to the UI; prewarming must never block startup.
+                pass
+
     def stop_recording(self):
         self.is_recording = False
         # Wake the capture loop immediately instead of waiting for its poll
