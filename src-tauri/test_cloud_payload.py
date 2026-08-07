@@ -20,6 +20,11 @@ class TestCloudPayload(unittest.TestCase):
         self.assertIn(b'filename="audio.wav"', payload)
         self.assertIn(GROQ_MULTIPART_BOUNDARY.encode("ascii"), payload)
 
+    def test_encode_cloud_multipart_omits_language_for_auto_detection(self):
+        payload = encode_cloud_multipart(encode_wav(np.zeros(160, dtype=np.float32)), None)
+        self.assertNotIn(b'name="language"', payload)
+        self.assertIn(b'filename="audio.wav"', payload)
+
     def test_trim_cloud_silence_keeps_quiet_speech_and_padding(self):
         quiet_speech = np.full(8000, 0.005, dtype=np.float32)
         recording = np.concatenate(

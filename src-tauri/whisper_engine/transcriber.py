@@ -45,6 +45,18 @@ _FILE_FIELD_PREFIX = (
     b"Content-Type: audio/wav\r\n\r\n"
 )
 _MULTIPART_SUFFIX = b"\r\n--" + _MULTIPART_BOUNDARY + b"--\r\n"
+_MULTIPART_BASE_PREFIX = _MODEL_FIELD + _RESPONSE_FORMAT_FIELD
+_MULTIPART_PREFIXES = {
+    language: (
+        _MULTIPART_BASE_PREFIX
+        + _LANGUAGE_FIELD_PREFIX
+        + language.encode("ascii")
+        + b"\r\n"
+        + _FILE_FIELD_PREFIX
+    )
+    for language in ("it", "en", "fr", "de", "es", "pt")
+}
+_MULTIPART_PREFIXES[None] = _MULTIPART_BASE_PREFIX + _FILE_FIELD_PREFIX
 _WAV_HEADER = struct.Struct("<4sI4s4sIHHIIHH4sI")
 _GROQ_TRANSCRIPTION_URL = httpx.URL(GROQ_TRANSCRIPTION_URL)
 _CLOUD_SILENCE_PADDING_SAMPLES = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
@@ -131,12 +143,13 @@ def encode_wav(recording):
 
 def encode_cloud_multipart(wav_buffer, language):
     """Build the fixed cloud multipart envelope without HTTPX re-encoding it."""
-    parts = [_MODEL_FIELD, _RESPONSE_FORMAT_FIELD]
-    if language:
-        parts.extend((_LANGUAGE_FIELD_PREFIX, language.encode("utf-8") + b"\r\n"))
-
-    parts.extend((_FILE_FIELD_PREFIX, wav_buffer.getvalue(), _MULTIPART_SUFFIX))
-    return b"".join(parts)
+    prefix = _MULTIPART_PREFIXES.get(language)
+    if prefix is None:
+        prefix = _MULTIPART_BASE_PREFIX
+        if language:
+            prefix += _LANGUAGE_FIELD_PREFIX + language.encode("utf-8") + b"\r\n"
+        prefix += _FILE_FIELD_PREFIX
+    return b"".join((prefix, wav_buffer.getvalue(), _MULTIPART_SUFFIX))
 
 
 def trim_cloud_silence(recording):
