@@ -137,7 +137,9 @@ class WhisperEngine:
                 self.log({"status": "ready", "message": "Nessun audio catturato."})
                 return
 
-            recording = np.concatenate(audio_data, axis=0).ravel()
+            # InputStream is configured for one channel. Selecting that
+            # column directly keeps the flattened recording as a view.
+            recording = np.concatenate(audio_data, axis=0)[:, 0]
             if recording.dtype != np.float32:
                 recording = recording.astype(np.float32, copy=False)
 
