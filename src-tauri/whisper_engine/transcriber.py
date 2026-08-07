@@ -8,6 +8,7 @@ import concurrent.futures
 
 from whisper_engine.constants import (
     GROQ_MODEL,
+    GROQ_MULTIPART_BOUNDARY,
     GROQ_TRANSCRIPTION_URL,
     CLOUD_SILENCE_PADDING_SECONDS,
     CLOUD_SILENCE_THRESHOLD,
@@ -25,7 +26,10 @@ _GROQ_CLIENT_LOCK = threading.Lock()
 def create_groq_client(groq_api_key):
     """Create one persistent HTTP client for the Groq endpoint."""
     return httpx.Client(
-        headers={"Authorization": f"Bearer {groq_api_key}"},
+        headers={
+            "Authorization": f"Bearer {groq_api_key}",
+            "Content-Type": f"multipart/form-data; boundary={GROQ_MULTIPART_BOUNDARY}",
+        },
         timeout=httpx.Timeout(30.0, connect=10.0, read=25.0),
         limits=httpx.Limits(
             max_connections=2,
@@ -97,6 +101,46 @@ def encode_wav(recording):
     return io.BytesIO(wav_header + pcm_data)
 
 
+def encode_cloud_multipart(wav_buffer, language):
+    """Build the fixed cloud multipart envelope without HTTPX re-encoding it."""
+    boundary = GROQ_MULTIPART_BOUNDARY.encode("ascii")
+    parts = []
+
+    for name, value in (
+        ("model", GROQ_MODEL),
+        ("response_format", "text"),
+    ):
+        parts.extend(
+            (
+                b"--" + boundary + b"\r\n",
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(
+                    "ascii"
+                ),
+                value.encode("ascii") + b"\r\n",
+            )
+        )
+
+    if language:
+        parts.extend(
+            (
+                b"--" + boundary + b"\r\n",
+                b'Content-Disposition: form-data; name="language"\r\n\r\n',
+                language.encode("utf-8") + b"\r\n",
+            )
+        )
+
+    parts.extend(
+        (
+            b"--" + boundary + b"\r\n",
+            b'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n',
+            b"Content-Type: audio/wav\r\n\r\n",
+            wav_buffer.getvalue(),
+            b"\r\n--" + boundary + b"--\r\n",
+        )
+    )
+    return b"".join(parts)
+
+
 def trim_cloud_silence(recording):
     """Remove only leading/trailing near-silence before a cloud upload."""
     if recording.size == 0:
@@ -149,22 +193,16 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
         return
 
     try:
-        buffer = encode_wav(trim_cloud_silence(recording))
+        buffer = encode_cloud_multipart(
+            encode_wav(trim_cloud_silence(recording)),
+            language if language != "auto" else None,
+        )
 
         client = get_groq_client(groq_api_key)
-        lang_param = language if language != "auto" else None
-
-        form_data = {
-            "model": GROQ_MODEL,
-            "response_format": "text",
-        }
-        if lang_param:
-            form_data["language"] = lang_param
 
         response = client.post(
             GROQ_TRANSCRIPTION_URL,
-            files={"file": ("audio.wav", buffer, "audio/wav")},
-            data=form_data,
+            content=buffer,
         )
         response.raise_for_status()
 

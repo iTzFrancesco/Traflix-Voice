@@ -7,11 +7,19 @@ import httpx
 import numpy as np
 
 from whisper_engine import transcriber
-from whisper_engine.constants import GROQ_TRANSCRIPTION_URL, SAMPLE_RATE
-from whisper_engine.transcriber import encode_wav, trim_cloud_silence
+from whisper_engine.constants import GROQ_MULTIPART_BOUNDARY, GROQ_TRANSCRIPTION_URL, SAMPLE_RATE
+from whisper_engine.transcriber import encode_cloud_multipart, encode_wav, trim_cloud_silence
 
 
 class TestCloudPayload(unittest.TestCase):
+    def test_encode_cloud_multipart_contains_expected_fields(self):
+        payload = encode_cloud_multipart(encode_wav(np.zeros(160, dtype=np.float32)), "it")
+        self.assertIn(b'name="model"', payload)
+        self.assertIn(b'name="response_format"', payload)
+        self.assertIn(b'name="language"', payload)
+        self.assertIn(b'filename="audio.wav"', payload)
+        self.assertIn(GROQ_MULTIPART_BOUNDARY.encode("ascii"), payload)
+
     def test_trim_cloud_silence_keeps_quiet_speech_and_padding(self):
         quiet_speech = np.full(8000, 0.005, dtype=np.float32)
         recording = np.concatenate(
@@ -47,7 +55,10 @@ class TestCloudPayload(unittest.TestCase):
 
         client = httpx.Client(
             transport=httpx.MockTransport(handler),
-            headers={"Authorization": "Bearer fake-key"},
+            headers={
+                "Authorization": "Bearer fake-key",
+                "Content-Type": f"multipart/form-data; boundary={GROQ_MULTIPART_BOUNDARY}",
+            },
         )
         events = []
         transcriber.close_groq_client()
@@ -66,6 +77,10 @@ class TestCloudPayload(unittest.TestCase):
         request = captured["request"]
         self.assertEqual(str(request.url), GROQ_TRANSCRIPTION_URL)
         self.assertEqual(request.headers["authorization"], "Bearer fake-key")
+        self.assertEqual(
+            request.headers["content-type"],
+            f"multipart/form-data; boundary={GROQ_MULTIPART_BOUNDARY}",
+        )
         self.assertIn(b"whisper-large-v3-turbo", request.content)
         self.assertEqual(events[-1]["text"], "ciao")
 

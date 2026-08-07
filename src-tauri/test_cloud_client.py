@@ -41,7 +41,10 @@ class TestGroqClientCache(unittest.TestCase):
 
         self.assertEqual(
             create.call_args.kwargs["headers"],
-            {"Authorization": "Bearer key-a"},
+            {
+                "Authorization": "Bearer key-a",
+                "Content-Type": "multipart/form-data; boundary=------------------------traflix-voice-8c4e9b",
+            },
         )
 
 
