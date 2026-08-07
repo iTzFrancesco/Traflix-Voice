@@ -1,7 +1,7 @@
 SAMPLE_RATE = 16000
-# 64 ms keeps the meter responsive and bounds the amount of audio waiting
-# behind a stop command without making callback overhead significant.
-BLOCK_SIZE = 1024
+# 32 ms keeps the meter and stop response responsive. The lightweight queue
+# and throttled volume calculation keep the extra callback rate inexpensive.
+BLOCK_SIZE = 512
 TRANSCRIPTION_TIMEOUT = 60
 GROQ_MODEL = "whisper-large-v3-turbo"
 GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
