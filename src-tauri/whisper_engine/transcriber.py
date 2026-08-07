@@ -21,6 +21,9 @@ _TRAF_DEBUG = os.environ.get("TRAF_DEBUG") == "1"
 _GROQ_CLIENT = None
 _GROQ_CLIENT_KEY = None
 _GROQ_CLIENT_LOCK = threading.Lock()
+_USAGE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="groq-usage"
+)
 _MULTIPART_BOUNDARY = GROQ_MULTIPART_BOUNDARY.encode("ascii")
 _MODEL_FIELD = (
     b"--" + _MULTIPART_BOUNDARY + b"\r\n"
@@ -222,7 +225,12 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
             _sys.stderr.write(f"[PY-DEBUG] transcribe_cloud result len={len(text)} duration={recording_duration}\n")
             _sys.stderr.flush()
         log_func({"status": "result", "text": text, "duration": recording_duration})
-        record_groq_usage(models_dir, duration_seconds=recording_duration)
+        if models_dir:
+            _USAGE_EXECUTOR.submit(
+                record_groq_usage,
+                models_dir,
+                duration_seconds=recording_duration,
+            )
 
     except ImportError:
         log_func({"status": "error", "message": "Libreria 'groq' non installata. Esegui: pip install groq"})
