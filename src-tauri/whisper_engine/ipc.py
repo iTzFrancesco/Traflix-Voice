@@ -45,8 +45,11 @@ def handle_command(cmd, data, engine):
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
     elif cmd == "transcribe":
         engine.provider = data.get("provider", "local")
-        threading.Thread(target=engine.transcribe,
-                         args=(data.get("device"), data.get("model", "small"), data.get("language", "it"))).start()
+        engine.start_transcription(
+            data.get("device"),
+            data.get("model", "small"),
+            data.get("language", "it"),
+        )
     elif cmd == "stop":
         engine.stop_recording()
     elif cmd == "set_device":

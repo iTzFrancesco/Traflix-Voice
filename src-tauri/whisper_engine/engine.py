@@ -2,6 +2,7 @@ import sys
 import json
 import queue
 import threading
+import concurrent.futures
 import numpy as np
 import sounddevice as sd
 
@@ -28,6 +29,10 @@ class WhisperEngine:
         self.groq_api_key = None
         self.provider = "local"
         self._loading_in_progress = False
+        self._transcription_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="transcription",
+        )
 
     def log(self, data):
         ipc.log(data)
@@ -83,6 +88,22 @@ class WhisperEngine:
         # Wake the capture loop immediately instead of waiting for its poll
         # timeout. The sentinel is consumed after blocks already queued.
         self.audio_queue.put(None)
+
+    def prepare_transcription_worker(self):
+        """Start the single recording worker before the first hotkey press."""
+        self._transcription_executor.submit(lambda: None).result()
+
+    def start_transcription(self, device_id, model_size, language="it"):
+        """Dispatch recording without paying per-session thread startup."""
+        return self._transcription_executor.submit(
+            self.transcribe,
+            device_id,
+            model_size,
+            language,
+        )
+
+    def close_transcription_worker(self):
+        self._transcription_executor.shutdown(wait=False, cancel_futures=True)
 
     def audio_callback(self, indata, frames, time, status):
         audio_module.audio_callback(indata, frames, time, status, self.audio_queue, self.is_recording, self.log)
@@ -153,13 +174,17 @@ class WhisperEngine:
             self.log({"status": "error", "message": str(e)})
 
     def run(self):
+        self.prepare_transcription_worker()
         self.log({"status": "starting", "message": "Avvio motore vocale..."})
-        for line in sys.stdin:
-            try:
-                data = json.loads(line)
-                cmd = data.get("command")
-                should_quit = ipc.handle_command(cmd, data, self)
-                if should_quit:
-                    break
-            except Exception as e:
-                self.log({"status": "error", "message": str(e)})
+        try:
+            for line in sys.stdin:
+                try:
+                    data = json.loads(line)
+                    cmd = data.get("command")
+                    should_quit = ipc.handle_command(cmd, data, self)
+                    if should_quit:
+                        break
+                except Exception as e:
+                    self.log({"status": "error", "message": str(e)})
+        finally:
+            self.close_transcription_worker()

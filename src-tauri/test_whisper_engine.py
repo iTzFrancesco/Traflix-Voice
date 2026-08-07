@@ -11,6 +11,7 @@ import json
 import io
 import sys
 import queue
+import threading
 import unittest
 from unittest.mock import patch, MagicMock, PropertyMock
 import numpy as np
@@ -41,6 +42,26 @@ class TestWhisperEngineInit(unittest.TestCase):
         self.assertIsInstance(engine.audio_queue, queue.SimpleQueue)
         self.assertEqual(engine.current_device, "cpu")
         self.assertEqual(engine.compute_device, "cpu")
+
+    def test_transcription_worker_reuses_one_warm_thread(self):
+        engine = WhisperEngine()
+        worker_ids = []
+        engine.prepare_transcription_worker()
+        try:
+            with patch.object(
+                engine,
+                "transcribe",
+                side_effect=lambda *_args: worker_ids.append(threading.get_ident()),
+            ):
+                first = engine.start_transcription(None, "small")
+                second = engine.start_transcription(None, "small")
+                first.result(timeout=1)
+                second.result(timeout=1)
+        finally:
+            engine.close_transcription_worker()
+
+        self.assertEqual(len(worker_ids), 2)
+        self.assertEqual(worker_ids[0], worker_ids[1])
 
 
 # ---------------------------------------------------------------------------
@@ -112,46 +133,47 @@ class TestRunCommandParsing(unittest.TestCase):
             json.dumps({"command": "download", "model": "small"}) + "\n",
             json.dumps({"command": "quit"}) + "\n",
         ]
-        with patch("sys.stdin", io.StringIO("".join(lines))):
+        with (
+            patch("sys.stdin", io.StringIO("".join(lines))),
+            patch.object(engine, "prepare_transcription_worker"),
+        ):
             engine.run()
 
         mock_thread_cls.assert_called_once()
         mock_thread.start.assert_called_once()
 
     # -- transcribe ---------------------------------------------------------
-    @patch("whisper_engine.ipc.threading.Thread")
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_cmd_transcribe_starts_thread(self, _, mock_thread_cls):
+    def test_cmd_transcribe_dispatches_to_warm_worker(self, _):
         engine = self._make_engine()
-        mock_thread = MagicMock()
-        mock_thread_cls.return_value = mock_thread
 
         lines = [
             json.dumps({"command": "transcribe", "device": 1, "model": "base"}) + "\n",
             json.dumps({"command": "quit"}) + "\n",
         ]
-        with patch("sys.stdin", io.StringIO("".join(lines))):
+        with (
+            patch("sys.stdin", io.StringIO("".join(lines))),
+            patch.object(engine, "start_transcription") as start_transcription,
+        ):
             engine.run()
 
-        self.assertTrue(mock_thread.start.called)
+        start_transcription.assert_called_once_with(1, "base", "it")
 
-    @patch("whisper_engine.ipc.threading.Thread")
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_cmd_transcribe_defaults_model_to_small(self, _, mock_thread_cls):
+    def test_cmd_transcribe_defaults_model_to_small(self, _):
         engine = self._make_engine()
-        mock_thread = MagicMock()
-        mock_thread_cls.return_value = mock_thread
 
         lines = [
             json.dumps({"command": "transcribe", "device": 0}) + "\n",
             json.dumps({"command": "quit"}) + "\n",
         ]
-        with patch("sys.stdin", io.StringIO("".join(lines))):
+        with (
+            patch("sys.stdin", io.StringIO("".join(lines))),
+            patch.object(engine, "start_transcription") as start_transcription,
+        ):
             engine.run()
 
-        call_args = mock_thread_cls.call_args
-        args_tuple = call_args.kwargs.get("args") or call_args[1].get("args")
-        self.assertIn("small", args_tuple)
+        start_transcription.assert_called_once_with(0, "small", "it")
 
     # -- stop ---------------------------------------------------------------
     @patch("sys.stdout", new_callable=io.StringIO)
