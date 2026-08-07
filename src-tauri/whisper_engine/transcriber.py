@@ -43,6 +43,7 @@ _FILE_FIELD_PREFIX = (
 )
 _MULTIPART_SUFFIX = b"\r\n--" + _MULTIPART_BOUNDARY + b"--\r\n"
 _WAV_HEADER = struct.Struct("<4sI4s4sIHHIIHH4sI")
+_GROQ_TRANSCRIPTION_URL = httpx.URL(GROQ_TRANSCRIPTION_URL)
 
 
 def create_groq_client(groq_api_key):
@@ -206,7 +207,7 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
         client = get_groq_client(groq_api_key)
 
         response = client.post(
-            GROQ_TRANSCRIPTION_URL,
+            _GROQ_TRANSCRIPTION_URL,
             content=buffer,
         )
         response.raise_for_status()
