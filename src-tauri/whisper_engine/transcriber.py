@@ -42,6 +42,7 @@ _FILE_FIELD_PREFIX = (
     b"Content-Type: audio/wav\r\n\r\n"
 )
 _MULTIPART_SUFFIX = b"\r\n--" + _MULTIPART_BOUNDARY + b"--\r\n"
+_WAV_HEADER = struct.Struct("<4sI4s4sIHHIIHH4sI")
 
 
 def create_groq_client(groq_api_key):
@@ -103,8 +104,7 @@ def encode_wav(recording):
     audio_int16 = clipped.astype(np.int16)
     pcm_data = audio_int16.tobytes()
     data_size = len(pcm_data)
-    wav_header = struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
+    wav_header = _WAV_HEADER.pack(
         b"RIFF",
         36 + data_size,
         b"WAVE",
