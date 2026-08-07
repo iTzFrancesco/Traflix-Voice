@@ -23,6 +23,7 @@ _GROQ_CLIENT_LOCK = threading.Lock()
 def create_groq_client(groq_api_key):
     """Create one persistent HTTP client for the Groq endpoint."""
     return httpx.Client(
+        headers={"Authorization": f"Bearer {groq_api_key}"},
         timeout=httpx.Timeout(30.0, connect=10.0, read=25.0),
         limits=httpx.Limits(
             max_connections=2,
@@ -143,7 +144,6 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
 
         response = client.post(
             GROQ_TRANSCRIPTION_URL,
-            headers={"Authorization": f"Bearer {groq_api_key}"},
             files={"file": ("audio.wav", buffer, "audio/wav")},
             data=form_data,
         )

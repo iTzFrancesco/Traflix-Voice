@@ -29,7 +29,10 @@ class TestCloudPayload(unittest.TestCase):
             captured["request"] = request
             return httpx.Response(200, text=" ciao ", request=request)
 
-        client = httpx.Client(transport=httpx.MockTransport(handler))
+        client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"Authorization": "Bearer fake-key"},
+        )
         events = []
         transcriber.close_groq_client()
         with patch.object(transcriber, "create_groq_client", return_value=client):

@@ -34,6 +34,16 @@ class TestGroqClientCache(unittest.TestCase):
         self.assertEqual(create.call_count, 2)
         first.close.assert_called_once_with()
 
+    def test_client_stores_authorization_header(self):
+        client = MagicMock()
+        with patch.object(transcriber.httpx, "Client", return_value=client) as create:
+            transcriber.create_groq_client("key-a")
+
+        self.assertEqual(
+            create.call_args.kwargs["headers"],
+            {"Authorization": "Bearer key-a"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
