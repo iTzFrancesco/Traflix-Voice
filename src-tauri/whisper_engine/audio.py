@@ -15,7 +15,12 @@ def calculate_volume(indata):
     if samples.size == 0:
         return 0
 
-    samples = np.nan_to_num(samples, nan=0.0, posinf=0.0, neginf=0.0)
+    # The callback already queued an independent copy. Reuse the sounddevice
+    # buffer for sanitizing invalid samples instead of allocating another
+    # block on every volume update.
+    samples = np.nan_to_num(
+        samples, nan=0.0, posinf=0.0, neginf=0.0, copy=False
+    )
     rms = float(np.sqrt(np.mean(np.square(samples))))
     peak = float(np.max(np.abs(samples)))
     effective_level = max(rms, peak * 0.08)
