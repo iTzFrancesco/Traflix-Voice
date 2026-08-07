@@ -1,6 +1,6 @@
 import io
-import wave
 import os
+import struct
 import threading
 import httpx
 import numpy as np
@@ -63,6 +63,30 @@ def close_groq_client():
             close()
 
 
+def encode_wav(recording):
+    """Encode mono float32 samples as the PCM WAV payload Groq accepts."""
+    audio_int16 = (np.clip(recording, -1.0, 1.0) * 32767).astype(np.int16)
+    pcm_data = audio_int16.tobytes()
+    data_size = len(pcm_data)
+    wav_header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + data_size,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        1,
+        SAMPLE_RATE,
+        SAMPLE_RATE * 2,
+        2,
+        16,
+        b"data",
+        data_size,
+    )
+    return io.BytesIO(wav_header + pcm_data)
+
+
 def transcribe_local(model, recording, language, recording_duration, shutting_down, log_func):
     if shutting_down:
         return
@@ -100,15 +124,7 @@ def transcribe_cloud(recording, language, recording_duration, groq_api_key, shut
         return
 
     try:
-        audio_int16 = (np.clip(recording, -1.0, 1.0) * 32767).astype(np.int16)
-
-        buffer = io.BytesIO()
-        with wave.open(buffer, 'wb') as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(SAMPLE_RATE)
-            wf.writeframes(audio_int16.tobytes())
-        buffer.seek(0)
+        buffer = encode_wav(recording)
 
         client = get_groq_client(groq_api_key)
         lang_param = language if language != "auto" else None
