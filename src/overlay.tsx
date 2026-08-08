@@ -54,6 +54,8 @@ function Overlay() {
       .vw { display:flex; align-items:center; justify-content:center; gap:2px; width:0px; overflow:hidden; opacity:0; transition:width 0.3s cubic-bezier(0.4,0,0.2,1),opacity 0.25s ease; }
       .ow.rec .vw { width:80px; opacity:1; }
       .bar { width:2.5px; background:#ff8c00; border-radius:2px; height:3px; transition:height 0.08s ease; box-shadow:0 0 4px rgba(255,140,0,0.35); flex-shrink:0; }
+      .sep { width:0px; height:15px; flex-shrink:0; background:linear-gradient(180deg,rgba(255,140,0,0) 0%,rgba(255,140,0,0.85) 50%,rgba(255,140,0,0) 100%); border-radius:99px; box-shadow:0 0 5px rgba(255,140,0,0.3); opacity:0; transition:width 0.3s cubic-bezier(0.4,0,0.2,1),opacity 0.25s ease,margin-left 0.3s cubic-bezier(0.4,0,0.2,1); }
+      .ow.rec .sep, .ow.proc .sep { width:2px; opacity:1; margin-left:-8px; }
       .hint { position:absolute; top:calc(100% + 7px); left:0; display:flex; align-items:center; gap:6px; color:rgba(245,243,239,.72); font:600 10px/1 "Segoe UI",sans-serif; letter-spacing:.03em; white-space:nowrap; opacity:0; transform:translateY(-2px); pointer-events:none; transition:opacity .18s ease,transform .18s ease; text-shadow:0 1px 5px #000; }
       .ow:hover .hint { opacity:1; transform:translateY(0); }
       .devbadge { color:#ff626b; background:rgba(255,98,107,.15); border-radius:4px; padding:3px 5px; font-weight:800; letter-spacing:.12em; box-shadow:0 0 10px rgba(255,98,107,.16); }
@@ -68,6 +70,7 @@ function Overlay() {
         <span class="lbl">Traflix Voice</span>
         <span class="dev-slot">${IS_DEV ? '<span class="devbadge widget-devbadge">DEV</span>' : ""}</span>
         <div class="spw"><div class="spr"></div></div>
+        <div class="sep" id="sep"></div>
         <div class="vw" id="vw"></div>
         <span class="hint"><span id="version-meta">v…</span><span>· Doppio clic per aprire</span></span>
       </div>
@@ -75,6 +78,7 @@ function Overlay() {
 
     const widget = root.firstElementChild as HTMLDivElement;
     const vizWrap = widget.querySelector(".vw") as HTMLDivElement;
+    const separator = widget.querySelector("#sep") as HTMLDivElement;
     const versionMeta = widget.querySelector("#version-meta") as HTMLSpanElement;
 
     if (!IS_DEV && window.__TAURI__?.core?.invoke) {
@@ -269,6 +273,16 @@ function Overlay() {
         bars[i].style.height = h + "px";
         const glow = (h / maxH) * 6;
         bars[i].style.boxShadow = `0 0 ${glow}px rgba(255, 140, 0, ${0.3 + (h / maxH) * 0.4})`;
+      }
+
+      if (visualState === "recording") {
+        // La barra separatrice cresce e brilla insieme alla voce.
+        separator.style.height = 12 + volNorm * 10 + "px";
+        separator.style.boxShadow = `0 0 ${4 + volNorm * 10}px rgba(255, 140, 0, ${0.25 + volNorm * 0.45})`;
+      } else if (visualState === "processing") {
+        // Durante l'elaborazione resta visibile ma stabile.
+        separator.style.height = "15px";
+        separator.style.boxShadow = "0 0 5px rgba(255, 140, 0, 0.3)";
       }
 
       if (visualState !== "idle" || currentVolume >= 0.5) {
