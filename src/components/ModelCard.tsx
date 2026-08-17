@@ -37,7 +37,7 @@ export default function ModelCard({
 }: ModelCardProps) {
   let buttonLabel = "Seleziona";
   let buttonClass =
-    "w-full text-center py-2 px-4 rounded-xl border font-bold text-[0.78rem] transition-all duration-200 cursor-pointer";
+    "model-action w-full text-center py-2 px-4 rounded-xl border font-bold text-[0.78rem] transition-all duration-200 cursor-pointer";
 
   if (isActive) {
     buttonLabel = "Attivo";
@@ -57,7 +57,7 @@ export default function ModelCard({
   return (
     <div
       className={`
-        panel p-4 rounded-2xl border transition-all duration-250
+        model-card panel p-4 rounded-2xl border transition-all duration-250
         ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col gap-3
         ${isActive ? "border-[rgba(255,157,36,.52)] bg-[rgba(255,157,36,.07)] shadow-[0_8px_24px_rgba(255,107,33,.09)]" : "border-[rgba(255,255,255,0.08)]"}
         ${!isDownloaded && !isActive ? "opacity-90" : ""}
@@ -102,7 +102,7 @@ export default function ModelCard({
               Precisione
             </span>
             <div className="flex gap-1 items-center">
-              {renderDots(model.quality, 5, "#4fc3f7")}
+              {renderDots(model.quality, 5, "var(--signal)")}
             </div>
           </div>
         </div>

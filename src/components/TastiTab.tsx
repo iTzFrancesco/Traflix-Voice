@@ -79,7 +79,7 @@ export default function TastiTab({
 
   return (
     <div className="tab-slide-in max-w-[700px] mx-auto w-full">
-      <header className="mb-6"><p className="eyebrow m-0 mb-2">Controllo globale</p><h1 className="page-title m-0">Scorciatoie</h1><p className="m-0 mt-2 text-[.84rem] text-[var(--muted)]">Configura il gesto che avvia la dettatura anche fuori dall'app.</p></header>
+      <header className="mb-6"><h1 className="page-title m-0">Scorciatoie</h1><p className="m-0 mt-2 text-[.84rem] text-[var(--muted)]">Configura il gesto che avvia la dettatura anche fuori dall'app.</p></header>
 
       <div className="panel p-5 mb-6">
         {/* Hotkey */}
@@ -98,7 +98,7 @@ export default function TastiTab({
                 id="hotkey"
                 placeholder={isRecording ? "Registrazione..." : "Premi i tasti..."}
                 readOnly
-                className={`w-full font-mono font-bold text-[0.95rem] tracking-[0.08em] px-3.5 py-3 rounded-xl outline-none ${
+                className={`field-control w-full font-mono font-bold text-[0.95rem] tracking-[0.08em] px-3.5 py-3 rounded-xl outline-none ${
                   recordedKeys
                     ? "bg-[rgba(255,140,0,0.08)] border-[rgba(255,140,0,0.25)] text-[var(--primary-orange)]"
                     : "bg-[rgba(0,0,0,0.6)] border-[rgba(255,255,255,0.08)] text-[#eee]"
@@ -149,7 +149,7 @@ export default function TastiTab({
               placeholder={secondary.isRecording ? "Registrazione..." : "Nessuna"}
               readOnly
               defaultValue={settings?.secondaryHotkey || ""}
-              className="flex-1 w-full font-mono font-bold text-[0.95rem] tracking-[0.08em] px-3.5 py-3 rounded-xl outline-none bg-[rgba(0,0,0,0.6)] border border-[rgba(255,255,255,0.08)] text-[#eee]"
+               className="field-control flex-1 w-full font-mono font-bold text-[0.95rem] tracking-[0.08em] px-3.5 py-3 rounded-xl outline-none bg-[rgba(0,0,0,0.6)] border border-[rgba(255,255,255,0.08)] text-[#eee]"
               aria-label="Seconda combinazione tasti"
             />
             <button

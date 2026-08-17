@@ -17,7 +17,7 @@ export default function SistemaTab({
 }: SistemaTabProps) {
   return (
     <div className="tab-slide-in max-w-[700px] mx-auto w-full">
-      <header className="mb-6"><p className="eyebrow m-0 mb-2">Ambiente di lavoro</p><h1 className="page-title m-0">Sistema</h1><p className="m-0 mt-2 text-[.84rem] text-[var(--muted)]">Audio, lingua, prestazioni e credenziali Cloud.</p></header>
+      <header className="mb-6"><h1 className="page-title m-0">Sistema</h1><p className="m-0 mt-2 text-[.84rem] text-[var(--muted)]">Audio, lingua, prestazioni e credenziali Cloud.</p></header>
 
       <div className="panel p-5 mb-4">
         {/* Audio Device */}
@@ -27,7 +27,7 @@ export default function SistemaTab({
           </label>
           <select
             id="audio-device"
-            className="bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
+            className="field-control bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
             aria-label="Seleziona sorgente audio"
             value={settings?.selectedDevice || "default"}
             onChange={(e) => onSettingChange("selectedDevice", e.target.value)}
@@ -48,7 +48,7 @@ export default function SistemaTab({
           </label>
           <select
             id="transcription-language"
-            className="bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
+            className="field-control bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
             aria-label="Seleziona lingua di trascrizione"
             value={settings?.selectedLanguage || "it"}
             onChange={(e) => onSettingChange("selectedLanguage", e.target.value)}
@@ -70,7 +70,7 @@ export default function SistemaTab({
           </label>
           <select
             id="compute-device"
-            className="bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
+            className="field-control bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
             aria-label="Seleziona dispositivo di calcolo"
             value={settings?.computeDevice || "cpu"}
             onChange={(e) => onSettingChange("computeDevice", e.target.value)}
@@ -92,7 +92,7 @@ export default function SistemaTab({
           <input
             type="password"
             id="groq-api-key"
-            className="bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
+            className="field-control bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
             placeholder="gsk_..."
             autoComplete="off"
             aria-label="Chiave API Groq"

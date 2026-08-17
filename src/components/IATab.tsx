@@ -27,7 +27,7 @@ export default function IATab({
 
   return (
     <div className="tab-slide-in max-w-[700px] mx-auto w-full">
-      <header className="mb-5"><p className="eyebrow m-0 mb-2">Motore di trascrizione</p><h1 className="page-title m-0">Scegli il tuo motore.</h1><p className="text-[.84rem] text-[var(--muted)] m-0 mt-2">Locale per privacy e controllo; Cloud per la massima velocità.</p></header>
+      <header className="mb-5"><h1 className="page-title m-0">Scegli il tuo motore.</h1><p className="text-[.84rem] text-[var(--muted)] m-0 mt-2">Locale per privacy e controllo; Cloud per la massima velocità.</p></header>
 
       {/* Provider Toggle */}
       <div className="panel p-5 mb-4">
@@ -68,10 +68,10 @@ export default function IATab({
               <div className="flex-1 min-w-[140px]">
                 <div className="flex justify-between items-center mb-1.5">
                   <span className="text-[0.65rem] font-bold text-[#888] uppercase tracking-[0.04em]">Giornaliero</span>
-                  <span className="text-[0.78rem] font-bold text-[#4fc3f7]">{Math.round(dailySecs)} / 28,800s</span>
+                  <span className="text-[0.78rem] font-bold text-[var(--signal)]">{Math.round(dailySecs)} / 28,800s</span>
                 </div>
                 <div className="bg-[#222] h-1 rounded-[4px] overflow-hidden">
-                  <div className="h-full rounded-[4px]" style={{ width: `${dailyPct}%`, background: "#4fc3f7" }} />
+                  <div className="h-full rounded-[4px]" style={{ width: `${dailyPct}%`, background: "var(--signal)" }} />
                 </div>
               </div>
               <div className="flex-1 min-w-[140px]">
@@ -100,7 +100,7 @@ export default function IATab({
             <div className="flex justify-between items-start mb-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="m-0 text-[0.95rem] font-bold text-[#eee]">Whisper Large V3 Turbo</h3>
-                <span className="text-[0.62rem] font-bold px-[7px] py-[2px] rounded-full whitespace-nowrap bg-[rgba(79,195,247,0.15)] text-[#4fc3f7] border border-[rgba(79,195,247,0.3)]">Cloud</span>
+                <span className="text-[0.62rem] font-bold px-[7px] py-[2px] rounded-full whitespace-nowrap bg-[rgba(85,216,155,0.12)] text-[var(--signal)] border border-[rgba(85,216,155,0.28)]">Cloud</span>
               </div>
               <div className="flex flex-col items-end gap-[2px]">
                 <span className="text-[0.72rem] text-[#555] font-semibold whitespace-nowrap">~3 GB (remoto)</span>
@@ -115,7 +115,7 @@ export default function IATab({
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.04em] whitespace-nowrap">Precisione</span>
-                <div className="flex gap-1 items-center">{renderDots(5, 5, "#4fc3f7")}</div>
+                <div className="flex gap-1 items-center">{renderDots(5, 5, "var(--signal)")}</div>
               </div>
             </div>
           </div>

@@ -66,7 +66,7 @@ function ToastItem({ toast, onRemove }: { toast: ToastType; onRemove: (id: numbe
 
   return (
     <div
-      className="bg-[rgba(10,10,0.95)] backdrop-blur-[10px] rounded-xl px-4 py-3 min-w-[280px] max-w-[400px] text-[#f6f6f6] text-[0.85rem] font-semibold flex items-center gap-2.5 shadow-[0_8px_30px_rgba(0,0,0,0.6)] pointer-events-auto animate-[slideInRight_0.3s_cubic-bezier(0.4,0,0.2,1)] relative overflow-hidden"
+      className="toast-surface backdrop-blur-[10px] rounded-xl px-4 py-3 min-w-[280px] max-w-[400px] text-[#f6f6f6] text-[0.85rem] font-semibold flex items-center gap-2.5 pointer-events-auto animate-[slideInRight_0.3s_cubic-bezier(0.16,1,0.3,1)] relative overflow-hidden"
       style={{ border: `1px solid ${borderColor[toast.type]}` }}
     >
       <div

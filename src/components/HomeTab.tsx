@@ -34,7 +34,7 @@ export default function HomeTab({ stats, settings, selectedProvider, selectedMod
   const status = statusMeta[transcriptionStatus] ?? { label: "In preparazione", tone: "#ff9d24" };
   const modelName = selectedProvider === "cloud" ? "Whisper Large V3 Turbo (Cloud)" : `Whisper ${WHISPER_MODELS.find((m) => m.id === selectedModel)?.name ?? selectedModel}`;
   return <div className="tab-slide-in max-w-[700px] mx-auto w-full">
-    <header className="mb-6"><p className="eyebrow m-0 mb-2">Traflix Voice / Dashboard</p><h1 className="page-title m-0">Panoramica</h1></header>
+    <header className="mb-6"><h1 className="page-title m-0">Panoramica</h1></header>
 
     <section className="panel p-5 mb-4" aria-label="Parole trascritte">
       <p className="m-0 font-mono text-[.68rem] font-bold uppercase tracking-[.13em] text-[var(--accent)]">Parole trascritte</p>
@@ -43,7 +43,18 @@ export default function HomeTab({ stats, settings, selectedProvider, selectedMod
     </section>
 
     <section className="panel p-5 mb-4" aria-label="Stato attuale">
-      <div className="flex items-center justify-between gap-3 mb-5"><div><p className="eyebrow m-0">Stato attuale</p><h2 className="m-0 mt-1 text-[1.15rem] tracking-[-.02em]">Configurazione attiva</h2></div><span className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[.7rem] font-bold" style={{ color: status.tone, background: `${status.tone}18` }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: status.tone }} />{status.label}</span></div>
+      <div className="status-header">
+        <div className="status-heading">
+          <p className="eyebrow m-0">Stato attuale</p>
+          <div className="status-title-row">
+            <h2 className="m-0 text-[1.15rem] tracking-[-.02em]">Configurazione attiva</h2>
+            <span className="status-badge inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[.7rem] font-bold" style={{ color: status.tone, background: `${status.tone}18` }}>
+              <span className="w-1.5 h-1.5 shrink-0 rounded-full" style={{ background: status.tone }} />
+              {status.label}
+            </span>
+          </div>
+        </div>
+      </div>
       <dl className="m-0 grid gap-3"><div className="flex items-baseline justify-between gap-4 border-b border-white/[.07] pb-3"><dt className="text-[.76rem] text-[var(--muted)]">Scorciatoia attiva</dt><dd className="m-0 font-mono text-[.78rem] font-bold text-[var(--accent)]">{settings?.hotkey ?? "Caricamento…"}</dd></div><div className="flex items-baseline justify-between gap-4"><dt className="text-[.76rem] text-[var(--muted)]">Modello in uso</dt><dd className="m-0 text-right text-[.78rem] font-semibold text-[var(--ink)]">{modelName}</dd></div></dl>
     </section>
 

@@ -22,10 +22,10 @@ export default function Sidebar({ activeTab, onTabChange, appVersion }: SidebarP
       requestAnimationFrame(() => document.getElementById(`nav-tab-${target.id}`)?.focus());
     }
   }, [onTabChange]);
-  return <nav className="w-[64px] bg-black/20 border-r border-white/[.08] flex flex-col items-center flex-shrink-0 py-4" aria-label="Menu principale">
+  return <nav className="app-sidebar w-[64px] bg-black/20 border-r border-white/[.08] flex flex-col items-center flex-shrink-0 py-4" aria-label="Menu principale">
     <div className="relative mb-7"><img src="/assets/logo.png" alt="Traflix Voice" className="w-9 h-9 object-contain" />{IS_DEV && <span className="absolute -right-1 -top-1 w-2 h-2 rounded-full bg-[#ff626b]" />}</div>
     <div className="flex flex-col gap-2 w-full px-2" role="tablist" aria-orientation="vertical">
-      {tabs.map((tab, index) => { const active = activeTab === tab.id; return <button id={`nav-tab-${tab.id}`} key={tab.id} type="button" role="tab" aria-selected={active} aria-label={tab.label} title={tab.label} tabIndex={active ? 0 : -1} onClick={() => onTabChange(tab.id)} onKeyDown={(e) => handleKeyDown(e, index)} className={`group relative h-10 rounded-xl transition-all ${active ? "bg-[rgba(255,157,36,.13)] text-[var(--accent)]" : "text-[#8d8a85] hover:bg-white/[.055] hover:text-[#e4e0d9]"}`}>
+      {tabs.map((tab, index) => { const active = activeTab === tab.id; return <button id={`nav-tab-${tab.id}`} key={tab.id} type="button" role="tab" aria-selected={active} aria-label={tab.label} title={tab.label} tabIndex={active ? 0 : -1} onClick={() => onTabChange(tab.id)} onKeyDown={(e) => handleKeyDown(e, index)} className={`nav-tab group relative h-10 rounded-xl transition-all ${active ? "bg-[rgba(255,157,36,.13)] text-[var(--accent)]" : "text-[#8d8a85] hover:bg-white/[.055] hover:text-[#e4e0d9]"}`}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 mx-auto" aria-hidden="true" dangerouslySetInnerHTML={{ __html: tab.svg }} />
         <span className="sr-only">{tab.label}</span>{active && <span className="absolute -left-2 top-3 h-4 w-[2px] rounded-r bg-[var(--accent)]" />}
       </button>; })}

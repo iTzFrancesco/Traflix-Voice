@@ -8,7 +8,7 @@ export default function LoadingOverlay({ show }: { show: boolean }) {
       aria-labelledby="loading-title"
       aria-modal="true"
     >
-      <div className="bg-[#1a1b19] p-7 rounded-3xl border border-[rgba(255,255,255,0.1)] w-[80%] max-w-[360px] text-center flex flex-col items-center gap-4 shadow-[0_18px_70px_rgba(0,0,0,.5)]">
+      <div className="modal-surface p-7 rounded-3xl border border-[rgba(255,255,255,0.1)] w-[80%] max-w-[360px] text-center flex flex-col items-center gap-4">
         <div
           className="w-12 h-12 rounded-full animate-[spin_0.8s_linear_infinite]"
           style={{
