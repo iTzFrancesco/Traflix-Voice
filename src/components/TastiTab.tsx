@@ -14,7 +14,6 @@ interface TastiTabProps {
   onWidgetModeChange: (value: string) => void;
   onSave: () => void;
   onSecondarySave: (value: string) => void;
-  onHotkeyChange: (value: string) => void;
 }
 
 export default function TastiTab({
@@ -184,48 +183,6 @@ export default function TastiTab({
 
         <hr className="border-none h-px bg-[rgba(255,255,255,0.08)] my-5" />
 
-        {/* Hold to Speak */}
-        <h3 className="text-[0.65rem] text-[var(--quiet)] font-bold uppercase tracking-[0.1em] m-0 mb-3">
-          Modalità
-        </h3>
-
-        <div className="mb-6 flex flex-row justify-between items-center">
-          <div className="flex-1 min-w-0">
-            <label
-              className="text-[0.9rem] font-bold text-[#ccc] block mb-1"
-              htmlFor="hold-to-speak"
-            >
-              Tieni premuto per parlare
-            </label>
-            <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">
-              Se disattivato, premi la scorciatoia una volta per avviare la registrazione e premila
-              di nuovo per interromperla.
-            </p>
-          </div>
-          <label className="relative inline-block w-11 h-6 cursor-pointer ml-4 flex-shrink-0">
-            <input
-              type="checkbox"
-              id="hold-to-speak"
-              className="opacity-0 w-0 h-0"
-              checked={holdToSpeak}
-              onChange={(e) => onHoldToSpeakChange(e.target.checked)}
-            />
-            <span
-              className="absolute inset-0 rounded-[30px] transition-colors duration-300"
-              style={{ backgroundColor: holdToSpeak ? "var(--primary-orange)" : "#333" }}
-            >
-              <span
-                className="absolute h-[18px] w-[18px] left-[3px] bottom-[3px] bg-white rounded-full transition-transform duration-300"
-                style={{
-                  transform: holdToSpeak ? "translateX(20px)" : "translateX(0)",
-                }}
-              />
-            </span>
-          </label>
-        </div>
-
-        <hr className="border-none h-px bg-[rgba(255,255,255,0.08)] my-5" />
-
         {/* Widget Visibility */}
         <h3 className="text-[0.65rem] text-[var(--quiet)] font-bold uppercase tracking-[0.1em] m-0 mb-3">
           Widget
@@ -290,6 +247,47 @@ export default function TastiTab({
           </div>
         </div>
 
+        <hr className="border-none h-px bg-[rgba(255,255,255,0.08)] my-5" />
+
+        {/* Hold to Speak */}
+        <h3 className="text-[0.65rem] text-[var(--quiet)] font-bold uppercase tracking-[0.1em] m-0 mb-3">
+          Modalità
+        </h3>
+
+        <div className="mb-6 flex flex-row justify-between items-center">
+          <div className="flex-1 min-w-0">
+            <label
+              className="text-[0.9rem] font-bold text-[#ccc] block mb-1"
+              htmlFor="hold-to-speak"
+            >
+              Tieni premuto per parlare
+            </label>
+            <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">
+              Se disattivato, premi la scorciatoia una volta per avviare la registrazione e premila
+              di nuovo per interromperla.
+            </p>
+          </div>
+          <label className="relative inline-block w-11 h-6 cursor-pointer ml-4 flex-shrink-0">
+            <input
+              type="checkbox"
+              id="hold-to-speak"
+              className="opacity-0 w-0 h-0"
+              checked={holdToSpeak}
+              onChange={(e) => onHoldToSpeakChange(e.target.checked)}
+            />
+            <span
+              className="absolute inset-0 rounded-[30px] transition-colors duration-300"
+              style={{ backgroundColor: holdToSpeak ? "var(--primary-orange)" : "#333" }}
+            >
+              <span
+                className="absolute h-[18px] w-[18px] left-[3px] bottom-[3px] bg-white rounded-full transition-transform duration-300"
+                style={{
+                  transform: holdToSpeak ? "translateX(20px)" : "translateX(0)",
+                }}
+              />
+            </span>
+          </label>
+        </div>
 
       </div>
     </div>

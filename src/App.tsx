@@ -8,88 +8,21 @@ import SistemaTab from "./components/SistemaTab";
 import ToastContainer from "./components/Toast";
 import LoadingOverlay from "./components/LoadingOverlay";
 import DownloadPopup from "./components/DownloadPopup";
+import { convertToSRT } from "./lib/export";
 import { useHotkey } from "./hooks/useHotkey";
+import { useAudioDevices } from "./hooks/useAudioDevices";
+import { useGroqUsage } from "./hooks/useGroqUsage";
+import { useHistory } from "./hooks/useHistory";
+import { usePythonOutput } from "./hooks/usePythonOutput";
+import { useSettings } from "./hooks/useSettings";
+import { useStats } from "./hooks/useStats";
 import type {
   AppSettings,
-  AppStats,
-  GroqUsage,
-  TranscriptionEntry,
-  AudioDeviceInfo,
   Provider,
   Toast,
   PythonEvent,
 } from "./types";
 import { WHISPER_MODELS } from "./types";
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-function formatKey(key: string): string {
-  const map: Record<string, string> = {
-    Control: "CommandOrControl",
-    Alt: "Alt",
-    Shift: "Shift",
-    " ": "Space",
-    Meta: "Super",
-  };
-  return map[key] || key.charAt(0).toUpperCase() + key.slice(1);
-}
-
-function convertToSRT(text: string): string {
-  const lines = text.split("\n").filter((line) => line.trim());
-  let srtContent = "";
-  let index = 1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    const timestampMatch = line.match(/^\[(\d{1,2}):(\d{2})\]\s*(.+)$/);
-
-    if (timestampMatch) {
-      // Formato atteso: [mm:ss] Testo
-      const minutes = parseInt(timestampMatch[1]);
-      const seconds = parseInt(timestampMatch[2]);
-      const textContent = timestampMatch[3];
-      const startTime = `00:${String(minutes).padStart(2, "0")}:${String(
-        seconds
-      ).padStart(2, "0")},000`;
-      let endSec = minutes * 60 + seconds + 3;
-      const endH = Math.floor(endSec / 3600);
-      const endM = Math.floor((endSec % 3600) / 60);
-      const endS = endSec % 60;
-
-      const endTime = `${String(endH).padStart(2, "0")}:${String(
-        endM
-      ).padStart(2, "0")}:${String(endS).padStart(2, "0")},000`;
-
-      srtContent += `${index}\n`;
-      srtContent += `${startTime} --> ${endTime}\n`;
-      srtContent += `${textContent}\n\n`;
-      index++;
-    } else {
-      const startSeconds = (index - 1) * 3;
-      const endSeconds = index * 3;
-      const startH = Math.floor(startSeconds / 3600);
-      const startM = Math.floor((startSeconds % 3600) / 60);
-      const startS = startSeconds % 60;
-      const endH = Math.floor(endSeconds / 3600);
-      const endM = Math.floor((endSeconds % 3600) / 60);
-      const endS = endSeconds % 60;
-
-      srtContent += `${index}\n`;
-      srtContent += `${String(startH).padStart(2, "0")}:${String(
-        startM
-      ).padStart(2, "0")}:${String(startS).padStart(2, "0")},000 --> ${String(
-        endH
-      ).padStart(2, "0")}:${String(endM).padStart(2, "0")}:${String(
-        endS
-      ).padStart(2, "0")},000\n`;
-      srtContent += `${line}\n\n`;
-      index++;
-    }
-  }
-  return srtContent;
-}
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
 
@@ -97,57 +30,40 @@ function convertToSRT(text: string): string {
 const IS_DEV = import.meta.env.DEV;
 
 export default function App() {
+  const {
+    settings,
+    setSettings,
+    loadSettings: loadStoredSettings,
+    persistSettings: persistStoredSettings,
+  } = useSettings();
+  const { stats, loadStats } = useStats();
+  const {
+    entries: historyEntries,
+    loadHistory,
+    clearHistory: clearStoredHistory,
+    saveTranscription,
+  } = useHistory();
+  const { devices: audioDevices, loadAudioDevices } = useAudioDevices();
+  const { groqUsage, reloadGroqUsage, recordGroqUsage } = useGroqUsage();
+
   // ── STATE ──
   const [activeTab, setActiveTab] = useState("home");
-  const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [stats, setStats] = useState<AppStats>({
-    total_words: 0,
-    avg_wpm: 0,
-    total_time: 0,
-  });
-  const [modelStatus, setModelStatus] = useState<
-    Record<string, { downloaded: boolean; loading: boolean }>
-  >({});
   const [selectedModel, setSelectedModel] = useState("small");
   const [selectedProvider, setSelectedProvider] = useState<Provider>("local");
   const [selectedLanguage, setSelectedLanguage] = useState("it");
-  const [computeDevice, setComputeDevice] = useState("cpu");
-  const [transcriptionStatus, setTranscriptionStatus] = useState("idle");
-  const [modelReady, setModelReady] = useState(false);
-  const [activeTranscription, setActiveTranscription] = useState(false);
-  const [showLoading, setShowLoading] = useState(false);
-  const [downloadInfo, setDownloadInfo] = useState<{
-    modelName: string;
-    progress: number;
-    title?: string;
-    message?: string;
-    isError?: boolean;
-  } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [transcriptionText, setTranscriptionText] = useState("");
-  const [historyEntries, setHistoryEntries] = useState<TranscriptionEntry[]>([]);
-  const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
   const [appVersion, setAppVersion] = useState("");
   const [holdToSpeak, setHoldToSpeak] = useState(false);
   const [widgetMode, setWidgetMode] = useState("always");
-  const [groqUsage, setGroqUsage] = useState<GroqUsage | null>(null);
-  const [gpuStatus, setGpuStatus] = useState("Dispositivo in uso: CPU");
 
   const toastIdRef = useRef(0);
-  const activeTranscriptionRef = useRef(false);
-  const selectedProviderRef = useRef<Provider>("local");
-  const isTestRecordingRef = useRef(false);
   const startSoundRef = useRef<HTMLAudioElement | null>(null);
   const stopSoundRef = useRef<HTMLAudioElement | null>(null);
-  const hotkeyInputRef = useRef<HTMLInputElement | null>(null);
   const hotkeyListenersRef = useRef<(() => void)[]>([]);
-  const modelReadyRef = useRef(false);
   const holdToSpeakRef = useRef(false);
   const startFnRef = useRef<(isTest?: boolean) => Promise<void>>(async () => {});
   const stopFnRef = useRef<() => void>(() => {});
-  modelReadyRef.current = modelReady;
   holdToSpeakRef.current = holdToSpeak;
-  selectedProviderRef.current = selectedProvider;
 
   // ── HOTKEY RECORDING ──
   const {
@@ -155,7 +71,6 @@ export default function App() {
     recordedKeys,
     startRecording,
     stopRecording,
-    resetKeys,
   } = useHotkey();
 
   // ── TOAST ──
@@ -171,78 +86,48 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // ── LOAD SETTINGS WITH RETRY ──
+  const {
+    modelStatus,
+    modelReady,
+    modelReadyRef,
+    showLoading,
+    transcriptionStatus,
+    transcriptionText,
+    downloadInfo,
+    gpuStatus,
+    activeTranscriptionRef,
+    transcriptionLockRef,
+    isTestRecordingRef,
+    updateModelStatus,
+    mergeModelStatus,
+    clearTranscriptionText,
+    clearDownloadInfo,
+  } = usePythonOutput({
+    selectedProvider,
+    showToast,
+    loadStats,
+    saveTranscription,
+    recordGroqUsage,
+    reloadGroqUsage,
+  });
+
+  // ── SETTINGS ──
   const loadSettings = useCallback(async (): Promise<AppSettings | null> => {
-    if (!window.__TAURI__?.core?.invoke) return null;
+    const loaded = await loadStoredSettings();
+    if (!loaded) return null;
 
-    for (let attempt = 0; attempt < 4; attempt++) {
-      if (attempt > 0) {
-        console.warn(`[settings] retrying loadSettings (attempt ${attempt + 1}/4)...`);
-        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
-      }
-      try {
-        const s = (await window.__TAURI__.core.invoke(
-          "load_settings"
-        )) as AppSettings | null;
-        if (!s || typeof s.hotkey === "undefined") {
-          console.warn("[settings] invalid data:", JSON.stringify(s));
-          continue;
-        }
-        console.log(
-          "[settings] loaded provider:",
-          s.provider,
-          "model:",
-          s.model,
-          "hotkey:",
-          s.hotkey
-        );
-        setSettings(s);
-        setSelectedModel(s.model || "small");
-        setSelectedProvider((s.provider as Provider) || "local");
-        setSelectedLanguage(s.selectedLanguage || "it");
-        setComputeDevice(s.computeDevice || "cpu");
-        setHoldToSpeak(s.holdToSpeak ?? false);
-        setWidgetMode(s.widgetMode ?? "always");
-        return s;
-      } catch (err) {
-        console.warn("[settings] error:", err);
-      }
-    }
-    return null;
-  }, []);
+    setSelectedModel(loaded.model || "small");
+    setSelectedProvider((loaded.provider as Provider) || "local");
+    setSelectedLanguage(loaded.selectedLanguage || "it");
+    setHoldToSpeak(loaded.holdToSpeak ?? false);
+    setWidgetMode(loaded.widgetMode ?? "always");
+    return loaded;
+  }, [loadStoredSettings]);
 
-  // ── PERSIST SETTINGS ──
   const persistSettings = useCallback(
-    async (overrides?: Partial<AppSettings>) => {
-      if (!window.__TAURI__?.core?.invoke || !settings) return;
-      const merged: AppSettings = { ...settings, ...overrides };
-      try {
-        await window.__TAURI__.core.invoke("save_settings", { settings: merged });
-        setSettings(merged);
-      } catch (err) {
-        console.error("[settings] save error:", err);
-      }
-    },
-    [settings]
+    (overrides?: Partial<AppSettings>) => persistStoredSettings(overrides),
+    [persistStoredSettings]
   );
-
-  // ── LOAD STATS ──
-  const loadStats = useCallback(async () => {
-    if (!window.__TAURI__?.core?.invoke) return;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const s = (await window.__TAURI__.core.invoke("get_stats")) as AppStats;
-        setStats({
-          total_words: s.total_words ?? 0,
-          avg_wpm: s.avg_wpm ?? 0,
-          total_time: s.total_time ?? 0,
-        });
-        return;
-      } catch (err) {
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-  }, []);
 
   // ── CHECK MODELS ──
   const refreshAllModelStatus = useCallback(async () => {
@@ -254,104 +139,15 @@ export default function App() {
           .then((exists) => ({ id: m.id, exists }))
       )
     );
-    const newStatus: Record<string, { downloaded: boolean; loading: boolean }> =
-      {};
-    for (const { id, exists } of results) {
-      newStatus[id] = { ...modelStatus[id], downloaded: exists as boolean };
-    }
-    setModelStatus((prev) => ({ ...prev, ...newStatus }));
-  }, []);
-
-  // ── GROQ USAGE ──
-  const loadGroqUsageFromStorage = useCallback((): GroqUsage | null => {
-    try {
-      const raw = localStorage.getItem("groq_usage");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as GroqUsage;
-      const today = new Date().toISOString().split("T")[0];
-      if (parsed.date !== today) return null;
-      return parsed;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const recordGroqUsage = useCallback((durationSecs: number) => {
-    if (!durationSecs) return;
-    try {
-      const today = new Date().toISOString().split("T")[0];
-      let u: GroqUsage;
-      const raw = localStorage.getItem("groq_usage");
-      if (raw) {
-        try {
-          u = JSON.parse(raw);
-        } catch {
-          u = { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
-        }
-      } else {
-        u = { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
-      }
-      if (u.date !== today) {
-        u = { date: today, audio_seconds: 0, audio_seconds_hourly: 0, hourly_reset: "" };
-      }
-      const now = Date.now();
-      const thisHour = Math.floor(now / 3600000);
-      if (u._lastHour !== thisHour) {
-          u.audio_seconds_hourly = 0;
-          u._lastHour = thisHour;
-        }
-      u.audio_seconds = Math.round((u.audio_seconds || 0) + durationSecs);
-      u.audio_seconds_hourly = Math.round((u.audio_seconds_hourly || 0) + durationSecs);
-      const nextHour = (Math.floor(now / 3600000) + 1) * 3600000;
-      u.hourly_reset = new Date(nextHour).toLocaleTimeString("it-IT", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      localStorage.setItem("groq_usage", JSON.stringify(u));
-      setGroqUsage(u);
-    } catch {}
-  }, []);
-
-  const reloadGroqUsage = useCallback(() => {
-    setGroqUsage(loadGroqUsageFromStorage());
-  }, [loadGroqUsageFromStorage]);
-
-  // ── AUDIO DEVICES ──
-  const loadAudioDevices = useCallback(async () => {
-    if (!window.__TAURI__?.core?.invoke) return;
-    try {
-      const result = (await window.__TAURI__.core.invoke(
-        "get_audio_devices"
-      )) as AudioDeviceInfo[];
-      setAudioDevices(result || []);
-    } catch (err) {
-      console.error("[audio] Errore:", err);
-    }
-  }, []);
-
-  // ── HISTORY ──
-  const loadHistory = useCallback(async () => {
-    if (!window.__TAURI__?.core?.invoke) return;
-    try {
-      const result = (await window.__TAURI__.core.invoke(
-        "get_history"
-      )) as TranscriptionEntry[];
-      setHistoryEntries(result || []);
-    } catch (err) {
-      console.error("[cronologia] Errore:", err);
-    }
-  }, []);
+    mergeModelStatus(
+      Object.fromEntries(results.map(({ id, exists }) => [id, exists as boolean]))
+    );
+  }, [mergeModelStatus]);
 
   const clearHistory = useCallback(async () => {
-    if (!window.__TAURI__?.core?.invoke) return;
-    try {
-      await window.__TAURI__.core.invoke("clear_history");
-      setHistoryEntries([]);
-      loadStats();
-    } catch (err) {
-      console.error("[cronologia] Errore cancellazione:", err);
-    }
-  }, [loadStats]);
+    await clearStoredHistory();
+    await loadStats();
+  }, [clearStoredHistory, loadStats]);
 
   // ── INIT ──
   // Set DEV title
@@ -388,7 +184,7 @@ export default function App() {
       await Promise.all([versionTask, loadAudioDevices(), modelTask]);
 
       // Load groq usage
-      setGroqUsage(loadGroqUsageFromStorage());
+      reloadGroqUsage();
 
       // Initialize sounds
       startSoundRef.current = new Audio("/assets/sounds/start.wav");
@@ -416,239 +212,7 @@ export default function App() {
     };
   }, []);
 
-  // ── PYTHON OUTPUT EVENT LISTENER ──
-  useEffect(() => {
-    if (!window.__TAURI__?.event?.listen) return;
-
-    let cancelled = false;
-    let unlisten: (() => void) | null = null;
-
-    window.__TAURI__.event
-      .listen("python_output", async (event: { payload: unknown }) => {
-        try {
-          const data = JSON.parse(event.payload as string) as PythonEvent;
-          let pastePromise: Promise<unknown> | null = null;
-
-          // Start the native paste before any React state updates or local
-          // bookkeeping can yield the event handler.
-          if (data.status === "result" && data.text && window.__TAURI__?.core?.invoke) {
-            pastePromise = window.__TAURI__.core.invoke("execute_paste", {
-              text: data.text,
-            });
-          }
-
-          // Update modelReady and loading overlay
-          if (data.status === "starting" || data.status === "loading_model") {
-            setModelReady(false);
-            setShowLoading(true);
-          } else if (
-            data.status === "ready" ||
-            data.status === "result" ||
-            data.status === "error"
-          ) {
-            setModelReady(true);
-            setShowLoading(false);
-          }
-
-          if (["starting", "loading_model", "listening", "processing", "ready", "result", "error", "rate_limit"].includes(data.status || "")) {
-            setTranscriptionStatus(data.status);
-          }
-
-          // Play sounds + UI state (only for test recordings)
-          if (data.status === "listening") {
-            activeTranscriptionRef.current = true;
-            transcriptionLockRef.current = false;
-            if (isTestRecordingRef.current) {
-              setActiveTranscription(true);
-            }
-          } else if (data.status === "result" || data.status === "ready") {
-            if (isTestRecordingRef.current) setActiveTranscription(false);
-            activeTranscriptionRef.current = false;
-            transcriptionLockRef.current = false;
-          }
-
-          // Download handling
-          if (data.status === "downloading") {
-            if (data.model) {
-              setModelStatus((prev) => ({
-                ...prev,
-                [data.model!]: {
-                  ...prev[data.model!],
-                  loading: true,
-                },
-              }));
-            }
-            const modelName =
-              WHISPER_MODELS.find((m) => m.id === data.model)?.name ||
-              data.model ||
-              "";
-            setDownloadInfo({
-              modelName,
-              progress: data.progress || 0,
-            });
-          }
-
-          if (data.status === "download_complete") {
-            if (data.model) {
-              setModelStatus((prev) => ({
-                ...prev,
-                [data.model!]: { downloaded: true, loading: false },
-              }));
-            }
-            const modelName =
-              WHISPER_MODELS.find((m) => m.id === data.model)?.name ||
-              data.model ||
-              "";
-            // Show 100% briefly then close
-            setDownloadInfo({ modelName, progress: 100 });
-            showToast(`Modello ${modelName} scaricato con successo`, "success");
-          }
-
-          if (data.status === "download_error") {
-            console.error("Download Error:", data.message);
-            const modelName =
-              WHISPER_MODELS.find((m) => m.id === data.model)?.name ||
-              data.model ||
-              "";
-            setDownloadInfo({
-              modelName,
-              progress: 100,
-              title: "Errore nel Download",
-              message: data.message || "Si è verificato un errore durante il download.",
-              isError: true,
-            });
-            // Reset loading states
-            setModelStatus((prev) => {
-              const next = { ...prev };
-              for (const key of Object.keys(next)) {
-                if (next[key].loading) next[key] = { ...next[key], loading: false };
-              }
-              return next;
-            });
-            showToast(data.message || "Errore durante il download del modello", "error");
-          }
-
-          // Error from Python
-          if (data.status === "error") {
-            console.error("Python Error:", data.message);
-            setModelStatus((prev) => {
-              const next = { ...prev };
-              for (const key of Object.keys(next)) {
-                if (next[key].loading) next[key] = { ...next[key], loading: false };
-              }
-              return next;
-            });
-            showToast(data.message || "Errore del motore Python", "error");
-          }
-
-          // Rate limit
-          if (data.status === "rate_limit") {
-            showToast(data.message || "Rate limit raggiunto", "error");
-          }
-
-          // GPU info
-          if (data.status === "gpu_info") {
-            const deviceLabel =
-              data.current_device === "cuda"
-                ? `GPU (${data.device_name})`
-                : "CPU";
-            const cudaLabel = data.cuda_available
-              ? `CUDA disponibile (${data.device_name})`
-              : "CUDA non disponibile";
-            setGpuStatus(`Dispositivo in uso: ${deviceLabel} | ${cudaLabel}`);
-          }
-
-          // Volume is consumed directly by the overlay. Keeping it out of
-          // React state prevents the full main window from rerendering while
-          // the user is speaking.
-          if (data.status === "volume") return;
-
-          // Log messages
-          if (data.status === "info" && data.message) {
-            console.log("[Python]", data.message);
-          }
-          if (data.status === "warning" && data.message) {
-            console.warn("[Python]", data.message);
-            showToast(data.message, "error");
-          }
-
-          // Result with transcription text
-          if (data.status === "result" && data.text) {
-            const resultText = data.text;
-            if (isTestRecordingRef.current) {
-              isTestRecordingRef.current = false;
-              setTranscriptionText((prev) => prev + resultText.trim() + "\n");
-            }
-
-            // Paste first: stats/history are local persistence work and must
-            // not add latency before the text reaches the active application.
-            if (pastePromise) {
-              void pastePromise.catch((e) => console.error("[RESULT] paste error:", e));
-            }
-
-            // Update stats
-            const wordCount = resultText
-              .trim()
-              .split(/\s+/)
-              .filter(Boolean).length;
-            if (wordCount > 0 && data.duration) {
-              const wpm = Math.round((wordCount / data.duration) * 60);
-              if (window.__TAURI__?.core?.invoke) {
-                void window.__TAURI__.core
-                  .invoke("update_stats", {
-                    words: wordCount,
-                    wpm,
-                    timeDelta: data.duration / 60,
-                  })
-                  .then(() => loadStats())
-                  .catch(() => {});
-              }
-            }
-
-            // Save to history
-            const historyTimestamp = new Date().toLocaleString("it-IT", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            });
-            if (window.__TAURI__?.core?.invoke) {
-              void window.__TAURI__.core
-                .invoke("save_transcription", {
-                  text: data.text.trim(),
-                  timestamp: historyTimestamp,
-                  wordCount,
-                })
-                .catch(() => {});
-            }
-
-            // Groq usage tracking
-            if (selectedProviderRef.current === "cloud") {
-              recordGroqUsage(data.duration || 0);
-            }
-
-            // Reload groq usage
-            reloadGroqUsage();
-          }
-        } catch (err) {
-          console.error("[python_output] Error:", err);
-        }
-      })
-      .then((fn: () => void) => {
-        if (cancelled) {
-          fn(); // Promise risolta dopo cleanup → disiscrivi subito
-        } else {
-          unlisten = fn;
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      if (unlisten) unlisten();
-    };
-  }, []);
+  // Python events are handled by a dedicated hook so App remains a composition module.
 
   // ── HOTKEY EVENT LISTENERS (with refs to avoid re-registration) ──
   useEffect(() => {
@@ -735,7 +299,6 @@ export default function App() {
   }, []);
 
   // ── TRANSCRIPTION CONTROL ──
-  const transcriptionLockRef = useRef(false);
   const transcriptionCooldownRef = useRef(0);
   const startTranscription = useCallback(async (isTest?: boolean) => {
     if (activeTranscriptionRef.current || transcriptionLockRef.current) return;
@@ -761,8 +324,6 @@ export default function App() {
     }
 
     activeTranscriptionRef.current = true;
-    if (isTest) setActiveTranscription(true);
-
     try {
       await window.__TAURI__.core.invoke("send_to_python", {
         message: JSON.stringify({
@@ -779,7 +340,6 @@ export default function App() {
     } catch (err) {
       console.error("[REC] start error:", err);
       activeTranscriptionRef.current = false;
-      setActiveTranscription(false);
     } finally {
       transcriptionLockRef.current = false;
     }
@@ -798,7 +358,6 @@ export default function App() {
     } catch (err) {
       console.error("[REC] stop error:", err);
     }
-    setActiveTranscription(false);
   }, []);
   stopFnRef.current = stopTranscription;
 
@@ -807,10 +366,7 @@ export default function App() {
     async (modelId: string) => {
       const status = modelStatus[modelId] || { downloaded: false, loading: false };
       if (!status.downloaded) {
-        setModelStatus((prev) => ({
-          ...prev,
-          [modelId]: { ...prev[modelId], loading: true },
-        }));
+        updateModelStatus(modelId, { loading: true });
         try {
           await window.__TAURI__.core.invoke("send_to_python", {
             message: JSON.stringify({ command: "download", model: modelId }),
@@ -825,7 +381,7 @@ export default function App() {
         }
       }
     },
-    [modelStatus, settings, persistSettings]
+    [modelStatus, settings, persistSettings, updateModelStatus]
   );
 
   // ── PROVIDER TOGGLE ──
@@ -882,7 +438,6 @@ export default function App() {
         setSelectedLanguage(value as string);
       }
       if (key === "computeDevice") {
-        setComputeDevice(value as string);
         try {
           await window.__TAURI__.core.invoke("send_to_python", {
             message: JSON.stringify({
@@ -967,9 +522,7 @@ export default function App() {
     [transcriptionText, showToast]
   );
 
-  const clearText = useCallback(() => {
-    setTranscriptionText("");
-  }, []);
+  const clearText = clearTranscriptionText;
 
   // ── HISTORY CLICK (copy) ──
   const handleHistoryClick = useCallback(
@@ -1008,8 +561,8 @@ export default function App() {
 
   // ── DOWNLOAD CLOSE ──
   const handleDownloadClose = useCallback(() => {
-    setDownloadInfo(null);
-  }, []);
+    clearDownloadInfo();
+  }, [clearDownloadInfo]);
 
   // ── RENDER ──
   return (
@@ -1056,7 +609,6 @@ export default function App() {
             onWidgetModeChange={handleWidgetModeChange}
             onSave={handleSaveHotkey}
             onSecondarySave={(value) => handleSaveHotkey("secondary", value)}
-            onHotkeyChange={(val) => recordedKeys}
           />
         )}
 

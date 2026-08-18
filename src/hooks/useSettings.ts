@@ -1,30 +1,43 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import type { AppSettings } from "../types";
 
 export function useSettings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const loadedRef = useRef(false);
+  const loadSettings = useCallback(async (): Promise<AppSettings | null> => {
+    if (!window.__TAURI__?.core?.invoke) return null;
 
-  const loadSettings = useCallback(async (): Promise<boolean> => {
-    if (!window.__TAURI__?.core?.invoke) {
-      console.warn("[settings] __TAURI__ not available");
-      return false;
-    }
-
-    try {
-      const s = (await window.__TAURI__.core.invoke("load_settings")) as AppSettings | null;
-      if (!s || typeof s.hotkey === "undefined") {
-        console.warn("[settings] invalid data from load_settings:", JSON.stringify(s));
-        return false;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) {
+        console.warn(
+          `[settings] retrying loadSettings (attempt ${attempt + 1}/4)...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
       }
-      console.log("[settings] loaded provider:", s.provider, "model:", s.model, "hotkey:", s.hotkey);
-      setSettings(s);
-      loadedRef.current = true;
-      return true;
-    } catch (err) {
-      console.warn("[settings] load_settings error:", err);
-      return false;
+
+      try {
+        const loaded = (await window.__TAURI__.core.invoke(
+          "load_settings"
+        )) as AppSettings | null;
+        if (!loaded || typeof loaded.hotkey === "undefined") {
+          console.warn("[settings] invalid data:", JSON.stringify(loaded));
+          continue;
+        }
+        console.log(
+          "[settings] loaded provider:",
+          loaded.provider,
+          "model:",
+          loaded.model,
+          "hotkey:",
+          loaded.hotkey
+        );
+        setSettings(loaded);
+        return loaded;
+      } catch (err) {
+        console.warn("[settings] error:", err);
+      }
     }
+
+    return null;
   }, []);
 
   const persistSettings = useCallback(
@@ -44,32 +57,10 @@ export function useSettings() {
     [settings]
   );
 
-  const updateSettings = useCallback((partial: Partial<AppSettings>) => {
-    setSettings((prev) => (prev ? { ...prev, ...partial } : prev));
-  }, []);
-
-  const retryLoadSettings = useCallback(async (): Promise<boolean> => {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      if (attempt > 0) {
-        console.warn(`[settings] retrying loadSettings (attempt ${attempt + 1}/4)...`);
-        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
-      }
-      const ok = await loadSettings();
-      if (ok) {
-        console.log("[settings] loaded successfully on attempt", attempt + 1);
-        return true;
-      }
-    }
-    return false;
-  }, [loadSettings]);
-
   return {
     settings,
     setSettings,
     loadSettings,
     persistSettings,
-    updateSettings,
-    retryLoadSettings,
-    loadedRef,
   };
 }

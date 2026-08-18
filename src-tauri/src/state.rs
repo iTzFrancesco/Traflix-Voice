@@ -102,11 +102,6 @@ impl Default for GroqUsage {
     }
 }
 
-#[allow(dead_code)]
-pub const GROQ_DAILY_LIMIT: f32 = 28_800.0;
-#[allow(dead_code)]
-pub const GROQ_HOURLY_LIMIT: f32 = 7_200.0;
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptionEntry {
     pub text: String,
@@ -128,8 +123,6 @@ pub struct AppState {
     pub settings_path: PathBuf,
     pub stats_path: PathBuf,
     pub history_path: PathBuf,
-    #[allow(dead_code)]
-    pub models_dir: PathBuf,
     pub groq_usage_path: PathBuf,
     pub hotkey_config: Arc<RwLock<Vec<HotkeyConfig>>>,
     pub is_shutting_down: AtomicBool,

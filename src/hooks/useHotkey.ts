@@ -102,17 +102,10 @@ export function useHotkey() {
     return () => window.removeEventListener("mousedown", handleMouseDown);
   }, [isRecording]);
 
-  const resetKeys = useCallback(() => {
-    setRecordedKeys("");
-  }, []);
-
   return {
     isRecording,
-    setIsRecording,
     recordedKeys,
-    setRecordedKeys,
     startRecording,
     stopRecording,
-    resetKeys,
   };
 }

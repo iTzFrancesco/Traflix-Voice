@@ -1,7 +1,10 @@
 mod commands;
 mod hotkey;
+mod hotkey_runtime;
 mod settings;
+mod sidecar;
 mod state;
+mod window_runtime;
 
 mod clipboard;
 
@@ -12,23 +15,18 @@ pub use hotkey::{parse_hotkey, str_to_vk};
 pub use settings::*;
 pub use state::*;
 
-use log::{debug, error, info, warn};
+use log::info;
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(test)]
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, RwLock};
-use tauri::{
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    Emitter, Listener, Manager, WindowEvent,
-};
-use tauri_plugin_shell::ShellExt;
+use tauri::{Emitter, Manager};
 
 // ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    const HOTKEY_POLL_INTERVAL_MS: u64 = 8;
-
     let builder = tauri::Builder::default()
         .setup(|app| {
             let app_data_dir = app
@@ -58,51 +56,14 @@ pub fn run() {
                 settings_path,
                 stats_path,
                 history_path,
-                models_dir: models_dir.clone(),
                 groq_usage_path: groq_usage_path.clone(),
                 hotkey_config: hotkey_config.clone(),
                 is_shutting_down: AtomicBool::new(false),
             });
 
-            // Hotkey polling via GetAsyncKeyState (~60Hz, no hooks, no message pump)
-            let app_handle_kb = app.handle().clone();
-            std::thread::spawn(move || {
-                let mut hotkey_active = false;
-                let mut last_emit: std::time::Instant = std::time::Instant::now();
-
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(HOTKEY_POLL_INTERVAL_MS));
-
-                    let config = hotkey_config.read().unwrap();
-                    if config.is_empty() {
-                        drop(config);
-                        continue;
-                    }
-                    let all_pressed = config
-                        .iter()
-                        .any(|hotkey| hotkey.vk_codes.iter().all(|&vk| is_key_pressed(vk)));
-                    drop(config);
-
-                    if all_pressed
-                        && !hotkey_active
-                        && last_emit.elapsed() > std::time::Duration::from_millis(100)
-                    {
-                        hotkey_active = true;
-                        last_emit = std::time::Instant::now();
-                        debug!("[Hotkey] Pressed");
-                        let _ = app_handle_kb.emit("hotkey_pressed", ());
-                    } else if !all_pressed && hotkey_active {
-                        hotkey_active = false;
-                        debug!("[Hotkey] Released");
-                        let _ = app_handle_kb.emit("hotkey_released", ());
-                    }
-                }
-            });
-
-            // Avvio Python sidecar (con health-check e auto-restart)
             let app_handle = app.handle().clone();
-            let app_handle_widget = app_handle.clone();
-            let models_dir_str = models_dir.to_string_lossy().to_string();
+            hotkey_runtime::spawn(app_handle.clone(), hotkey_config);
+
             #[cfg(debug_assertions)]
             let script_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
             #[cfg(not(debug_assertions))]
@@ -111,236 +72,16 @@ pub fn run() {
                 .resource_dir()
                 .expect("Impossibile trovare resource dir");
             let script_path = script_dir.join("whisper_engine.py");
-            let script_path_str = script_path.to_string_lossy().to_string();
-            info!("[Python sidecar] Script path: {}", script_path_str);
-
-            std::thread::spawn(move || {
-                let mut restart_count: u32 = 0;
-                const MAX_BACKOFF_SECS: u64 = 10;
-
-                loop {
-                    info!(
-                        "[Python sidecar] Spawning python process (attempt #{})",
-                        restart_count + 1
-                    );
-
-                    let shell = app_handle.shell();
-                    // Windows: prova "py" (Python launcher, sempre in PATH),
-                    // poi "python" come fallback
-                    let python_cmd = if cfg!(windows) { "py" } else { "python3" };
-                    let spawn_result = shell.command(python_cmd).args([&script_path_str]).spawn();
-                    // Fallback: se "py"/"python3" fallisce, prova "python"
-                    #[allow(unused_assignments)]
-                    let spawn_result = if spawn_result.is_err() {
-                        warn!(
-                            "[Python sidecar] {:?} not found, trying 'python'",
-                            python_cmd
-                        );
-                        shell.command("python").args([&script_path_str]).spawn()
-                    } else {
-                        spawn_result
-                    };
-
-                    let (mut rx, mut child) = match spawn_result {
-                        Ok(pair) => pair,
-                        Err(e) => {
-                            error!("[Python sidecar] Failed to spawn: {:?}", e);
-                            let delay =
-                                std::cmp::min(2u64.saturating_pow(restart_count), MAX_BACKOFF_SECS);
-                            std::thread::sleep(std::time::Duration::from_secs(delay));
-                            restart_count += 1;
-                            continue;
-                        }
-                    };
-
-                    // Send init command (models_dir + compute_device)
-                    let (selected_model, compute_device, groq_api_key, provider) = {
-                        let app_state = app_handle.state::<AppState>();
-                        let s = load_settings_from_file(&app_state.settings_path);
-                        (s.model, s.compute_device, s.groq_api_key, s.provider)
-                    };
-                    let init_msg = serde_json::json!({
-                        "command": "init",
-                        "models_dir": models_dir_str,
-                        "compute_device": compute_device,
-                        "model": selected_model,
-                        "groq_api_key": groq_api_key,
-                        "provider": provider,
-                    });
-                    let _ = child.write(
-                        format!("{}\n", serde_json::to_string(&init_msg).unwrap()).as_bytes(),
-                    );
-
-                    // Store the child handle so send_to_python can write to it
-                    *app_handle
-                        .state::<AppState>()
-                        .python_process
-                        .lock()
-                        .unwrap() = Some(child);
-
-                    if restart_count > 0 {
-                        warn!(
-                            "[Python sidecar] Process restarted (restart #{})",
-                            restart_count
-                        );
-                        let _ = app_handle.emit("python_restarted", restart_count);
-                    }
-
-                    // Read stdout until the process exits (rx channel closes)
-                    while let Some(event) = rx.blocking_recv() {
-                        if let tauri_plugin_shell::process::CommandEvent::Stdout(line) = event {
-                            let _ = app_handle
-                                .emit("python_output", String::from_utf8_lossy(&line).to_string());
-                        }
-                    }
-
-                    // If we reach here, the Python process has died
-                    // Skip restart if we're shutting down intentionally
-                    if app_handle
-                        .state::<AppState>()
-                        .is_shutting_down
-                        .load(Ordering::SeqCst)
-                    {
-                        info!("[Python sidecar] Process exited (intentional shutdown)");
-                        break;
-                    }
-                    error!("[Python sidecar] Process exited unexpectedly, will restart");
-
-                    // Clear the stale child handle
-                    *app_handle
-                        .state::<AppState>()
-                        .python_process
-                        .lock()
-                        .unwrap() = None;
-
-                    // Back-off before restarting
-                    restart_count += 1;
-                    let delay = std::cmp::min(2u64.saturating_pow(restart_count), MAX_BACKOFF_SECS);
-                    info!("[Python sidecar] Waiting {}s before restart...", delay);
-                    std::thread::sleep(std::time::Duration::from_secs(delay));
-                }
-            });
+            sidecar::spawn(app_handle.clone(), script_path, models_dir.clone());
 
             // Emit initial widget mode for the overlay
-            let _ = app_handle_widget.emit("widget_mode_updated", settings.widget_mode.clone());
-
-            // Tray Menu
-            let show_i =
-                MenuItem::with_id(app, "show", "Mostra Traflix Voice", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Esci", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
-
-            let tray_tooltip = if cfg!(debug_assertions) {
-                "Traflix Voice [DEV]"
-            } else {
-                "Traflix Voice"
-            };
-
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip(tray_tooltip)
-                .menu(&menu)
-                .on_menu_event(|handle, event| {
-                    if event.id.as_ref() == "show" {
-                        if let Some(main_win) = handle.get_webview_window("main") {
-                            let _ = main_win.show();
-                            let _ = main_win.set_focus();
-                        }
-                        if let Some(overlay) = handle.get_webview_window("overlay") {
-                            let _ = overlay.hide();
-                        }
-                    } else if event.id.as_ref() == "quit" {
-                        // Mark as shutting down so the sidecar reader skips restart
-                        handle
-                            .state::<AppState>()
-                            .is_shutting_down
-                            .store(true, Ordering::SeqCst);
-                        // Stop any active recording first, then quit cleanly
-                        if let Some(child) = handle
-                            .state::<AppState>()
-                            .python_process
-                            .lock()
-                            .unwrap()
-                            .as_mut()
-                        {
-                            let _ = child.write(b"{\"command\": \"stop\"}\n");
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                        if let Some(child) = handle
-                            .state::<AppState>()
-                            .python_process
-                            .lock()
-                            .unwrap()
-                            .as_mut()
-                        {
-                            let _ = child.write(b"{\"command\": \"quit\"}\n");
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                        handle.exit(0);
-                    }
-                })
-                .build(app)?;
-
-            // Listen for show_main_window event from overlay
-            let app_handle_show = app.handle().clone();
-
-            // Listen for widget_mode updates from save_settings
-            let app_handle_wm = app.handle().clone();
-            app.listen("widget_mode_updated", move |event| {
-                let mode: String = serde_json::from_str(event.payload()).unwrap_or_default();
-                info!("[WidgetMode] Updated to: {}", mode);
-                // If switching to "always", show overlay if main window is hidden
-                if mode == "always" {
-                    if let Some(main_win) = app_handle_wm.get_webview_window("main") {
-                        let is_visible = main_win.is_visible().unwrap_or(false);
-                        if !is_visible {
-                            if let Some(overlay) = app_handle_wm.get_webview_window("overlay") {
-                                let _ = overlay.show();
-                            }
-                        }
-                    }
-                }
-                // If switching to "recording", hide overlay immediately
-                if mode == "recording" {
-                    if let Some(overlay) = app_handle_wm.get_webview_window("overlay") {
-                        let _ = overlay.hide();
-                    }
-                }
-            });
-
-            app.listen("show_main_window", move |_| {
-                if let Some(main_win) = app_handle_show.get_webview_window("main") {
-                    let _ = main_win.show();
-                    let _ = main_win.set_focus();
-                }
-                if let Some(overlay) = app_handle_show.get_webview_window("overlay") {
-                    let _ = overlay.hide();
-                }
-            });
+            let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());
+            window_runtime::setup_tray(app)?;
+            window_runtime::install_listeners(app);
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
-                    // Show the mini overlay widget only if widget mode is "always"
-                    let app_handle = window.app_handle();
-                    let app_state = app_handle.state::<AppState>();
-                    let settings = load_settings_from_file(&app_state.settings_path);
-                    if settings.widget_mode == "always" {
-                        if let Some(overlay) = app_handle.get_webview_window("overlay") {
-                            let _ = overlay.show();
-                            let _ = overlay.set_focus();
-                        }
-                    }
-                } else if window.label() == "overlay" {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-        })
+        .on_window_event(window_runtime::handle_window_event)
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
@@ -349,13 +90,7 @@ pub fn run() {
 
     #[cfg(not(debug_assertions))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        if let Some(main_win) = app.get_webview_window("main") {
-            let _ = main_win.show();
-            let _ = main_win.set_focus();
-        }
-        if let Some(overlay) = app.get_webview_window("overlay") {
-            let _ = overlay.hide();
-        }
+        window_runtime::show_main_window(app);
     }));
 
     builder
