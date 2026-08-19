@@ -199,3 +199,287 @@ La chiave Groq non è presente nel codice, nel report o nei commit. `.env` resta
 ignorato da Git. Anche dopo questi round non conviene riscrivere il backend cloud
 in C/C++/Rust: il tratto locale è 0,220–0,329 ms, mentre la mediana live è
 188,6 ms; il limite residuo è quasi interamente rete/provider.
+
+## Dieci round cloud-only aggiuntivi
+
+Questo ciclo è stato riallineato alla richiesta di usare esclusivamente Groq
+Cloud. L’esperimento sul riuso dell’executor locale è stato rimosso e non è
+conteggiato. Sono state mantenute solo le modifiche condivise che incidono sul
+percorso cloud: cattura audio, IPC, overlay, persistenza del risultato e
+client HTTP.
+
+| Round | Intervento | Prima → dopo | Evidenza |
+|---:|---|---|---|
+| 1 | Serializzazione compatta degli eventi `volume` | 56,761 → 9,591 ms / 20.000 eventi; 34 → 31 byte | `benchmark_ipc.py` |
+| 2 | Scarto del volume prima di `JSON.parse` e `Set` statico degli stati | 108,780 → 9,263 ms / 200.000 eventi (−91,5%) | `benchmark_frontend_events.mjs` |
+| 3 | Waveform con `transform: scaleY` e fattori precomputati | 5.739,054 → 5.320,687 ms / 100.000 frame (−7,3%) | `benchmark_overlay_animation.mjs` |
+| 4 | Sessione audio isolata, sentinel idempotente e clock monotono | costo stop→request sub-ms; lieve overhead rispetto al vecchio sentinel, con stop cross-session eliminato | suite `TestRecordingSession` + latency loop |
+| 5 | Una sola IPC per statistiche e lock separati per history/stats | 200.000 → 100.000 IPC; loop 1,220 → 0,786 ms | `benchmark_stats_flow.mjs` |
+| 6 | Copia mono riusata nel volume e conversione WAV cloud senza min/max | audio 0,0303 → 0,0278 ms; WAV 0,0855 → 0,0586 ms | `benchmark_cloud_audio.py` |
+| 7 | WAV+multipart costruiti direttamente senza `BytesIO` intermedio | 0,0847 → 0,0597 ms (−29,5%); payload identico, 128.573 byte | `benchmark_cloud_payload.py` |
+| 8 | Reset orario usage e rotazione client fuori dal lock | nessun lavoro aggiunto al percorso critico: usage resta su `groq-usage` executor | test tracker/client + cloud path |
+| 9 | Chiusura esplicita delle response e classificazione robusta del 429 | 500 richieste concorrenti, 500 risultati, 0 errori; p95 0,961 ms con trasporto finto | `benchmark_cloud_stress.py` |
+| 10 | Verifica aggregata finale e regressione cloud | cloud path mediana 0,125 ms, p95 0,219 ms; stop→request mediana 0,185 ms, p95 0,309 ms | latency/path loop, 47 test, build |
+
+Le misure end-to-end sono locali e soggette allo scheduling di Windows; non
+sono una misura della latenza reale Groq. Il round 4 privilegia la correttezza
+dello stop tra registrazioni, quindi non viene presentato come guadagno di
+microsecondi. Il percorso reale resta dominato da rete e provider.
+
+### Verifiche di questo ciclo
+
+- 47 test Python passati;
+- `py_compile` di tutti i moduli Python passato;
+- build TypeScript/Vite passata;
+- `cargo fmt --check` passato;
+- benchmark deterministici IPC, frontend, overlay, audio, payload, path,
+  stop-latency e stress passati;
+- working tree controllato su `main`, senza branch secondari;
+- nessun commit o push eseguito.
+
+Non è stato letto `.env` e non è stata effettuata una chiamata Groq reale: i
+benchmark cloud usano trasporti HTTP finti per non esporre chiavi né confondere
+il costo di rete con quello del codice locale. `cargo test`, `clippy` e build
+Rust completi non sono stati rilanciati in questo ciclo per mantenere il focus
+cloud richiesto e non ripetere il blocco di toolchain già rilevato.
+
+## Nuovi 50 round — avanzamento chunk 1/5
+
+Il primo chunk dei nuovi 50 round è completato. I round sono aggiuntivi rispetto
+ai precedenti 10 e restano limitati al percorso cloud.
+
+| Round | Miglioria | Evidenza |
+|---:|---|---|
+| 1 | RMS cloud con dot product, senza copia quadratica | Volume 0,0226 → 0,0179 ms mediana |
+| 2 | Scala dB precomputata a livello di modulo | Nessuna variazione del livello calibrato nei test |
+| 3 | Throttle volume basato sui campioni, senza `monotonic()` per blocco | Soglia stabile a 50 ms con blocchi variabili |
+| 4 | Mask long-clip senza temporaneo `abs()` float | Output di trimming identico sui clip brevi/lunghi |
+| 5 | Workspace booleano riusato durante la scansione lunga | Allocazione massima limitata a un blocco da 1 s |
+| 6 | Normalizzazione dei caller cloud a mono float32 | Matrice mono accettata, multi-canale rifiutata prima dell’HTTP |
+| 7 | Normalizzazione lingua (`AUTO`, spazi e maiuscole) | Campo multipart omesso per auto-detect |
+| 8 | `getbuffer()` per il compatibile percorso WAV legacy | Payload 128.573 byte invariato |
+| 9 | Lease del client HTTP durante la richiesta | Rotazione chiave non chiude client attivo |
+| 10 | Decode UTF-8 tollerante per response provider malformate | Response corrotta produce comunque `result` controllato |
+
+Risultati chunk 1: 56 test Python, build frontend, `py_compile`, `cargo
+fmt --check`, security scan e `npm audit` passati; stress cloud 300/300 con 0
+errori. Il candidato `np.any()` per il silenzio è stato scartato dopo il
+benchmark perché peggiorava il caso comune; non è conteggiato come round.
+
+## Nuovi 50 round — chunk 2/5: IPC e overlay cloud (round 11–20)
+
+Il secondo chunk riduce il lavoro generato dagli aggiornamenti di volume durante
+la registrazione cloud. Il dato ad alta frequenza viene consegnato direttamente
+all'overlay, mentre gli stati applicativi restano sul canale della finestra
+principale.
+
+| Round | Miglioria | Evidenza |
+|---:|---|---|
+| 11 | Routing degli eventi `volume` solo alla finestra `overlay` | La finestra principale non viene più risvegliata per ogni campione del meter |
+| 12 | Parser numerico compatto per payload `volume` | Nessun `JSON.parse` nel percorso normale del meter |
+| 13 | Listener principale sincrono, senza callback `async` inutilizzata | Nessuna Promise allocata per la ricezione degli eventi non-volume |
+| 14 | Fallback al broadcast se l'overlay non è disponibile | Nessun evento perso durante chiusura o ricreazione della finestra |
+| 15 | Jitter delle barre generato una sola volta per sessione | Eliminato `Math.random()` dal loop per-frame |
+| 16 | Look-up table per la curva di risposta del volume | 100.000 frame: 5.585,334 → 5.244,626 ms (−6,1%) |
+| 17 | Supporto al formato `volume` legacy e clamp del valore | Payload negativi, oltre 100, incompleti o non numerici non propagano valori invalidi |
+| 18 | Fast path degli stati compatti comuni dell'overlay | Gli stati `listening/processing/result/ready/error/rate_limit` evitano il parsing JSON completo |
+| 19 | Rifiuto anticipato dei payload non stringa | Eventi IPC anomali terminano senza eccezioni o lavoro React |
+| 20 | Riutilizzo della stringa UTF-8 presa in prestito nel sidecar | Evitata un'allocazione `.to_string()` per riga stdout; fallback preservato |
+
+Misure del chunk 2: il benchmark di dispatch frontend passa da 61,726 a
+8,615 ms su 200.000 eventi simulati (−86,0%); l'animazione passa da
+5.585,334 a 5.244,626 ms su 100.000 frame (−6,1%). Lo stress cloud simulato
+ha completato 300/300 richieste con 0 fallimenti e p95 di 1,321 ms. I valori
+sono costi locali del codice e non includono la latenza di rete o inferenza
+Groq.
+
+### Verifiche chunk 2
+
+- 56 test Python passati;
+- `py_compile` dei moduli Python cloud passato;
+- build TypeScript/Vite passata;
+- `cargo fmt --check` passato;
+- benchmark frontend, overlay, payload e stress passati;
+- `npm audit --omit=dev --audit-level=high` passato con 0 vulnerabilità;
+- nessun `.env` letto o modificato, nessun commit e nessun push eseguito.
+
+## Nuovi 50 round — chunk 4/5: client HTTP e resilienza Groq (round 31–40)
+
+Il quarto chunk lavora sul bordo HTTP cloud senza introdurre retry automatici:
+un retry non controllato potrebbe duplicare una trascrizione e il relativo
+consumo API. Le modifiche delimitano risorse, shutdown e prewarm del client.
+
+| Round | Miglioria | Evidenza |
+|---:|---|---|
+| 31 | Pool HTTP limitato a una connessione keep-alive | Allineato al worker cloud seriale, meno contesa e risorse inutili |
+| 32 | Timeout del pool esplicito a 5 s | Una concorrenza accidentale non può attendere indefinitamente una connessione |
+| 33 | Close del client isolato dagli errori di cleanup | Chiusura/rotazione non maschera il risultato o lo shutdown principale |
+| 34 | Check shutdown dopo trim/preparazione audio | Evitata una richiesta se la chiusura è iniziata prima dell'acquisizione client |
+| 35 | Check shutdown appena prima dell'invio | Lease del client sempre rilasciato senza inviare lavoro tardivo |
+| 36 | Shutdown dinamico osservabile durante la response | Risultato arrivato dopo la chiusura scartato, response comunque chiusa |
+| 37 | `stream=False` esplicito su `Client.send` | Body Groq letto e chiuso in modo deterministico |
+| 38 | Timeout HTTP classificato separatamente | UI riceve un errore azionabile senza confonderlo con rate limit |
+| 39 | Prewarm con snapshot della chiave e guardia stale/shutdown | Un thread vecchio non può rimpiazzare il client della chiave nuova |
+| 40 | Skip usage a durata nulla e redazione della chiave negli errori | Nessun task quota inutile; API key non viene inclusa nel messaggio mostrato |
+
+Benchmark chunk 4: cloud path deterministico mediana 0,137 ms/p95 0,241 ms;
+stop→request con client prewarmed mediana 0,174 ms/p95 0,236 ms; stress
+concorrente 300/300 con 0 fallimenti e p95 1,401 ms. Le misure escludono rete
+Groq reale e servono a controllare il costo del codice e la stabilità del
+seam HTTP.
+
+### Verifiche chunk 4
+
+- 63 test Python passati, inclusi timeout, shutdown dinamico, stale prewarm e
+  cleanup client;
+- `py_compile` dei moduli cloud e benchmark passato;
+- build TypeScript/Vite passata;
+- `cargo fmt --check` e `cargo check --lib` passati;
+- benchmark path, stop-latency e stress passati;
+- nessun retry automatico introdotto, nessun `.env` letto o modificato;
+- nessun commit e nessun push eseguito.
+
+## Nuovi 50 round — chunk 3/5: persistenza del risultato cloud (round 21–30)
+
+Questo chunk ottimizza il lavoro successivo alla risposta Groq: quota locale,
+cronologia e statistiche. La durabilità resta sincrona/atomica dove già lo era;
+viene eliminato solo il lavoro duplicato o evitabile.
+
+| Round | Miglioria | Evidenza |
+|---:|---|---|
+| 21 | Rimosso il `reloadGroqUsage()` immediatamente successivo a `recordGroqUsage()` | Il record aggiorna già lo stato React: eliminati read/parse duplicati per risultato |
+| 22 | Cache in memoria della quota nel renderer | Cache warm mediana 6,8283 → 0,8019 ms per write simulata (−88,3%) |
+| 23 | Formattazione del reset orario solo al cambio bucket | Nessuna conversione locale ripetuta nello stesso intervallo orario |
+| 24 | Validazione di durata finita e positiva + normalizzazione numerica | Durate NaN/negative e valori persistiti corrotti non alterano la quota |
+| 25 | Inserimento ottimistico della nuova cronologia dopo salvataggio riuscito | La trascrizione cloud compare subito senza un secondo `get_history` |
+| 26 | Guardie di generazione contro risposte asincrone obsolete | Cambio tab/clear/save non può sovrascrivere la cronologia con una risposta vecchia |
+| 27 | Retention delle ultime 50 voci con `drain` | Evitata la nuova allocazione di `split_off` sul 51° risultato |
+| 28 | JSON compatto per stats/history macchina-read | Stesso schema e parser invariato, meno byte e serializzazione per write |
+| 29 | Cache del file `groq_usage.json` nel sidecar | Il tracker caldo non rilegge/reparsa il file ad ogni risultato; write resta atomica |
+| 30 | Directory cache e no-op fast path del tracker | Nessuna directory/file operation per usage nullo; test cache e reset orario passati |
+
+Il benchmark del tracker ha misurato 80 scritture: cache warm mediana 0,8019 ms
+contro 6,8283 ms simulando un reload JSON ad ogni risultato (−88,3%). Il flusso
+stats conferma 100.000 trascrizioni con 200.000 → 100.000 chiamate IPC (−50%).
+La suite è salita a 58 test Python; il formato persistito e la scrittura
+atomica non sono stati rimossi.
+
+### Verifiche chunk 3
+
+- 58 test Python passati, inclusi cache usage, reset orario e no-op tracker;
+- `py_compile` dei moduli cloud e benchmark passato;
+- build TypeScript/Vite passata;
+- `cargo fmt --check` e `cargo check --lib` passati;
+- benchmark persistence/stats passati;
+- `npm audit --omit=dev --audit-level=high`: 0 vulnerabilità;
+- nessun `.env` letto o modificato, nessun commit e nessun push eseguito.
+
+## Nuovi 50 round — chunk 5/5: audit e rifinitura cloud (round 41–50)
+
+L’ultimo chunk chiude il ciclo con ottimizzazioni trasversali sul risultato
+Groq, sul meter e sui dashboard quota/history, più una regressione aggregata.
+Non sono state aggiunte chiamate reali al provider né retry automatici.
+
+| Round | Miglioria | Evidenza |
+|---:|---|---|
+| 41 | Separatori JSON compatti per gli eventi IPC di stato, oltre a `volume` | 20.000 eventi volume: applicazione 6,672 ms; payload 34 → 31 byte; `result` mantiene il serializer più rapido |
+| 42 | Durata cloud normalizzata a numero finito non negativo | `NaN`, stringhe invalide e valori negativi diventano `0.0` prima del risultato |
+| 43 | Limite di 512 caratteri sugli errori provider | Un errore anomalo non può gonfiare IPC/UI; chiave già redatta nel round 40 |
+| 44 | Durata positiva verificata nel listener React | Nessun WPM infinito/negativo e nessun aggiornamento stats con durata corrotta |
+| 45 | `Intl.DateTimeFormat` riusato per timestamp history | Formatter creato una volta, non per ogni risposta cloud |
+| 46 | Deduplica degli stati di trascrizione nel renderer principale | Stati ripetuti non generano nuovi aggiornamenti React |
+| 47 | Deduplica dei livelli volume consecutivi per sessione | Il meter non invia lo stesso valore IPC due volte di seguito |
+| 48 | Risultato normalizzato con una sola `trim()` | Testo, conteggio parole e history condividono lo stesso buffer logico |
+| 49 | Filtro history conserva l’indice originale durante la mappatura | Eliminato `indexOf` per ogni voce filtrata |
+| 50 | Clamp dei contatori quota nei dashboard | Valori persistiti NaN/negativi non producono percentuali o CSS invalidi |
+
+Regressione aggregata finale: frontend dispatch 56,698 → 8,285 ms su 200.000
+eventi (−85,4%); overlay 5.738,757 → 5.275,886 ms su 100.000 frame
+(−8,1%); payload cloud 0,0565 → 0,0448 ms con 128.573 byte identici;
+tracker quota warm 0,7397 ms contro 7,0682 ms con reload ad ogni risultato
+(−89,5%); stress 300/300, 0 fallimenti, p95 1,328 ms; cloud path mediana
+0,140 ms/p95 0,232; stop→request mediana 0,179 ms/p95 0,303.
+
+### Verifiche finali dei 50 round
+
+- 66 test Python passati;
+- `py_compile` di moduli Python e benchmark passato;
+- build TypeScript/Vite passata;
+- `cargo fmt --check` e `cargo check --lib` passati;
+- benchmark IPC, frontend, overlay, payload, persistence, path, latency e
+  stress passati;
+- `npm audit --omit=dev --audit-level=high`: 0 vulnerabilità;
+- nessun pattern di chiave/token nel codice, nessun `.env` letto o modificato;
+- nessun commit, nessun branch secondario e nessun push su GitHub.
+
+Il risultato complessivo è un percorso cloud più leggero prima della rete,
+più stabile durante rotazioni/shutdown e con meno lavoro nel renderer. La
+latenza reale Groq resta dipendente da rete, coda provider e inferenza: i
+benchmark locali non vanno interpretati come latenza end-to-end del servizio.
+
+## Altri 20 round — flusso cloud Registra → Stop → Groq
+
+Questo ciclo è limitato al gesto di avvio/arresto della registrazione cloud e
+alla preparazione immediatamente precedente all'HTTP Groq. Non sono state
+modificate funzioni del provider locale, non sono stati aggiunti retry e non è
+stata letta la configurazione `.env`.
+
+| Round | Miglioria | Evidenza / controllo |
+|---:|---|---|
+| 1 | Polling hotkey cloud portato da 8 ms a 4 ms | Minore finestra tra pressione e evento, stesso meccanismo Windows |
+| 2 | Guard readiness UI su `modelReadyRef` | La pressione usa lo stato più recente senza closure obsoleta |
+| 3 | Riga IPC fissa per `listening` | Eliminata la serializzazione JSON dello stato di avvio |
+| 4 | Riga IPC fissa per `processing` | Eliminata la serializzazione JSON dello stato di stop/elaborazione |
+| 5 | `monotonic` importato una sola volta | Nessun import locale durante ogni trascrizione |
+| 6 | Registrazione a un solo blocco senza `concatenate` | Evitata una copia per clip cloud molto brevi |
+| 7 | Fast path array mono `float32` 1-D | Il buffer già acquisito viene riusato |
+| 8 | Fast path matrice mono `float32` | Vista sulla colonna senza nuova allocazione |
+| 9 | Test di regressione IPC dei due stati caldi | Riga prodotta byte-per-byte e con newline corretto |
+| 10 | Test di riuso del buffer cloud | Identità dell'array preservata prima dell'encode |
+| 11 | Normalizzazione lingua canonica senza `str/strip/lower` | `it/en/fr/de/es/pt` passano senza allocazione intermedia |
+| 12 | Normalizzazione durata con fast path `float` finito | Il valore già valido viene restituito invariato |
+| 13 | Snapshot del provider all'inizio della sessione | Il percorso scelto resta stabile durante drain e encode |
+| 14 | Provider memorizzato nella `_RecordingSession` | Un toggle arrivato prima dell'esecuzione del worker non devia il clip |
+| 15 | Regressione provider-toggle durante cattura | Cloud chiamato, local non chiamato anche dopo il cambio impostazione |
+| 16 | Debounce nativo hotkey ridotto a 32 ms | Il latch `active` continua a impedire ripetizioni mentre il tasto è premuto |
+| 17 | Cooldown UI start ridotto a 80 ms | Il doppio evento accidentale resta filtrato con meno attesa |
+| 18 | Stop azzera il cooldown start | Una nuova registrazione può seguire subito lo stop |
+| 19 | Benchmark stop→request su 1/8/64 blocchi | Mediana dopo: 0,176 / 0,176 / 0,232 ms; p95: 0,226 / 0,223 / 0,331 ms |
+| 20 | Stress e verifica aggregata del percorso | 300/300 richieste, 0 errori; suite, build, lint e security check verdi |
+
+### Misure prima/dopo
+
+Baseline del tratto Python misurata prima del ciclo, con client prewarmed:
+0,198 ms mediana su un blocco, 0,208 ms su 8 blocchi e 0,237 ms su 64
+blocchi. Dopo i 20 round, su 100 iterazioni sequenziali: 0,176 ms, 0,176 ms
+e 0,232 ms rispettivamente. Il percorso a un blocco riduce quindi la mediana
+misurata di circa l'11%; il caso lungo resta sostanzialmente invariato entro
+il rumore del benchmark.
+
+La suite finale conta 72 test Python; `cargo fmt --check`, `cargo clippy
+-- -D warnings`, `cargo test` (10 unit test Rust e doctest), `py_compile`,
+`npm run build`, `npm audit --omit=dev --audit-level=high` e `git diff --check`
+sono passati. Il benchmark payload mantiene 128.573 byte identici prima/dopo
+e lo stress cloud ha prodotto 300 risultati su 300 senza errori.
+
+Nessun commit, branch secondario o push è stato eseguito.
+
+## Hardening post-review end-to-end
+
+- Cattura audio e processamento cloud/local sono stati separati in due worker:
+  una nuova registrazione non resta accodata dietro una richiesta Groq ancora
+  in corso.
+- Aggiunta una regressione per il riavvio cloud rapido stop → start → stop.
+- Aggiornamenti statistiche e `clear_history` condividono una coda ordinata;
+  il clear è una barriera tra scritture precedenti e successive.
+- Cronologia, salvataggi, letture e cancellazioni condividono una coda ordinata;
+  un salvataggio precedente non può ricomparire dopo la cancellazione.
+- Gli errori del motore emettono nuovamente `ready` e il renderer libera il
+  lock di registrazione anche quando riceve `error`.
+- Ripristinato il margine clipboard Windows a 50 ms per evitare race con le
+  applicazioni target più lente.
+- Polling hotkey riportato a 8 ms: resta reattivo senza il costo idle del
+  polling a 250 Hz.
+
+Verifica post-hardening: 72 test Python, build TypeScript/Vite e test mirato
+stop → nuova registrazione superati.
