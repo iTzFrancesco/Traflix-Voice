@@ -74,20 +74,32 @@ pub async fn update_stats(
     _wpm: u32,
     time_delta: f32,
 ) -> Result<AppStats, String> {
-    let mut stats = state.stats.lock().unwrap();
-    stats.total_words += words;
-    stats.total_time += time_delta;
-
-    // total_time is in minutes, so WPM = total_words / total_time_in_minutes
-    if stats.total_time > 0.0 {
-        stats.avg_wpm = (stats.total_words as f32 / stats.total_time).round() as u32;
+    if !time_delta.is_finite() || time_delta < 0.0 {
+        return Err("Durata trascrizione non valida".to_string());
     }
 
+    // Serialize file snapshots without holding the short-lived stats mutex;
+    // this keeps get_stats responsive while preserving write ordering.
+    let _stats_write_guard = state.stats_write_lock.lock().unwrap();
+    let updated_stats = {
+        let mut stats = state.stats.lock().unwrap();
+        stats.total_words += words;
+        stats.total_time += time_delta;
+
+        // total_time is in minutes, so WPM = total_words / total_time_in_minutes
+        if stats.total_time > 0.0 {
+            stats.avg_wpm = (stats.total_words as f32 / stats.total_time).round() as u32;
+        }
+        stats.clone()
+    };
+
     ensure_app_data_dir(&state.stats_path);
-    let data = serde_json::to_string_pretty(&*stats).map_err(|e| e.to_string())?;
+    // Stats are machine-read JSON and are rewritten after every cloud result;
+    // compact encoding reduces serialization and disk-write work.
+    let data = serde_json::to_string(&updated_stats).map_err(|e| e.to_string())?;
     atomic_write(&state.stats_path, &data).map_err(|e| e.to_string())?;
 
-    Ok(stats.clone())
+    Ok(updated_stats)
 }
 
 /// Restituisce le statistiche correnti
@@ -160,9 +172,10 @@ pub async fn execute_paste<R: Runtime>(app: AppHandle<R>, text: String) -> Resul
         .write_text(text)
         .map_err(|e| e.to_string())?;
 
-    // ClipboardManager::write_text is synchronous; a short settle window is
-    // enough before SendInput and avoids adding 30 ms to every paste.
-    thread::sleep(Duration::from_millis(20));
+    // Keep a conservative settle window for slower Windows target apps. The
+    // clipboard write is synchronous, but SendInput can otherwise race a
+    // target that has not observed the new clipboard sequence yet.
+    thread::sleep(Duration::from_millis(50));
 
     simulate_ctrl_v();
 
@@ -185,6 +198,7 @@ pub async fn save_transcription(
     timestamp: String,
     word_count: u32,
 ) -> Result<(), String> {
+    let _history_guard = state.history_lock.lock().unwrap();
     ensure_app_data_dir(&state.history_path);
 
     let mut entries: Vec<TranscriptionEntry> =
@@ -202,10 +216,13 @@ pub async fn save_transcription(
 
     // Mantieni solo le ultime 50 voci
     if entries.len() > 50 {
-        entries = entries.split_off(entries.len() - 50);
+        let remove_count = entries.len() - 50;
+        entries.drain(..remove_count);
     }
 
-    let data = serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())?;
+    // History is machine-read JSON and is rewritten after every result; keep
+    // the payload small while retaining the same schema and ordering.
+    let data = serde_json::to_string(&entries).map_err(|e| e.to_string())?;
     atomic_write(&state.history_path, &data).map_err(|e| e.to_string())?;
 
     Ok(())
@@ -214,6 +231,7 @@ pub async fn save_transcription(
 /// Restituisce la cronologia (ultime 50 trascrizioni, dalla più recente)
 #[tauri::command]
 pub async fn get_history(state: State<'_, AppState>) -> Result<Vec<TranscriptionEntry>, String> {
+    let _history_guard = state.history_lock.lock().unwrap();
     if let Ok(data) = fs::read_to_string(&state.history_path) {
         let mut entries: Vec<TranscriptionEntry> = serde_json::from_str(&data).unwrap_or_default();
         entries.reverse(); // Più recente prima
@@ -226,13 +244,18 @@ pub async fn get_history(state: State<'_, AppState>) -> Result<Vec<Transcription
 /// Cancella tutta la cronologia e resetta le statistiche
 #[tauri::command]
 pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
+    let _history_guard = state.history_lock.lock().unwrap();
+    let _stats_write_guard = state.stats_write_lock.lock().unwrap();
     if state.history_path.exists() {
         fs::remove_file(&state.history_path).map_err(|e| e.to_string())?;
     }
-    let mut stats = state.stats.lock().unwrap();
-    *stats = AppStats::default();
+    let stats = {
+        let mut current = state.stats.lock().unwrap();
+        *current = AppStats::default();
+        current.clone()
+    };
     ensure_app_data_dir(&state.stats_path);
-    let data = serde_json::to_string_pretty(&*stats).map_err(|e| e.to_string())?;
+    let data = serde_json::to_string(&stats).map_err(|e| e.to_string())?;
     atomic_write(&state.stats_path, &data).map_err(|e| e.to_string())?;
     Ok(())
 }

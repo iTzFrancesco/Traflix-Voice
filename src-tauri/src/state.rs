@@ -119,10 +119,12 @@ pub struct AudioDeviceInfo {
 
 pub struct AppState {
     pub stats: Mutex<AppStats>,
+    pub stats_write_lock: Mutex<()>,
     pub python_process: Mutex<Option<CommandChild>>,
     pub settings_path: PathBuf,
     pub stats_path: PathBuf,
     pub history_path: PathBuf,
+    pub history_lock: Mutex<()>,
     pub groq_usage_path: PathBuf,
     pub hotkey_config: Arc<RwLock<Vec<HotkeyConfig>>>,
     pub is_shutting_down: AtomicBool,

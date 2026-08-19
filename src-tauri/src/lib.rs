@@ -52,10 +52,12 @@ pub fn run() {
 
             app.manage(AppState {
                 stats: Mutex::new(load_stats_from_file(&stats_path)),
+                stats_write_lock: Mutex::new(()),
                 python_process: Mutex::new(None),
                 settings_path,
                 stats_path,
                 history_path,
+                history_lock: Mutex::new(()),
                 groq_usage_path: groq_usage_path.clone(),
                 hotkey_config: hotkey_config.clone(),
                 is_shutting_down: AtomicBool::new(false),

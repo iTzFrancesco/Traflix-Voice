@@ -20,9 +20,10 @@ import type {
   AppSettings,
   Provider,
   Toast,
-  PythonEvent,
 } from "./types";
 import { WHISPER_MODELS } from "./types";
+
+const TRANSCRIPTION_COOLDOWN_MS = 80;
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ export default function App() {
     loadSettings: loadStoredSettings,
     persistSettings: persistStoredSettings,
   } = useSettings();
-  const { stats, loadStats } = useStats();
+  const { stats, loadStats, updateStats, runStatsMutation } = useStats();
   const {
     entries: historyEntries,
     loadHistory,
@@ -105,10 +106,9 @@ export default function App() {
   } = usePythonOutput({
     selectedProvider,
     showToast,
-    loadStats,
+    updateStats,
     saveTranscription,
     recordGroqUsage,
-    reloadGroqUsage,
   });
 
   // ── SETTINGS ──
@@ -145,9 +145,9 @@ export default function App() {
   }, [mergeModelStatus]);
 
   const clearHistory = useCallback(async () => {
-    await clearStoredHistory();
+    await runStatsMutation(() => clearStoredHistory());
     await loadStats();
-  }, [clearStoredHistory, loadStats]);
+  }, [clearStoredHistory, loadStats, runStatsMutation]);
 
   // ── INIT ──
   // Set DEV title
@@ -299,15 +299,18 @@ export default function App() {
   }, []);
 
   // ── TRANSCRIPTION CONTROL ──
+  // Duplicate presses are already blocked by the active/lock refs. Keep a
+  // short guard only for the initial edge; stop clears it so a new cloud
+  // recording can start immediately after the previous one is ended.
   const transcriptionCooldownRef = useRef(0);
   const startTranscription = useCallback(async (isTest?: boolean) => {
     if (activeTranscriptionRef.current || transcriptionLockRef.current) return;
     const now = Date.now();
-    if (now - transcriptionCooldownRef.current < 300) return;
+    if (now - transcriptionCooldownRef.current < TRANSCRIPTION_COOLDOWN_MS) return;
     transcriptionCooldownRef.current = now;
     transcriptionLockRef.current = true;
     isTestRecordingRef.current = !!isTest;
-    if (!modelReady) {
+    if (!modelReadyRef.current) {
       showToast("Caricamento modello in corso, attendere...", "info");
       transcriptionLockRef.current = false;
       return;
@@ -343,7 +346,7 @@ export default function App() {
     } finally {
       transcriptionLockRef.current = false;
     }
-  }, [modelReady, modelStatus, selectedModel, selectedProvider, selectedLanguage, settings]);
+  }, [modelStatus, selectedModel, selectedProvider, selectedLanguage, settings]);
 
   startFnRef.current = startTranscription;
 
@@ -351,6 +354,7 @@ export default function App() {
     if (!activeTranscriptionRef.current) return;
     activeTranscriptionRef.current = false;
     transcriptionLockRef.current = false;
+    transcriptionCooldownRef.current = 0;
     try {
       void window.__TAURI__.core.invoke("stop_python").catch((err: unknown) => {
         console.error("[REC] stop error:", err);
