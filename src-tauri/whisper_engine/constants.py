@@ -11,5 +11,6 @@ GROQ_MULTIPART_BOUNDARY = "------------------------traflix-voice-8c4e9b"
 # makes the reported value independent from the number of samples in a block.
 VOLUME_FLOOR_DB = -58.0
 VOLUME_CEILING_DB = -12.0
+VOLUME_DB_SCALE = 100.0 / (VOLUME_CEILING_DB - VOLUME_FLOOR_DB)
 CLOUD_SILENCE_THRESHOLD = 0.003
 CLOUD_SILENCE_PADDING_SECONDS = 0.16

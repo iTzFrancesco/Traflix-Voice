@@ -1,7 +1,12 @@
 import numpy as np
-import time as pytime
 
-from whisper_engine.constants import VOLUME_CEILING_DB, VOLUME_FLOOR_DB
+from whisper_engine.constants import (
+    SAMPLE_RATE,
+    VOLUME_DB_SCALE,
+    VOLUME_FLOOR_DB,
+)
+
+VOLUME_UPDATE_SAMPLES = max(1, SAMPLE_RATE // 20)
 
 
 def calculate_volume(indata):
@@ -21,13 +26,15 @@ def calculate_volume(indata):
     samples = np.nan_to_num(
         samples, nan=0.0, posinf=0.0, neginf=0.0, copy=False
     )
-    rms = float(np.sqrt(np.mean(np.square(samples))))
-    peak = float(np.max(np.abs(samples)))
+    # The dot product computes RMS without materializing a squared copy. The
+    # queued cloud capture is a contiguous mono vector, so ravel() is a view
+    # on the hot path and NumPy can use its optimized reduction.
+    flat = samples.reshape(-1)
+    peak = float(np.max(np.abs(flat)))
+    rms = float(np.sqrt(np.dot(flat, flat) / samples.size))
     effective_level = max(rms, peak * 0.08)
     level_db = 20.0 * np.log10(max(effective_level, 1e-6))
-    normalized = (level_db - VOLUME_FLOOR_DB) / (
-        VOLUME_CEILING_DB - VOLUME_FLOOR_DB
-    ) * 100.0
+    normalized = (level_db - VOLUME_FLOOR_DB) * VOLUME_DB_SCALE
     return int(np.clip(normalized, 0.0, 100.0))
 
 
@@ -35,19 +42,33 @@ def audio_callback(indata, frames, time, status, audio_queue, is_recording, log_
     if status:
         log_func({"status": "warning", "message": str(status)})
     if not is_recording:
+        audio_callback._volume_sample_count = 0
         return
 
     # InputStream is mono. Queue only the channel itself so the stop path can
     # concatenate a flat recording without creating a second view later.
     mono = indata[:, 0] if indata.ndim > 1 else indata
-    audio_queue.put(mono.copy())
+    queued = mono.copy()
+    audio_queue.put(queued)
 
-    current_time = pytime.monotonic()
-    if current_time - audio_callback._last_vol_time <= 0.05:
+    audio_callback._volume_sample_count += max(0, int(frames or 0))
+    if audio_callback._volume_sample_count < VOLUME_UPDATE_SAMPLES:
         return
-    level = calculate_volume(indata)
+    audio_callback._volume_sample_count -= VOLUME_UPDATE_SAMPLES
+    # Reuse the queued mono copy: it is contiguous, already independent from
+    # PortAudio's callback buffer, and avoids scanning the 2-D input view.
+    level = calculate_volume(queued)
+    if level == getattr(audio_callback, "_last_volume", None):
+        return
+    audio_callback._last_volume = level
     log_func({"status": "volume", "value": level})
-    audio_callback._last_vol_time = current_time
 
 
-audio_callback._last_vol_time = 0
+audio_callback._volume_sample_count = VOLUME_UPDATE_SAMPLES
+audio_callback._last_volume = None
+
+
+def reset_volume_state():
+    """Reset the meter at the start of a new recording session."""
+    audio_callback._volume_sample_count = VOLUME_UPDATE_SAMPLES
+    audio_callback._last_volume = None
