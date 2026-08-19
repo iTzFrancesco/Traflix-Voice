@@ -114,7 +114,7 @@ pub fn handle_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) 
     if window.label() == "main" {
         if let WindowEvent::Moved(position) = event {
             let app_handle = window.app_handle();
-            sync_overlay_position(&app_handle, PhysicalPosition::new(position.x, position.y));
+            sync_overlay_position(app_handle, PhysicalPosition::new(position.x, position.y));
             return;
         }
     }
@@ -129,9 +129,9 @@ pub fn handle_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) 
             let settings = load_settings_from_file(&app_state.settings_path);
             if settings.widget_mode == "always" {
                 if let Ok(position) = window.outer_position() {
-                    sync_overlay_position(&app_handle, position);
+                    sync_overlay_position(app_handle, position);
                 }
-                show_overlay_with_animation(&app_handle);
+                show_overlay_with_animation(app_handle);
             }
         } else if window.label() == "overlay" {
             api.prevent_close();
