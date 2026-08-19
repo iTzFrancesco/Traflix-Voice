@@ -5,8 +5,34 @@ import threading
 from whisper_engine.constants import GROQ_MODEL
 
 
+_FAST_STATUS_LINES = {
+    ("listening", "In ascolto... parla ora."): '{"status":"listening","message":"In ascolto... parla ora."}\n',
+    ("processing", "Trascrizione in corso..."): '{"status":"processing","message":"Trascrizione in corso..."}\n',
+}
+
+
 def log(data):
-    sys.stdout.write(json.dumps(data) + "\n")
+    # Volume events are the hottest IPC message and contain only a bounded
+    # integer. Avoiding a full JSON encoder call keeps the audio callback
+    # lightweight; every other event retains the generic serializer.
+    value = data.get("value")
+    if data.get("status") == "volume" and type(value) is int:
+        line = '{"status":"volume","value":' + str(value) + "}\n"
+    elif data.get("status") == "result":
+        # Result text dominates the payload and compact encoding is slower for
+        # this lower-frequency path on short responses; retain the established
+        # serializer here and optimize status events below.
+        line = json.dumps(data) + "\n"
+    else:
+        line = _FAST_STATUS_LINES.get((data.get("status"), data.get("message")))
+        if line is not None:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            return
+        # Sidecar events are line-delimited machine JSON. Compact separators
+        # reduce stdout bytes and WebView parsing work for status events.
+        line = json.dumps(data, separators=(",", ":")) + "\n"
+    sys.stdout.write(line)
     sys.stdout.flush()
 
 
@@ -20,7 +46,11 @@ def handle_command(cmd, data, engine):
         if engine.provider == "local":
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
         else:
-            threading.Thread(target=engine.prepare_groq_client, daemon=True).start()
+            threading.Thread(
+                target=engine.prepare_groq_client,
+                args=(engine.groq_api_key,),
+                daemon=True,
+            ).start()
             engine.log({"status": "ready", "message": f"Pronto (cloud: {GROQ_MODEL})."})
     elif cmd == "download":
         threading.Thread(target=engine.download_model, args=(data.get("model"),), daemon=True).start()
@@ -39,7 +69,11 @@ def handle_command(cmd, data, engine):
         engine.provider = new_provider
         if new_provider == "cloud" and old_provider == "local":
             engine.unload_model()
-            threading.Thread(target=engine.prepare_groq_client, daemon=True).start()
+            threading.Thread(
+                target=engine.prepare_groq_client,
+                args=(engine.groq_api_key,),
+                daemon=True,
+            ).start()
         elif new_provider == "local":
             preload_model = data.get("model", "small")
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
@@ -58,7 +92,11 @@ def handle_command(cmd, data, engine):
     elif cmd == "set_groq_api_key":
         engine.groq_api_key = data.get("api_key") or None
         if engine.provider == "cloud":
-            threading.Thread(target=engine.prepare_groq_client, daemon=True).start()
+            threading.Thread(
+                target=engine.prepare_groq_client,
+                args=(engine.groq_api_key,),
+                daemon=True,
+            ).start()
     elif cmd == "quit":
         engine._shutting_down = True
         engine.stop_recording()

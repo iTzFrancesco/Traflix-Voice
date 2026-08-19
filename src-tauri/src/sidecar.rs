@@ -12,6 +12,10 @@ use crate::state::AppState;
 
 const MAX_BACKOFF_SECS: u64 = 10;
 
+fn is_volume_event(line: &str) -> bool {
+    line.starts_with(r#"{"status":"volume""#) || line.starts_with(r#"{"status": "volume""#)
+}
+
 /// Start the Python sidecar supervisor.
 ///
 /// The supervisor owns spawn, init, stdout forwarding, restart backoff and
@@ -94,8 +98,24 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
 
             while let Some(event) = rx.blocking_recv() {
                 if let CommandEvent::Stdout(line) = event {
-                    let _ = app_handle
-                        .emit("python_output", String::from_utf8_lossy(&line).to_string());
+                    let output = String::from_utf8_lossy(&line);
+                    let output_str = output.as_ref();
+                    if is_volume_event(output_str) {
+                        // The main window does not consume meter events. Keep
+                        // the high-frequency cloud stream in the overlay only
+                        // instead of waking both WebViews for every block.
+                        // If the overlay has already been destroyed, retain
+                        // the old broadcast behavior so the sidecar stream
+                        // remains observable during shutdown/reload races.
+                        if app_handle
+                            .emit_to("overlay", "python_output", output_str)
+                            .is_err()
+                        {
+                            let _ = app_handle.emit("python_output", output_str);
+                        }
+                    } else {
+                        let _ = app_handle.emit("python_output", output_str);
+                    }
                 }
             }
 
@@ -158,4 +178,16 @@ fn sleep_before_restart(restart_count: u32) {
         info!("[Python sidecar] Waiting {}s before restart...", delay);
     }
     thread::sleep(Duration::from_secs(delay));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_volume_event;
+
+    #[test]
+    fn routes_compact_and_legacy_volume_lines() {
+        assert!(is_volume_event(r#"{"status":"volume","value":42}"#));
+        assert!(is_volume_event(r#"{"status": "volume", "value": 42}"#));
+        assert!(!is_volume_event(r#"{"status":"result","text":"ok"}"#));
+    }
 }
