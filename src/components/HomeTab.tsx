@@ -22,9 +22,10 @@ const statusMeta: Record<string, { label: string; tone: string }> = {
 };
 
 function UsageMeter({ label, used, limit, color, footer }: { label: string; used: number; limit: number; color: string; footer?: string }) {
-  const percent = Math.min(100, (used / limit) * 100);
+  const safeUsed = Number.isFinite(used) && used >= 0 ? used : 0;
+  const percent = Math.min(100, (safeUsed / limit) * 100);
   return <div className="panel-subtle p-3.5">
-    <div className="flex items-center justify-between gap-2 mb-2"><span className="text-[.64rem] font-bold uppercase tracking-[.09em] text-[var(--quiet)]">{label}</span><span className="text-[.75rem] font-bold" style={{ color }}>{Math.round(used).toLocaleString("it-IT")} / {limit.toLocaleString("it-IT")}s</span></div>
+    <div className="flex items-center justify-between gap-2 mb-2"><span className="text-[.64rem] font-bold uppercase tracking-[.09em] text-[var(--quiet)]">{label}</span><span className="text-[.75rem] font-bold" style={{ color }}>{Math.round(safeUsed).toLocaleString("it-IT")} / {limit.toLocaleString("it-IT")}s</span></div>
     <div className="h-1.5 overflow-hidden rounded-full bg-black/30"><div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${percent}%`, background: color }} /></div>
     {footer && <p className="m-0 mt-2 text-[.64rem] text-[var(--quiet)]">{footer}</p>}
   </div>;

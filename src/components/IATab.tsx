@@ -20,8 +20,12 @@ export default function IATab({
   onProviderToggle,
   onModelAction,
 }: IATabProps) {
-  const dailySecs = groqUsage?.audio_seconds || 0;
-  const hourlySecs = groqUsage?.audio_seconds_hourly || 0;
+  const dailySecs = Number.isFinite(groqUsage?.audio_seconds) && (groqUsage?.audio_seconds ?? 0) >= 0
+    ? groqUsage?.audio_seconds ?? 0
+    : 0;
+  const hourlySecs = Number.isFinite(groqUsage?.audio_seconds_hourly) && (groqUsage?.audio_seconds_hourly ?? 0) >= 0
+    ? groqUsage?.audio_seconds_hourly ?? 0
+    : 0;
   const dailyPct = Math.min(100, (dailySecs / 28800) * 100);
   const hourlyPct = Math.min(100, (hourlySecs / 7200) * 100);
 

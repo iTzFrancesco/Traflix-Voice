@@ -13,20 +13,54 @@ export interface DownloadInfo {
 interface UsePythonOutputOptions {
   selectedProvider: Provider;
   showToast: (message: string, type: ToastType) => void;
-  loadStats: () => void | Promise<void>;
+  updateStats: (
+    words: number,
+    wpm: number,
+    timeDelta: number,
+  ) => Promise<unknown>;
   saveTranscription: (
     text: string,
     timestamp: string,
     wordCount: number
   ) => Promise<void>;
   recordGroqUsage: (durationSecs: number) => void;
-  reloadGroqUsage: () => void;
 }
 
 type ModelStatus = Record<
   string,
   { downloaded: boolean; loading: boolean }
 >;
+
+const TRANSCRIPTION_STATUSES = new Set([
+  "starting",
+  "loading_model",
+  "listening",
+  "processing",
+  "ready",
+  "result",
+  "error",
+  "rate_limit",
+]);
+
+const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat("it-IT", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+function positiveFiniteNumber(value: unknown): number {
+  if (typeof value !== "number" && typeof value !== "string") return 0;
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function countWords(text: string): number {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
 
 function modelNameFor(id?: string): string {
   return WHISPER_MODELS.find((model) => model.id === id)?.name || id || "";
@@ -43,10 +77,9 @@ function clearLoading(status: ModelStatus): ModelStatus {
 export function usePythonOutput({
   selectedProvider,
   showToast,
-  loadStats,
+  updateStats,
   saveTranscription,
   recordGroqUsage,
-  reloadGroqUsage,
 }: UsePythonOutputOptions) {
   const [modelStatus, setModelStatus] = useState<ModelStatus>({});
   const [modelReady, setModelReady] = useState(false);
@@ -62,6 +95,7 @@ export function usePythonOutput({
   const transcriptionLockRef = useRef(false);
   const isTestRecordingRef = useRef(false);
   const modelReadyRef = useRef(false);
+  const lastTranscriptionStatusRef = useRef("idle");
   modelReadyRef.current = modelReady;
 
   const updateModelStatus = useCallback(
@@ -101,9 +135,27 @@ export function usePythonOutput({
     let unlisten: (() => void) | null = null;
 
     window.__TAURI__.event
-      .listen("python_output", async (event: { payload: unknown }) => {
+      .listen("python_output", (event: { payload: unknown }) => {
         try {
-          const data = JSON.parse(event.payload as string) as PythonEvent;
+          const rawPayload = typeof event.payload === "string" ? event.payload : "";
+
+          // Python always writes the status field first. The overlay is the
+          // only consumer of volume events, so reject both compact and legacy
+          // JSON spellings before paying for JSON.parse in the main app.
+          if (
+            rawPayload.startsWith('{"status":"volume"') ||
+            rawPayload.startsWith('{"status": "volume"')
+          ) {
+            return;
+          }
+
+          const data = JSON.parse(rawPayload) as PythonEvent;
+
+          // The overlay owns volume updates. Exit before any React state
+          // checks or allocations so the high-frequency meter never causes
+          // work in the main application tree.
+          if (data.status === "volume") return;
+
           let pastePromise: Promise<unknown> | null = null;
 
           // Start the native paste before React state or persistence work.
@@ -126,24 +178,21 @@ export function usePythonOutput({
           }
 
           if (
-            [
-              "starting",
-              "loading_model",
-              "listening",
-              "processing",
-              "ready",
-              "result",
-              "error",
-              "rate_limit",
-            ].includes(data.status || "")
+            TRANSCRIPTION_STATUSES.has(data.status || "") &&
+            lastTranscriptionStatusRef.current !== data.status
           ) {
+            lastTranscriptionStatusRef.current = data.status;
             setTranscriptionStatus(data.status);
           }
 
           if (data.status === "listening") {
             activeTranscriptionRef.current = true;
             transcriptionLockRef.current = false;
-          } else if (data.status === "result" || data.status === "ready") {
+          } else if (
+            data.status === "result" ||
+            data.status === "ready" ||
+            data.status === "error"
+          ) {
             activeTranscriptionRef.current = false;
             transcriptionLockRef.current = false;
           }
@@ -209,9 +258,6 @@ export function usePythonOutput({
             setGpuStatus(`Dispositivo in uso: ${deviceLabel} | ${cudaLabel}`);
           }
 
-          // Volume is consumed by the overlay and must not rerender the app.
-          if (data.status === "volume") return;
-
           if (data.status === "info" && data.message) {
             console.log("[Python]", data.message);
           }
@@ -222,10 +268,12 @@ export function usePythonOutput({
 
           if (data.status === "result" && data.text) {
             const resultText = data.text;
+            const trimmedResultText = resultText.trim();
+            const duration = positiveFiniteNumber(data.duration);
             if (isTestRecordingRef.current) {
               isTestRecordingRef.current = false;
               setTranscriptionText((previous) =>
-                previous + resultText.trim() + "\n"
+                previous + trimmedResultText + "\n"
               );
             }
 
@@ -235,40 +283,23 @@ export function usePythonOutput({
               );
             }
 
-            const wordCount = resultText
-              .trim()
-              .split(/\s+/)
-              .filter(Boolean).length;
-            if (wordCount > 0 && data.duration && window.__TAURI__?.core?.invoke) {
-              const wpm = Math.round((wordCount / data.duration) * 60);
-              void window.__TAURI__.core
-                .invoke("update_stats", {
-                  words: wordCount,
-                  wpm,
-                  timeDelta: data.duration / 60,
-                })
-                .then(() => loadStats())
+            const wordCount = countWords(trimmedResultText);
+            if (wordCount > 0 && duration > 0) {
+              const wpm = Math.round((wordCount / duration) * 60);
+              void updateStats(wordCount, wpm, duration / 60)
                 .catch(() => {});
             }
 
-            const historyTimestamp = new Date().toLocaleString("it-IT", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            });
+            const historyTimestamp = HISTORY_TIMESTAMP_FORMATTER.format(new Date());
             void saveTranscription(
-              resultText.trim(),
+              trimmedResultText,
               historyTimestamp,
               wordCount
             );
 
             if (selectedProviderRef.current === "cloud") {
-              recordGroqUsage(data.duration || 0);
+              recordGroqUsage(duration);
             }
-            reloadGroqUsage();
           }
         } catch (error) {
           console.error("[python_output] Error:", error);
@@ -284,9 +315,8 @@ export function usePythonOutput({
       if (unlisten) unlisten();
     };
   }, [
-    loadStats,
+    updateStats,
     recordGroqUsage,
-    reloadGroqUsage,
     saveTranscription,
     showToast,
     updateModelStatus,
