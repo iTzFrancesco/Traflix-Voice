@@ -13,6 +13,7 @@ declare global {
       window: {
         getCurrentWindow: () => {
           startDragging: () => Promise<void>;
+          outerPosition: () => Promise<{ x: number; y: number }>;
           show: () => Promise<void>;
           hide: () => Promise<void>;
           center: () => Promise<void>;

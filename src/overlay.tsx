@@ -2,14 +2,65 @@ import { useEffect, useRef } from "react";
 import ReactDOM from "react-dom/client";
 
 const IS_DEV = import.meta.env.DEV || ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const WIDGET_EXIT_MS = 220;
+
+const RESPONSIVE_VOLUME_LUT = Array.from({ length: 101 }, (_, index) => {
+  const normalized = index / 100;
+  return normalized === 0
+    ? 0
+    : Math.min(1, Math.pow(normalized, 0.68) * 1.12);
+});
 
 function responsiveVolume(value: number): number {
   const normalized = Math.min(1, Math.max(0, value / 100));
   if (normalized === 0) return 0;
 
-  // A sub-linear curve makes quiet speech visible while preserving headroom
-  // for louder peaks instead of clipping the bars immediately.
-  return Math.min(1, Math.pow(normalized, 0.68) * 1.12);
+  const scaled = normalized * 100;
+  const lower = Math.floor(scaled);
+  const upper = Math.min(100, lower + 1);
+  const fraction = scaled - lower;
+  return (
+    RESPONSIVE_VOLUME_LUT[lower] +
+    (RESPONSIVE_VOLUME_LUT[upper] - RESPONSIVE_VOLUME_LUT[lower]) * fraction
+  );
+}
+
+function compactVolumeFromPayload(payload: unknown): number | null {
+  if (typeof payload !== "string") return null;
+  const compactPrefix = '{"status":"volume","value":';
+  const legacyPrefix = '{"status": "volume", "value":';
+  const prefix = payload.startsWith(compactPrefix)
+    ? compactPrefix
+    : payload.startsWith(legacyPrefix)
+      ? legacyPrefix
+      : null;
+  if (!prefix) return null;
+  const end = payload.indexOf("}", prefix.length);
+  const value = Number(payload.slice(prefix.length, end < 0 ? undefined : end));
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
+}
+
+const COMPACT_STATUS_PREFIXES: ReadonlyArray<readonly [string, string]> = [
+  ['{"status":"listening"', "listening"],
+  ['{"status": "listening"', "listening"],
+  ['{"status":"processing"', "processing"],
+  ['{"status": "processing"', "processing"],
+  ['{"status":"result"', "result"],
+  ['{"status": "result"', "result"],
+  ['{"status":"ready"', "ready"],
+  ['{"status": "ready"', "ready"],
+  ['{"status":"error"', "error"],
+  ['{"status": "error"', "error"],
+  ['{"status":"rate_limit"', "rate_limit"],
+  ['{"status": "rate_limit"', "rate_limit"],
+];
+
+function compactStatusFromPayload(payload: unknown): string | null {
+  if (typeof payload !== "string") return null;
+  for (const [prefix, status] of COMPACT_STATUS_PREFIXES) {
+    if (payload.startsWith(prefix)) return status;
+  }
+  return null;
 }
 
 function Overlay() {
@@ -23,12 +74,31 @@ function Overlay() {
     let currentVolume = 0;
     let targetVolume = 0;
     const barHeights = new Array(14).fill(3);
-    const barTargets = new Array(14).fill(3);
+    const barJitters = Array.from(
+      { length: 14 },
+      () => 0.84 + Math.random() * 0.16,
+    );
+    const barPhases = Array.from(
+      { length: 14 },
+      (_, index) => index * 0.42 + Math.random() * 0.75,
+    );
+    const barSpeeds = Array.from(
+      { length: 14 },
+      () => 0.9 + Math.random() * 0.22,
+    );
+    const barFactors = Array.from({ length: 14 }, (_, i) => {
+      const center = (14 - 1) / 2;
+      return 1 - (Math.abs(i - center) / center) * 0.28;
+    });
     const bars: HTMLDivElement[] = [];
     let widgetMode = "always";
     let isListening = false;
     let isProcessing = false;
     let animationFrame = 0;
+    let animationTime = 0;
+    let lastFrameTime = performance.now();
+    let widgetMotion: "enter" | "exit" | null = null;
+    let isOpeningMain = false;
 
     const startSound = new Audio("/assets/sounds/start.wav");
     const stopSound = new Audio("/assets/sounds/stop.wav");
@@ -42,7 +112,11 @@ function Overlay() {
       #overlay-root { width:100%; height:100%; display:flex; align-items:center; justify-content:flex-start; }
       :root { --voice-gradient:linear-gradient(180deg,#ff8c00 0%,#ffd27a 50%,#ff8c00 100%); --separator-gradient:linear-gradient(180deg,rgba(255,98,107,0) 0%,rgba(255,98,107,.95) 50%,rgba(255,98,107,0) 100%); }
       @keyframes spin { to { transform:rotate(360deg); } }
+      @keyframes widget-enter { 0% { opacity:0; transform:translate3d(0,8px,0) scale(.92); filter:blur(2px); } 58% { opacity:1; transform:translate3d(0,-1px,0) scale(1.018); filter:blur(0); } 100% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } }
+      @keyframes widget-exit { 0% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } 100% { opacity:0; transform:translate3d(0,-5px,0) scale(.94); filter:blur(1.5px); } }
       .ow { height:38px; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; transition:border-color 0.3s cubic-bezier(0.4,0,0.2,1),box-shadow 0.3s cubic-bezier(0.4,0,0.2,1); }
+      .ow.widget-enter { animation:widget-enter .42s cubic-bezier(.22,1,.36,1) both; }
+      .ow.widget-exit { animation:widget-exit .22s cubic-bezier(.4,0,1,1) both; pointer-events:none; }
       .ow:active { cursor:grabbing; }
       .ow:hover { border-color:rgba(255,140,0,0.5); box-shadow:0 0 10px rgba(255,140,0,0.1); }
       .ow.rec { border-color:rgba(255,140,0,0.5); box-shadow:0 0 12px rgba(255,140,0,0.12); }
@@ -54,7 +128,7 @@ function Overlay() {
       .spr { width:16px; height:16px; border:2px solid transparent; border-radius:50%; background:linear-gradient(rgba(18,19,17,.96),rgba(18,19,17,.96)) padding-box,conic-gradient(from 0deg,#ff8c00,#ffd27a,#ff8c00) border-box; animation:spin 0.9s cubic-bezier(0.4,0,0.2,1) infinite; flex-shrink:0; }
       .vw { display:flex; align-items:center; justify-content:center; gap:2px; width:0px; overflow:hidden; opacity:0; transition:width 0.3s cubic-bezier(0.4,0,0.2,1),opacity 0.25s ease; }
       .ow.rec .vw { width:80px; opacity:1; }
-      .bar { width:2.5px; background:var(--voice-gradient); border-radius:2px; height:3px; transition:height 0.08s ease; box-shadow:0 0 4px rgba(255,190,90,0.38); flex-shrink:0; }
+      .bar { width:2.5px; background:var(--voice-gradient); border-radius:2px; height:30px; transform:scaleY(.1); transform-origin:center; box-shadow:0 0 5px rgba(255,190,90,0.48); flex-shrink:0; will-change:transform; }
       .sep { width:0px; height:16px; flex-shrink:0; background:var(--separator-gradient); border-radius:99px; box-shadow:0 0 6px rgba(255,98,107,0.42); opacity:0; visibility:hidden; transition:width 0.3s cubic-bezier(0.4,0,0.2,1),opacity 0.25s ease,margin-left 0.3s cubic-bezier(0.4,0,0.2,1); }
       .ow.rec .sep { width:2.5px; opacity:1; visibility:visible; margin-left:-8px; }
       .hint { position:absolute; top:calc(100% + 7px); left:0; display:flex; align-items:center; gap:6px; color:rgba(245,243,239,.72); font:600 10px/1 "Segoe UI",sans-serif; letter-spacing:.03em; white-space:nowrap; opacity:0; transform:translateY(-2px); pointer-events:none; transition:opacity .18s ease,transform .18s ease; text-shadow:0 1px 5px #000; }
@@ -62,6 +136,7 @@ function Overlay() {
       .devbadge { color:#ff626b; background:rgba(255,98,107,.15); border-radius:4px; padding:3px 5px; font-weight:800; letter-spacing:.12em; box-shadow:0 0 10px rgba(255,98,107,.16); }
       .dev-slot { display:inline-flex; align-items:center; justify-content:center; height:100%; }
       .widget-devbadge { background:transparent; color:#ff7b83; font:800 9px/1 "Segoe UI",sans-serif; letter-spacing:.1em; padding:0 1px; text-shadow:0 0 6px rgba(255,98,107,.45); }
+      @media (prefers-reduced-motion: reduce) { .ow.widget-enter, .ow.widget-exit { animation-duration:.001ms !important; } }
     `;
     document.head.appendChild(style);
 
@@ -105,6 +180,34 @@ function Overlay() {
       vizWrap.appendChild(bar);
       bars.push(bar);
     }
+
+    function setWidgetStateClass(stateClass: "rec" | "proc" | "") {
+      const motionClass = widgetMotion ? ` widget-${widgetMotion}` : "";
+      widget.className = `ow${stateClass ? ` ${stateClass}` : ""}${motionClass}`;
+    }
+
+    function playWidgetEntry() {
+      widgetMotion = "enter";
+      widget.classList.remove("widget-exit", "widget-enter");
+      void widget.offsetWidth;
+      widget.classList.add("widget-enter");
+    }
+
+    function playWidgetExit() {
+      widgetMotion = "exit";
+      widget.classList.remove("widget-enter", "widget-exit");
+      void widget.offsetWidth;
+      widget.classList.add("widget-exit");
+    }
+
+    function handleWidgetAnimationEnd(event: AnimationEvent) {
+      if (event.target !== widget || event.animationName !== "widget-enter") return;
+      if (widgetMotion === "enter") {
+        widgetMotion = null;
+        widget.classList.remove("widget-enter");
+      }
+    }
+    widget.addEventListener("animationend", handleWidgetAnimationEnd);
 
     // ── SHOW / HIDE WINDOW BASED ON WIDGET MODE ──
     let requestedVisibility: boolean | null = null;
@@ -154,17 +257,17 @@ function Overlay() {
       }
 
       if (nextState === "recording") {
-        widget.className = "ow rec";
+        setWidgetStateClass("rec");
         widget.setAttribute("aria-label", "Traflix Voice. Registrazione in corso. Doppio clic per aprire la console");
         startSound.currentTime = 0;
         startSound.play().catch(() => {});
       } else if (nextState === "processing") {
-        widget.className = "ow proc";
+        setWidgetStateClass("proc");
         widget.setAttribute("aria-label", "Traflix Voice. Elaborazione della trascrizione. Doppio clic per aprire la console");
         stopSound.currentTime = 0;
         stopSound.play().catch(() => {});
       } else {
-        widget.className = "ow";
+        setWidgetStateClass("");
         widget.setAttribute("aria-label", "Traflix Voice pronta. Doppio clic per aprire la console");
       }
 
@@ -172,12 +275,40 @@ function Overlay() {
       scheduleAnimation();
     }
 
+    async function requestMainWindow() {
+      if (isOpeningMain) return;
+      isOpeningMain = true;
+
+      const currentWindow = window.__TAURI__?.window?.getCurrentWindow?.();
+      const positionPromise = currentWindow?.outerPosition
+        ? Promise.resolve().then(() => currentWindow.outerPosition()).catch(() => null)
+        : Promise.resolve(null);
+      const exitDelay = new Promise<void>((resolve) => {
+        window.setTimeout(resolve, WIDGET_EXIT_MS);
+      });
+
+      playWidgetExit();
+
+      try {
+        const [position] = await Promise.all([positionPromise, exitDelay]);
+        const payload = position && Number.isFinite(position.x) && Number.isFinite(position.y)
+          ? { x: Math.round(position.x), y: Math.round(position.y) }
+          : {};
+        await window.__TAURI__.event.emit("show_main_window", payload);
+      } catch (_) {
+        widgetMotion = null;
+        widget.classList.remove("widget-exit");
+      } finally {
+        isOpeningMain = false;
+      }
+    }
+
     // ── MOUSE CLICK (double-click to show main) ──
     widget.addEventListener("mousedown", (e: MouseEvent) => {
       const now = Date.now();
       if (now - lastClick < 300) {
         lastClick = 0;
-        window.__TAURI__.event.emit("show_main_window", {}).catch(() => {});
+        void requestMainWindow();
         return;
       }
       lastClick = now;
@@ -188,13 +319,21 @@ function Overlay() {
     widget.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        window.__TAURI__.event.emit("show_main_window", {}).catch(() => {});
+        void requestMainWindow();
       }
     });
 
     // ── EVENT LISTENERS ──
     let overlayCancelled = false;
     const unlistenFns: (() => void)[] = [];
+
+    window.__TAURI__.event
+      .listen("overlay_appearing", () => {
+        playWidgetEntry();
+      })
+      .then((fn) => {
+        if (overlayCancelled) fn(); else unlistenFns.push(fn);
+      });
 
     // Listen for widget_mode_updated
     window.__TAURI__.event
@@ -212,7 +351,28 @@ function Overlay() {
     window.__TAURI__.event
       .listen("python_output", (event: { payload: unknown }) => {
         try {
-          const data = JSON.parse(event.payload as string);
+          const compactVolume = compactVolumeFromPayload(event.payload);
+          if (compactVolume !== null) {
+            targetVolume = compactVolume;
+            scheduleAnimation();
+            return;
+          }
+
+          const compactStatus = compactStatusFromPayload(event.payload);
+          if (compactStatus !== null) {
+            if (compactStatus === "listening") {
+              applyVisualState("recording");
+            } else if (compactStatus === "processing") {
+              applyVisualState("processing");
+            } else {
+              applyVisualState("idle");
+            }
+            return;
+          }
+
+          if (typeof event.payload !== "string") return;
+
+          const data = JSON.parse(event.payload);
 
           if (data.status === "listening") {
             applyVisualState("recording");
@@ -250,29 +410,54 @@ function Overlay() {
       if (!animationFrame) animationFrame = requestAnimationFrame(animate);
     }
 
-    function animate() {
+    function animate(frameTime: number) {
       animationFrame = 0;
+
+      const elapsed = Math.min(
+        0.05,
+        Math.max(0.001, (frameTime - lastFrameTime) / 1000),
+      );
+      lastFrameTime = frameTime;
+      animationTime += elapsed;
 
       currentVolume += (targetVolume - currentVolume) * 0.2;
       if (currentVolume < 0.5) currentVolume = 0;
 
       const volNorm = responsiveVolume(currentVolume);
+      // Keep a very small living motion while recording, even between meter
+      // packets. The real volume still controls the overall amplitude.
+      const animatedVolume = Math.max(
+        volNorm,
+        isListening ? 0.035 : 0,
+      );
       const maxH = 30;
       const minH = 3;
 
       for (let i = 0; i < 14; i++) {
-        const center = 14 / 2;
-        const dist = Math.abs(i - center) / center;
-        const bellFactor = 1 - dist * 0.5;
-        const jitter = 0.6 + Math.random() * 0.4;
+        const phase = barPhases[i];
+        const speed = barSpeeds[i];
+        const travellingWave = Math.sin(
+          animationTime * 3.2 * speed - i * 0.58 + phase,
+        );
+        const breathingWave = Math.sin(animationTime * 1.8 + phase * 0.7);
+        const innerWave = Math.sin(
+          animationTime * 2.45 + phase + (1 - Math.abs(i - 6.5) / 6.5) * 1.2,
+        );
+        const motion = 0.86 + travellingWave * 0.1 + breathingWave * 0.04;
+        const shape = barFactors[i] * (0.96 + innerWave * 0.08);
+        const target =
+          minH +
+          animatedVolume *
+            (maxH - minH) *
+            shape *
+            barJitters[i] *
+            motion;
 
-        barTargets[i] = minH + volNorm * (maxH - minH) * bellFactor * jitter;
-        barHeights[i] += (barTargets[i] - barHeights[i]) * 0.25;
+        barHeights[i] += (target - barHeights[i]) * 0.25;
 
         const h = Math.max(minH, Math.min(maxH, barHeights[i]));
-        bars[i].style.height = h + "px";
-        const glow = (h / maxH) * 6;
-        bars[i].style.boxShadow = `0 0 ${glow}px rgba(255, 190, 90, ${0.3 + (h / maxH) * 0.4})`;
+        const drift = Math.sin(animationTime * 2.1 + phase) * animatedVolume * 0.7;
+        bars[i].style.transform = `translateY(${drift}px) scaleY(${h / maxH})`;
       }
 
       if (visualState !== "idle" || currentVolume >= 0.5) {
@@ -283,6 +468,7 @@ function Overlay() {
     return () => {
       overlayCancelled = true;
       cancelAnimationFrame(animationFrame);
+      widget.removeEventListener("animationend", handleWidgetAnimationEnd);
       unlistenFns.forEach((fn) => fn());
       if (style.parentNode) style.parentNode.removeChild(style);
     };
