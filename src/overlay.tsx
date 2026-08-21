@@ -73,23 +73,27 @@ function Overlay() {
     let lastClick = 0;
     let currentVolume = 0;
     let targetVolume = 0;
-    const barHeights = new Array(14).fill(3);
+    const BAR_COUNT = 14;
+    const barHeights = new Array(BAR_COUNT).fill(3);
+    const barVolumes = new Array(BAR_COUNT).fill(0);
     const barJitters = Array.from(
-      { length: 14 },
-      () => 0.84 + Math.random() * 0.16,
+      { length: BAR_COUNT },
+      () => 0.68 + Math.random() * 0.34,
     );
     const barPhases = Array.from(
-      { length: 14 },
-      (_, index) => index * 0.42 + Math.random() * 0.75,
+      { length: BAR_COUNT },
+      (_, index) => index * 0.64 + Math.random() * 1.15,
     );
     const barSpeeds = Array.from(
-      { length: 14 },
-      () => 0.9 + Math.random() * 0.22,
+      { length: BAR_COUNT },
+      () => 0.82 + Math.random() * 0.48,
     );
-    const barFactors = Array.from({ length: 14 }, (_, i) => {
-      const center = (14 - 1) / 2;
-      return 1 - (Math.abs(i - center) / center) * 0.28;
+    const barFactors = Array.from({ length: BAR_COUNT }, (_, i) => {
+      const center = (BAR_COUNT - 1) / 2;
+      return 0.52 + 0.48 * (1 - Math.abs(i - center) / center);
     });
+    const volHistory = new Array(8).fill(0);
+    let volHistIdx = 0;
     const bars: HTMLDivElement[] = [];
     let widgetMode = "always";
     let isListening = false;
@@ -174,7 +178,7 @@ function Overlay() {
       }).catch(() => {});
     }
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < BAR_COUNT; i++) {
       const bar = document.createElement("div");
       bar.className = "bar";
       vizWrap.appendChild(bar);
@@ -257,6 +261,11 @@ function Overlay() {
       }
 
       if (nextState === "recording") {
+        volHistory.fill(0);
+        volHistIdx = 0;
+        barVolumes.fill(0);
+        barHeights.fill(3);
+        currentVolume = 0;
         setWidgetStateClass("rec");
         widget.setAttribute("aria-label", "Traflix Voice. Registrazione in corso. Doppio clic per aprire la console");
         startSound.currentTime = 0;
@@ -420,43 +429,55 @@ function Overlay() {
       lastFrameTime = frameTime;
       animationTime += elapsed;
 
-      currentVolume += (targetVolume - currentVolume) * 0.2;
+      currentVolume += (targetVolume - currentVolume) * 0.22;
       if (currentVolume < 0.5) currentVolume = 0;
 
       const volNorm = responsiveVolume(currentVolume);
-      // Keep a very small living motion while recording, even between meter
-      // packets. The real volume still controls the overall amplitude.
       const animatedVolume = Math.max(
         volNorm,
-        isListening ? 0.035 : 0,
+        isListening ? 0.028 : 0,
       );
+      volHistory[volHistIdx] = animatedVolume;
+      volHistIdx = (volHistIdx + 1) % volHistory.length;
       const maxH = 30;
       const minH = 3;
 
-      for (let i = 0; i < 14; i++) {
+      for (let i = 0; i < BAR_COUNT; i++) {
         const phase = barPhases[i];
         const speed = barSpeeds[i];
+        const histOffset = Math.floor(i * 0.58);
+        const delayed =
+          volHistory[
+            (volHistIdx - 1 - histOffset + volHistory.length * 2) %
+              volHistory.length
+          ];
+        const perBarVol = delayed * 0.62 + animatedVolume * 0.38;
+        barVolumes[i] +=
+          (perBarVol - barVolumes[i]) * (0.19 + (i % 4) * 0.045);
+
         const travellingWave = Math.sin(
-          animationTime * 3.2 * speed - i * 0.58 + phase,
+          animationTime * 3.7 * speed - i * 0.72 + phase,
         );
-        const breathingWave = Math.sin(animationTime * 1.8 + phase * 0.7);
-        const innerWave = Math.sin(
-          animationTime * 2.45 + phase + (1 - Math.abs(i - 6.5) / 6.5) * 1.2,
+        const breathingWave = Math.sin(animationTime * 2.15 + phase * 0.85);
+        const detailWave = Math.sin(
+          animationTime * 5.0 * speed + phase * 1.4 + i * 0.31,
         );
-        const motion = 0.86 + travellingWave * 0.1 + breathingWave * 0.04;
-        const shape = barFactors[i] * (0.96 + innerWave * 0.08);
+        const motion =
+          0.76 +
+          travellingWave * 0.24 +
+          breathingWave * 0.09 +
+          detailWave * 0.07;
+        const shape = barFactors[i] * (0.9 + detailWave * 0.07);
+        const micro = 0.94 + Math.random() * 0.08;
+        const v = barVolumes[i];
         const target =
           minH +
-          animatedVolume *
-            (maxH - minH) *
-            shape *
-            barJitters[i] *
-            motion;
+          Math.pow(v, 0.9) * (maxH - minH) * shape * barJitters[i] * motion * micro;
 
-        barHeights[i] += (target - barHeights[i]) * 0.25;
+        barHeights[i] += (target - barHeights[i]) * 0.32;
 
         const h = Math.max(minH, Math.min(maxH, barHeights[i]));
-        const drift = Math.sin(animationTime * 2.1 + phase) * animatedVolume * 0.7;
+        const drift = Math.sin(animationTime * 2.3 + phase) * v * 0.55;
         bars[i].style.transform = `translateY(${drift}px) scaleY(${h / maxH})`;
       }
 
