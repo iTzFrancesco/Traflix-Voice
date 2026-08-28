@@ -12,52 +12,6 @@ Traflix Voice is a Tauri 2 desktop application for voice dictation. It combines:
 
 Windows is the primary supported platform. Do not assume that platform-specific behavior works unchanged on macOS or Linux.
 
-## Development commands
-
-Install dependencies:
-
-```powershell
-npm ci
-python -m pip install -r src-tauri/requirements.txt
-```
-
-Run the development application:
-
-```powershell
-npm run tauri dev
-```
-
-Build the frontend:
-
-```powershell
-npm run build
-```
-
-Build the Windows installer:
-
-```powershell
-npm run tauri build
-```
-
-## Validation commands
-
-Run Rust formatting, linting, and tests from `src-tauri`:
-
-```powershell
-cd src-tauri
-cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
-cd ..
-```
-
-Run Python validation from the repository root:
-
-```powershell
-python -m py_compile src-tauri/whisper_engine.py
-python -m pytest src-tauri/test_whisper_engine.py -v
-```
-
 When changing timing-sensitive behavior, also perform a manual runtime check with the desktop application. Static tests do not fully cover audio capture, global hotkeys, clipboard paste, overlay behavior, or model loading.
 
 ## Architecture
