@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.5.6",
   "type": "module",
-  "description": "Dettatura vocale locale professionale alimentata da OpenAI Whisper.",
+  "description": "Privacy-focused desktop voice dictation for Windows, built with Tauri, Rust, React, and Whisper.",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

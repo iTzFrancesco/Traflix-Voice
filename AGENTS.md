@@ -1,97 +1,122 @@
-> **⚠️ IMPORTANTE:** Non leggere mai il file `.env` di questo progetto. Contiene chiavi API e segreti. **Don't read .env**  
-> **⚠️ IMPORTANTE:** Non fare **push su GitHub** senza che l'utente abbia esplicitamente approvato. Mai push automatici. **No push without user approval**
-
 # AGENTS.md
 
-Guidance for OpenCode when working in this repository.
+Guidance for contributors and coding agents working in the Traflix Voice repository.
 
-## Build & Development Commands
+## Project overview
 
-```bash
-cargo tauri dev                    # development (hot reload)
-cargo tauri build                  # production build (.msi + .exe)
-npm run tauri build                # equivalent using npm script
+Traflix Voice is a Tauri 2 desktop application for voice dictation. It combines:
 
-# Rust
-cd src-tauri && cargo fmt --check
-cd src-tauri && cargo clippy -- -D warnings
-cd src-tauri && cargo test         # unit tests in lib.rs
+- a Rust/Tauri desktop shell for global hotkeys, clipboard integration, the system tray, persistence, and process supervision;
+- a React and TypeScript frontend built with Vite;
+- a Python sidecar for audio capture, Whisper model management, local inference, and optional Groq transcription.
 
-# Python
+Windows is the primary supported platform. Do not assume that platform-specific behavior works unchanged on macOS or Linux.
+
+## Development commands
+
+Install dependencies:
+
+```powershell
+npm ci
+python -m pip install -r src-tauri/requirements.txt
+```
+
+Run the development application:
+
+```powershell
+npm run tauri dev
+```
+
+Build the frontend:
+
+```powershell
+npm run build
+```
+
+Build the Windows installer:
+
+```powershell
+npm run tauri build
+```
+
+## Validation commands
+
+Run Rust formatting, linting, and tests from `src-tauri`:
+
+```powershell
+cd src-tauri
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cd ..
+```
+
+Run Python validation from the repository root:
+
+```powershell
 python -m py_compile src-tauri/whisper_engine.py
 python -m pytest src-tauri/test_whisper_engine.py -v
-
-# Install dependencies
-npm ci
-pip install -r src-tauri/requirements.txt
 ```
+
+When changing timing-sensitive behavior, also perform a manual runtime check with the desktop application. Static tests do not fully cover audio capture, global hotkeys, clipboard paste, overlay behavior, or model loading.
 
 ## Architecture
 
-Three-layer desktop app for offline/cloud voice-to-text dictation:
+### Tauri and Rust
 
-**Tauri/Rust** (`src-tauri/src/lib.rs`) - Desktop shell. Global hotkey via `GetAsyncKeyState` polling thread (~60Hz, no hooks). Clipboard ops via `SendInput` + `ClipboardManager` plugin. System tray (Menu: Mostra/Esci). Python sidecar management with auto-restart (exponential backoff, 1s-10s cap). Audio device enumeration via `cpal`. Atomic file writes (`.tmp` → rename). Entrypoint: `src-tauri/src/main.rs` just calls `traflix_voice_gui_lib::run()`.
+The Rust layer owns the application lifecycle, global hotkey polling, clipboard operations, system-tray behavior, settings and statistics persistence, and Python sidecar supervision. The sidecar is restarted with bounded backoff after an unexpected exit.
 
-**Frontend** (`src/`) - Vanilla JS, no bundler. Tabbed UI (Home/IA/Tasti/Cronologia/Sistema). Canvas waveform visualizer driven by smoothed RMS volume from Python (throttled ~0.05s). Overlay is a transparent, always-on-top, skip-taskbar widget shown when main window is *hidden* (CloseRequested → `window.hide()`, not minimize).
+### React frontend
 
-**Python sidecar** (`src-tauri/whisper_engine.py`) - Spawned as `shell.command("python")` with args. Uses `pywhispercpp` (whisper.cpp bindings) for local inference or `groq` for cloud transcription. `huggingface-hub` for model downloads from `ggerganov/whisper.cpp`. Models stored as `ggml-{size}.bin`.
+The frontend is under `src/`. `App.tsx` coordinates application state, while the tab components provide the home, AI, hotkey, history, and system views. `overlay.tsx` implements the transparent always-on-top status widget.
 
-## Hotkey Handling
+### Python sidecar
 
-Default hotkey is `XBUTTON2` (mouse forward button), click-to-toggle mode (`hold_to_speak: false`). The hotkey polling thread wakes every 16ms, reads `GetAsyncKeyState` for each VK code in the configured combination, and emits `hotkey_pressed`/`hotkey_released` Tauri events. Supports any combination of Ctrl, Alt, Shift, letter/digit/function keys, Space, and mouse buttons (XBUTTON1, XBUTTON2, MButton).
+`src-tauri/whisper_engine.py` is the sidecar entry point. The `src-tauri/whisper_engine/` package handles audio capture, local Whisper inference, model downloads, Groq requests, usage accounting, and line-delimited JSON IPC.
 
-When the main window has focus, keyboard event listeners (keydown/keyup) act as local fallback for Ctrl+Alt.
+## Hotkeys and recording
 
-`cargo test` includes tests for `str_to_vk`, `parse_hotkey`, and `AtomicPtr` hotkey config swapping.
+The default hotkey is `XBUTTON2` (the forward mouse button) in click-to-toggle mode. The implementation also supports configurable combinations of modifier keys, letters, digits, function keys, Space, and supported mouse buttons.
 
-## IPC Protocol (Rust ↔ Python)
+When the main window has focus, keyboard listeners provide a local fallback for supported shortcuts. Any change to hotkey handling must be checked both with the main window focused and while another application is active.
 
-JSON line-delimited over stdin/stdout. Rust sends commands:
-- `init` - sets models_dir, compute_device, model, groq_api_key, provider; starts model preload on background thread (only for `"local"` provider)
-- `transcribe` - device, model, language, provider
-- `stop` - sets `is_recording = false`
-- `download` - model size (downloads via hf_hub_download)
-- `set_provider` - switches between `"local"` and `"cloud"`; unloads local model on cloud switch
-- `quit` - unloads model, breaks stdin loop
+## IPC contract
 
-Python responses: `listening`, `processing`, `result`, `volume`, `downloading`, `download_complete`, `error`, `ready`, `rate_limit`, `warning`, `info`.
+Rust sends line-delimited JSON commands to Python. Important commands include:
 
-## Data Persistence
+- `init` to configure models, compute device, provider, and the optional Groq key;
+- `transcribe` to record and transcribe audio;
+- `stop` to stop the active recording;
+- `download` to download a local Whisper model;
+- `set_provider` to switch between local and cloud transcription;
+- `set_groq_api_key` to update the optional cloud credential;
+- `quit` to shut down the sidecar cleanly.
 
-Files in `AppData/Roaming/it.traflix.voice/`: `settings.json`, `stats.json`, `history.json` (last 50 entries), `groq_usage.json`, `models/ggml-{size}.bin`. All writes atomic (write `.json.tmp` then rename).
+Python reports status through JSON events such as `listening`, `processing`, `result`, `volume`, `downloading`, `download_complete`, `ready`, `rate_limit`, `warning`, and `error`.
 
-`AppSettings` fields: `hotkey`, `model`, `autoPaste`, `minimizeTray`, `selectedDevice`, `selectedLanguage`, `computeDevice`, `holdToSpeak`, `groqApiKey`, `provider`.
+Preserve this contract when changing either side of the boundary. Add or update focused tests for new commands and status payloads.
 
-## Key Implementation Details
+## Data and credential handling
 
-- **Paste flow**: `execute_paste` writes text to clipboard, 50ms delay, `SendInput` for Ctrl+V, 100ms delay, restores previous clipboard content.
-- **Model download**: Runs in a daemon thread via `hf_hub_download` from `ggerganov/whisper.cpp` repo. Validates downloaded file (exists, non-empty) before reporting success.
-- **Cloud support**: Provider toggle sends `set_provider` command. Groq usage tracked locally in both `groq_usage.json` (Python side) and `localStorage` (frontend). Limits: 28,800s/day, 7,200s/hour.
-- **Transcription timeout**: 60s per local inference (`concurrent.futures.ThreadPoolExecutor` + `TRANSCRIPTION_TIMEOUT`).
-- **Notification sounds**: `start.wav` and `stop.wav` in `src/assets/sounds/`.
-- **Crate name**: `traflix_voice_gui_lib` (Windows cargo name collision avoidance, see `Cargo.toml`).
-- **WebView2Loader.dll**: Copied by `build.rs` from the Cargo build output dir.
-- **No bundler**: `tauri.conf.json` → `frontendDist: "../src"` serves raw HTML/CSS/JS.
-- **Vanilla JS**: imported via `<script>` tags, no framework. `export-functions.js` loaded separately for export functionality.
+- Normal application use does not require a `.env` file.
+- `.env`, `.env.*`, and `*.env` files must never be committed.
+- Never place API keys, tokens, passwords, private keys, or real user data in source files, tests, documentation, screenshots, or logs.
+- The optional Groq API key is entered in the application settings and passed to the sidecar at runtime. Do not print it or include it in error messages.
+- Application data belongs in the OS application-data directory, not in the repository.
+- Keep generated builds, downloaded models, caches, logs, and user recordings out of commits.
 
-## CI (GitHub Actions)
+The optional live Groq benchmark may read `GROQ_API_KEY` from the process environment. It must not load `.env` files or print credentials.
 
-### `ci.yml`
-- Trigger: `push`/`pull_request` su `main`.
-- Jobs: lint-rust, test-rust, lint-python, test-python + **build** (MSI come artefatto).
-- Il build **non** crea una release. L'MSI è solo un artefatto scaricabile.
+## CI and releases
 
-### `release.yml`
-- Trigger **solo** su tag `v*` (es. `git tag v1.0.0 && git push origin v1.0.0`).
-- Jobs: check-rust, check-python + **build MSI + GitHub Release**.
-- Crea una GitHub Release ufficiale con note di rilascio.
-- Serve un **tag esplicito**: nessun push normale genera una release.
+- CI runs Rust formatting, Clippy, Rust tests, Python checks, Python tests, and a Windows MSI build for pushes and pull requests targeting `main`.
+- The release workflow runs for tags matching `v*` and publishes the Windows MSI with generated release notes.
+- Do not change release behavior, signing configuration, or updater settings without verifying the resulting artifact and its security implications.
 
-### `ci-failure-issue.yml`
-- Auto-crea issue con label `ci-failure` quando la CI fallisce su push.
+## Change guidelines
 
-On CI failure, verify fixes locally with:
-```bash
-cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
-python -m py_compile src-tauri/whisper_engine.py && python -m pytest src-tauri/test_whisper_engine.py -v
-```
+- Keep changes focused and preserve existing IPC, settings, and persistence contracts.
+- Prefer small, testable changes over broad rewrites.
+- Use English for new public documentation and contributor guidance.
+- Avoid adding comments or abstractions that do not explain a real constraint.
+- After editing React or Tauri behavior, run the relevant checks and perform a manual runtime verification when the change affects user-visible or timing-sensitive behavior.
