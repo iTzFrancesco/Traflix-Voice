@@ -53,7 +53,8 @@ Preserve this contract when changing either side of the boundary. Add or update 
 ## Data and credential handling
 
 - Normal application use does not require a `.env` file.
-- `.env`, `.env.*`, and `*.env` files must never be committed.
+- `.env`, `.env.*` (except `.env.example`), and `*.env` files must never be committed.
+- `.env.example` may be committed as a documentation template, but it must contain placeholders only and never real credentials.
 - Never place API keys, tokens, passwords, private keys, or real user data in source files, tests, documentation, screenshots, or logs.
 - The optional Groq API key is entered in the application settings and passed to the sidecar at runtime. Do not print it or include it in error messages.
 - Application data belongs in the OS application-data directory, not in the repository.

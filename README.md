@@ -31,7 +31,7 @@ Audio is processed on the local machine after a Whisper model has been downloade
 
 Audio is sent to Groq for transcription. The API key is entered in the application's **System** tab and stored in the application's local settings. Review Groq's terms and privacy policy before enabling this provider.
 
-No `.env` file is required for normal application use. Never commit API keys, tokens, or other credentials to the repository.
+No `.env` file is required for normal application use. The repository's `.env.example` file documents the optional benchmark variable without containing a credential. Never commit API keys, tokens, or other credentials to the repository.
 
 ## Measured cloud performance
 
