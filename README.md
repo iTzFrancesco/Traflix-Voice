@@ -197,4 +197,4 @@ Traflix Voice uses Whisper/whisper.cpp, `pywhispercpp`, Hugging Face model hosti
 
 ## License
 
-This repository does not currently include a license file. Add an OSI-approved license before distributing the project as open-source software.
+Traflix Voice is licensed under the [MIT License](LICENSE).
