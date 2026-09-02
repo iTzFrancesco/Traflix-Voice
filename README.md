@@ -1,16 +1,29 @@
-<div align="center">
+<h1 align="center">Traflix Voice</h1>
 
-# Traflix Voice
-
-Privacy-focused desktop voice dictation for Windows.
-
-Speak, transcribe, and paste text into the currently focused application.
-
-<p>
-  <img src="docs/assets/readme/traflix-voice-desktop.webp" alt="Traflix Voice desktop application" width="860">
+<p align="center">
+  <strong>Local-first voice dictation for Windows.</strong><br/>
+  Transcribe speech and paste the result into the application that has focus.
 </p>
 
-</div>
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Platform: Windows" />
+  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=111827" alt="React 19" />
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/license-MIT-4493F8?style=flat-square" alt="License: MIT" />
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#supported-workflow">Workflow</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="docs/">Documentation</a> ·
+  <a href="LICENSE">MIT License</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/traflix-voice-desktop.webp" alt="Traflix Voice desktop application" width="620" />
+</p>
 
 Traflix Voice is a Windows desktop application built with Tauri 2, Rust, React,
 TypeScript, and Python. It provides a local-first workflow with optional cloud
@@ -80,7 +93,7 @@ the application's local settings and is not required in the repository.
 History, settings, statistics, usage data, and downloaded models are stored in
 the operating system's application-data directory. Never commit API keys,
 tokens, passwords, or a populated `.env` file; use [`.env.example`](.env.example)
-only as documentation. See [`SECURITY.md`](SECURITY.md) for reporting guidance.
+only as documentation.
 
 ## Architecture
 
