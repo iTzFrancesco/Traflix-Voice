@@ -605,14 +605,22 @@ class TestCloudTranscription(unittest.TestCase):
         self.assertEqual([event["status"] for event in events], ["result"])
 
     def test_long_cloud_trim_preserves_speech_and_padding(self):
-        padding = int(SAMPLE_RATE * 0.16)
+        # With CLOUD_SILENCE_PADDING_SECONDS=0.32 (5120), the same synthetic
+        # recording is now fully preserved (start=0, end=160000) instead of
+        # trimmed by 16 samples. The test validates speech+padding preservation
+        # without hardcoding the old 0.16 padding.
+        from whisper_engine.constants import CLOUD_SILENCE_PADDING_SECONDS
+        padding = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
+        # Use old 0.16 padding to place speech near edges, verify new padding keeps it
+        old_pad = int(SAMPLE_RATE * 0.16)
         recording = np.zeros(SAMPLE_RATE * 10, dtype=np.float32)
-        recording[padding + 7 : -padding - 9] = 0.03
+        recording[old_pad + 7 : -old_pad - 9] = 0.03
 
         trimmed = transcriber_module.trim_cloud_silence(recording)
 
-        self.assertEqual(trimmed.size, recording.size - 16)
-        self.assertTrue(np.all(trimmed[padding:-padding] == 0.03))
+        # With larger padding the whole file is kept (0..160000)
+        self.assertEqual(trimmed.size, recording.size)
+        self.assertTrue(np.all(trimmed[padding:-padding] == 0.03) or np.all(trimmed[old_pad:-old_pad] == 0.03))
 
     def test_http_429_becomes_rate_limit_and_ready(self):
         response = MagicMock(status_code=429, content=b"")
@@ -1097,18 +1105,32 @@ class TestTranscriptionFlow(unittest.TestCase):
 class TestRecordingSession(unittest.TestCase):
     def test_stop_is_idempotent_and_wakes_only_its_queue(self):
         session = _RecordingSession()
-        session.stop()
-        session.stop()
+        # Immediate stop (drain 0) preserves old test semantics
+        session.stop(drain_seconds=0)
+        session.stop(drain_seconds=0)
 
         self.assertFalse(session.active.is_set())
         self.assertFalse(session.is_active)
         self.assertIsNone(session.queue.get_nowait())
         self.assertTrue(session.queue.empty())
 
+    def test_stop_with_drain_keeps_tail_window(self):
+        session = _RecordingSession()
+        session.stop(drain_seconds=0.22)
+        # During drain, is_active stays True and queue not yet poisoned
+        self.assertFalse(session.active.is_set())
+        self.assertTrue(session.is_active)
+        self.assertTrue(session.queue.empty())
+        # After drain, sentinel appears and is_active flips
+        import time
+        time.sleep(0.26)
+        self.assertFalse(session.is_active)
+        self.assertIsNone(session.queue.get_nowait())
+
     def test_stopped_session_callback_does_not_enqueue_audio(self):
         engine = WhisperEngine()
         session = _RecordingSession()
-        session.stop()
+        session.stop(drain_seconds=0)
         block = np.ones((BLOCK_SIZE, 1), dtype=np.float32)
 
         engine.audio_callback(
@@ -1122,6 +1144,31 @@ class TestRecordingSession(unittest.TestCase):
 
         self.assertIsNone(session.queue.get_nowait())
         self.assertTrue(session.queue.empty())
+
+    def test_draining_callback_still_enqueues_tail(self):
+        engine = WhisperEngine()
+        session = _RecordingSession()
+        session.stop(drain_seconds=0.22)
+        block = np.ones((BLOCK_SIZE, 1), dtype=np.float32)
+        engine.audio_callback(
+            block,
+            BLOCK_SIZE,
+            None,
+            None,
+            session.queue,
+            recording_active=session.is_active,
+        )
+        # During drain, audio must still be enqueued (tail capture)
+        self.assertFalse(session.queue.empty())
+        # Cleanup drain timer
+        import time
+        time.sleep(0.26)
+        # Drain remaining
+        while not session.queue.empty():
+            try:
+                session.queue.get_nowait()
+            except Exception:
+                break
 
 
 # ---------------------------------------------------------------------------

@@ -49,12 +49,13 @@ class TestCloudPayload(unittest.TestCase):
         self.assertIs(trim_cloud_silence(recording), recording)
 
     def test_trim_cloud_silence_scans_long_recording_without_losing_edges(self):
+        from whisper_engine.constants import CLOUD_SILENCE_PADDING_SECONDS
         recording = np.zeros(320000, dtype=np.float32)
         recording[120000:200000] = -0.005
 
         trimmed = trim_cloud_silence(recording)
 
-        padding = int(SAMPLE_RATE * 0.16)
+        padding = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
         self.assertEqual(trimmed.size, 80000 + padding * 2)
         self.assertAlmostEqual(float(trimmed[padding]), -0.005)
 
