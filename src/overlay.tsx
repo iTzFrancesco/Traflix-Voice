@@ -233,13 +233,18 @@ function Overlay() {
       requestedVisibility = shouldShow;
 
       const win = window.__TAURI__.window.getCurrentWindow();
+      // Capture this task's desired visibility. The queue ensures
+      // show -> hide order is preserved even if hide is enqueued
+      // microseconds after show (e.g. immediate empty-audio result).
+      // Previously the inner check `requestedVisibility !== shouldShow`
+      // caused a fast hide to cancel the preceding show, making the
+      // widget never appear for short recordings.
+      const taskShouldShow = shouldShow;
       visibilityQueue = visibilityQueue
         .catch(() => {})
         .then(async () => {
-          // A newer state may have superseded this request while it waited in
-          // the queue. The newer request will perform the native operation.
-          if (widgetMode !== "recording" || requestedVisibility !== shouldShow) return;
-          if (shouldShow) await win.show();
+          if (widgetMode !== "recording") return;
+          if (taskShouldShow) await win.show();
           else await win.hide();
         })
         .catch(() => {});
