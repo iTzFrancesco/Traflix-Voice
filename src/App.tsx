@@ -368,7 +368,23 @@ export default function App() {
   // ── MODEL ACTION ──
   const handleModelAction = useCallback(
     async (modelId: string) => {
-      const status = modelStatus[modelId] || { downloaded: false, loading: false };
+      // Guard stale probe: startup in cloud skips disk check, so modelStatus may be empty
+      // immediately after cloud->local toggle. Verify on-disk before deciding download vs select.
+      let status = modelStatus[modelId] || { downloaded: false, loading: false };
+      const isKnown = modelId in modelStatus;
+      if (!isKnown && window.__TAURI__?.core?.invoke) {
+        try {
+          const exists = (await window.__TAURI__.core.invoke("check_model_exists", { modelId })) as boolean;
+          status = { downloaded: !!exists, loading: false };
+          mergeModelStatus({ [modelId]: !!exists });
+          // If the file exists, treat as select immediately (no download)
+          if (exists) {
+            setSelectedModel(modelId);
+            if (settings) await persistSettings({ model: modelId });
+            return;
+          }
+        } catch {}
+      }
       if (!status.downloaded) {
         updateModelStatus(modelId, { loading: true });
         try {
@@ -385,7 +401,7 @@ export default function App() {
         }
       }
     },
-    [modelStatus, settings, persistSettings, updateModelStatus]
+    [modelStatus, settings, persistSettings, updateModelStatus, mergeModelStatus]
   );
 
   // ── PROVIDER TOGGLE ──
@@ -394,6 +410,10 @@ export default function App() {
       setSelectedProvider(provider);
       if (settings) {
         await persistSettings({ provider });
+      }
+      // When switching to local, refresh disk status: startup skips probe in cloud mode for speed
+      if (provider === "local") {
+        void refreshAllModelStatus();
       }
       showToast(`Provider: ${provider === "cloud" ? "Cloud" : "Locale"}`, "info");
       try {
@@ -408,7 +428,7 @@ export default function App() {
         console.warn("[provider] Error:", err);
       }
     },
-    [settings, persistSettings, selectedModel, showToast]
+    [settings, persistSettings, selectedModel, showToast, refreshAllModelStatus]
   );
 
   // ── HOLD TO SPEAK CHANGE (auto‑salvataggio immediato) ──
