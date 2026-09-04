@@ -103,6 +103,7 @@ export default function App() {
     mergeModelStatus,
     clearTranscriptionText,
     clearDownloadInfo,
+    notifyOptimisticProcessing,
   } = usePythonOutput({
     selectedProvider,
     showToast,
@@ -355,6 +356,10 @@ export default function App() {
     activeTranscriptionRef.current = false;
     transcriptionLockRef.current = false;
     transcriptionCooldownRef.current = 0;
+    // Optimistic UI: leave `listening` on the same tick as the click.
+    // The sidecar also emits `processing` immediately (drain runs in
+    // background); the duplicate event is deduped by the hook/overlay.
+    notifyOptimisticProcessing();
     try {
       void window.__TAURI__.core.invoke("stop_python").catch((err: unknown) => {
         console.error("[REC] stop error:", err);
@@ -362,7 +367,7 @@ export default function App() {
     } catch (err) {
       console.error("[REC] stop error:", err);
     }
-  }, []);
+  }, [notifyOptimisticProcessing]);
   stopFnRef.current = stopTranscription;
 
   // ── MODEL ACTION ──

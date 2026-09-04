@@ -128,6 +128,18 @@ export function usePythonOutput({
     setDownloadInfo(null);
   }, []);
 
+  // Optimistic stop: the sidecar now emits `processing` immediately, but the
+  // React state must also leave `listening` on the same tick as the click so
+  // HomeTab badge and any status-driven UI react in <50ms even if the IPC
+  // round-trip is delayed. Duplicate `processing` events from Python are
+  // deduped by lastTranscriptionStatusRef, so this never double-fires.
+  const notifyOptimisticProcessing = useCallback(() => {
+    if (lastTranscriptionStatusRef.current !== "processing") {
+      lastTranscriptionStatusRef.current = "processing";
+      setTranscriptionStatus("processing");
+    }
+  }, []);
+
   useEffect(() => {
     if (!window.__TAURI__?.event?.listen) return;
 
@@ -191,7 +203,8 @@ export function usePythonOutput({
           } else if (
             data.status === "result" ||
             data.status === "ready" ||
-            data.status === "error"
+            data.status === "error" ||
+            data.status === "rate_limit"
           ) {
             activeTranscriptionRef.current = false;
             transcriptionLockRef.current = false;
@@ -338,5 +351,6 @@ export function usePythonOutput({
     mergeModelStatus,
     clearTranscriptionText,
     clearDownloadInfo,
+    notifyOptimisticProcessing,
   };
 }

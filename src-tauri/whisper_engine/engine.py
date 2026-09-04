@@ -30,6 +30,13 @@ class _RecordingSession:
         # flag avoids an Event syscall on every PortAudio block while the
         # Event remains available for lifecycle checks outside the callback.
         self.is_active = True
+        # Split UI signal from capture finalization: stop_recording() sets
+        # processing_notified and emits `processing` immediately so the widget
+        # reacts in <50ms, while the 220ms tail drain still runs in background.
+        # listening_notified gates the early emit so a stop racing startup
+        # cannot leave the UI stuck in `processing` with no result to follow.
+        self.listening_notified = False
+        self.processing_notified = False
         self._stop_lock = threading.Lock()
         self._stop_sent = False
         self._drain_timer = None
@@ -153,6 +160,19 @@ class WhisperEngine:
         # Wake only the current capture loop. A later recording owns a
         # different queue, so an old stop cannot poison the next session.
         if session is not None:
+            # Optimistic UI: notify `processing` now so the widget leaves the
+            # recording state in milliseconds. The session drain timer still
+            # captures the 220ms tail in background; transcribe() skips its
+            # duplicate post-loop emit via processing_notified. Gate on
+            # listening_notified so a stop racing startup leaves UI idle.
+            should_notify = (
+                not self._shutting_down
+                and getattr(session, "listening_notified", False)
+                and not getattr(session, "processing_notified", False)
+            )
+            if should_notify:
+                session.processing_notified = True
+                self.log({"status": "processing", "message": "Trascrizione in corso..."})
             session.stop()
         else:
             self.audio_queue.put(None)
@@ -291,17 +311,29 @@ class WhisperEngine:
                 audio_data.append(pre_roll)
 
             self.log({"status": "listening", "message": "In ascolto... parla ora."})
+            session.listening_notified = True
 
             start_time = pytime.monotonic()
 
+            def session_log(data):
+                # Keep enqueuing tail audio during drain, but drop the meter:
+                # the UI already left `recording` on the early `processing`
+                # and volume events would relight the pill after hide.
+                if data.get("status") == "volume" and getattr(
+                    session, "processing_notified", False
+                ):
+                    return
+                self.log(data)
+
             def session_audio_callback(indata, frames, callback_time, status):
-                self.audio_callback(
+                audio_module.audio_callback(
                     indata,
                     frames,
                     callback_time,
                     status,
                     session.queue,
-                    recording_active=session.is_active,
+                    session.is_active,
+                    session_log,
                 )
 
             with sd.InputStream(device=device_id, channels=1, callback=session_audio_callback,
@@ -315,7 +347,12 @@ class WhisperEngine:
 
             recording_duration = max(0.0, pytime.monotonic() - start_time)
 
-            self.log({"status": "processing", "message": "Trascrizione in corso..."})
+            # Early `processing` from stop_recording() already notified the UI;
+            # skip the duplicate so sounds/logs fire once. Audio path below
+            # is unchanged: same queue, same concatenation, same payload.
+            if not getattr(session, "processing_notified", False):
+                self.log({"status": "processing", "message": "Trascrizione in corso..."})
+                session.processing_notified = True
 
             if not audio_data:
                 self.log({"status": "ready", "message": "Nessun audio catturato."})

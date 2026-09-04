@@ -1208,6 +1208,147 @@ class TestDownloadModel(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Instant stop: optimistic `processing` with background tail drain
+# ---------------------------------------------------------------------------
+class TestInstantStop(unittest.TestCase):
+    """Stop must notify the UI immediately while keeping tail audio."""
+
+    def test_stop_emits_processing_immediately_and_drains_in_background(self):
+        engine = WhisperEngine()
+        session = _RecordingSession(provider="cloud")
+        session.listening_notified = True  # simulate transcribe past `listening`
+        with engine._recording_lock:
+            engine._active_session = session
+            engine.is_recording = True
+        events = []
+        engine.log = events.append
+
+        started = time.monotonic()
+        engine.stop_recording()
+        elapsed = time.monotonic() - started
+
+        # UI signal is synchronous: no 220ms wait on the stop path.
+        self.assertLess(elapsed, 0.05)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["status"], "processing")
+        # Capture still open: tail blocks must be accepted, no sentinel yet.
+        self.assertTrue(session.is_active)
+        self.assertTrue(session.queue.empty())
+
+        time.sleep(0.26)
+        self.assertFalse(session.is_active)
+        self.assertIsNone(session.queue.get_nowait())
+        # Duplicate stop stays silent (overlay/frontend already dedup too).
+        engine.stop_recording()
+        self.assertEqual(len(events), 1)
+
+    def test_stop_before_listening_leaves_ui_idle(self):
+        engine = WhisperEngine()
+        session = _RecordingSession(provider="cloud")
+        # listening_notified False: stop raced startup, nothing shown yet.
+        with engine._recording_lock:
+            engine._active_session = session
+            engine.is_recording = True
+        events = []
+        engine.log = events.append
+
+        engine.stop_recording()
+
+        self.assertEqual(events, [])
+        time.sleep(0.26)
+        self.assertFalse(session.is_active)
+
+    def test_transcribe_emits_single_processing_with_early_stop(self):
+        import sounddevice as sd
+
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        engine.provider = "cloud"
+        block = np.ones((BLOCK_SIZE,), dtype=np.float32)
+        events = []
+        engine.log = events.append
+        captured = {}
+
+        class FakeInputStream:
+            def __init__(self, **kwargs):
+                pass
+
+            def __enter__(self):
+                # Runs after transcribe logged `listening`: early `processing`
+                # fires here, then the 220ms drain keeps the tail.
+                engine.audio_queue.put(block.copy())
+                engine.stop_recording()
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        def fake_process(recording, *_args):
+            captured["recording"] = recording.copy()
+
+        with patch.object(sd, "InputStream", FakeInputStream):
+            with patch.object(engine, "_process_recording", side_effect=fake_process):
+                session = _RecordingSession(provider="cloud")
+                with engine._recording_lock:
+                    engine._active_session = session
+                    engine.audio_queue = session.queue
+                    engine.is_recording = True
+                engine.transcribe(None, "small", capture_session=session)
+
+        kinds = [e.get("status") for e in events]
+        self.assertIn("listening", kinds)
+        # Exactly one processing: early emit wins, post-loop skips duplicate.
+        self.assertEqual(kinds.count("processing"), 1)
+        self.assertLess(kinds.index("processing") - kinds.index("listening"), 2)
+        # Payload keeps the block queued before stop (no cut from early flag).
+        self.assertIn("recording", captured)
+        self.assertGreaterEqual(captured["recording"].size, BLOCK_SIZE)
+        self.assertTrue(np.all(captured["recording"][-BLOCK_SIZE:] == 1.0))
+
+    def test_volume_suppressed_during_drain_but_tail_kept(self):
+        from whisper_engine import audio as audio_module
+
+        engine = WhisperEngine()
+        session = _RecordingSession(provider="cloud")
+        session.listening_notified = True
+        with engine._recording_lock:
+            engine._active_session = session
+            engine.audio_queue = session.queue
+            engine.is_recording = True
+        events = []
+        engine.log = events.append
+        engine.stop_recording()  # early processing + drain starts
+        self.assertEqual(events[0]["status"], "processing")
+
+        # Simulate one callback block arriving during the drain window.
+        import sounddevice as sd  # noqa: F401 (keeps test env parity)
+
+        block = np.ones((BLOCK_SIZE, 1), dtype=np.float32)
+        # Reproduce transcribe's filtered session_log path.
+        def session_log(data):
+            if data.get("status") == "volume" and getattr(
+                session, "processing_notified", False
+            ):
+                return
+            engine.log(data)
+
+        audio_module.audio_callback(
+            block, BLOCK_SIZE, None, None, session.queue, session.is_active, session_log
+        )
+        # Tail audio kept, meter dropped.
+        self.assertFalse(session.queue.empty())
+        self.assertEqual(
+            [e.get("status") for e in events].count("volume"), 0
+        )
+        time.sleep(0.26)
+        while not session.queue.empty():
+            try:
+                session.queue.get_nowait()
+            except Exception:
+                break
+
+
+# ---------------------------------------------------------------------------
 # Constants sanity check
 # ---------------------------------------------------------------------------
 class TestConstants(unittest.TestCase):
