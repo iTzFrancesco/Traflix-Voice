@@ -220,32 +220,45 @@ function Overlay() {
     function syncOverlayVisibility() {
       if (!window.__TAURI__?.window?.getCurrentWindow) return;
 
-      // In "always" mode Rust owns visibility. Invalidating the requested
-      // target prevents an older queued hide/show from winning after a mode
-      // switch.
+      const shouldShow = isListening || isProcessing;
+      const win = window.__TAURI__.window.getCurrentWindow();
+
+      if (shouldShow) {
+        // Always show when active, in ANY mode. In "always" mode this is a
+        // harmless no-op (Rust already shows it); in "recording" mode it is
+        // essential. No dedup on show: a native X-close hides the window
+        // without updating requestedVisibility, so every listening/processing
+        // event must force show to guarantee re-appearance.
+        requestedVisibility = true;
+        // Immediate show for responsiveness (recovers from X-close instantly).
+        win.show().catch(() => {});
+        playWidgetEntry();
+        // Queued show preserves correct final ordering for fast cycles
+        // (show -> hide -> show must end visible, never stuck hidden).
+        visibilityQueue = visibilityQueue
+          .catch(() => {})
+          .then(async () => {
+            // Re-check current flags at execution time: a hide enqueued later
+            // for idle must still win over this earlier show.
+            if (isListening || isProcessing) await win.show();
+          })
+          .catch(() => {});
+        return;
+      }
+
+      // Hide path: only in "recording" mode (in "always" mode Rust owns
+      // visibility and must not be fought).
       if (widgetMode !== "recording") {
         requestedVisibility = null;
         return;
       }
-
-      const shouldShow = isListening || isProcessing;
-      if (requestedVisibility === shouldShow) return;
-      requestedVisibility = shouldShow;
-
-      const win = window.__TAURI__.window.getCurrentWindow();
-      // Capture this task's desired visibility. The queue ensures
-      // show -> hide order is preserved even if hide is enqueued
-      // microseconds after show (e.g. immediate empty-audio result).
-      // Previously the inner check `requestedVisibility !== shouldShow`
-      // caused a fast hide to cancel the preceding show, making the
-      // widget never appear for short recordings.
-      const taskShouldShow = shouldShow;
+      if (requestedVisibility === false) return;
+      requestedVisibility = false;
       visibilityQueue = visibilityQueue
         .catch(() => {})
         .then(async () => {
           if (widgetMode !== "recording") return;
-          if (taskShouldShow) await win.show();
-          else await win.hide();
+          if (!isListening && !isProcessing) await win.hide();
         })
         .catch(() => {});
     }
@@ -261,9 +274,9 @@ function Overlay() {
       targetVolume = nextState === "recording" ? targetVolume : 0;
 
       if (!stateChanged) {
-        // Duplicate events must not replay sounds or trigger native work.
-        // Still re-sync visibility in case the window was closed via X
-        // while idle (overlay hidden). Next listening must force show.
+        // Duplicate events must not replay sounds, but visibility must still
+        // sync: a native X-close can hide the window without changing state,
+        // so every event re-asserts show/hide.
         syncOverlayVisibility();
         return;
       }
@@ -278,13 +291,6 @@ function Overlay() {
         widget.setAttribute("aria-label", "Traflix Voice. Registrazione in corso. Doppio clic per aprire la console");
         startSound.currentTime = 0;
         startSound.play().catch(() => {});
-        // In recording-only mode the window may have been hidden via X/CLOSE.
-        // Force show immediately in addition to queued sync to guarantee re-appearance.
-        if (widgetMode === "recording" && window.__TAURI__?.window?.getCurrentWindow) {
-          window.__TAURI__.window.getCurrentWindow().show().catch(() => {});
-          // Reset dedup so queued sync is not skipped
-          requestedVisibility = null;
-        }
       } else if (nextState === "processing") {
         setWidgetStateClass("proc");
         widget.setAttribute("aria-label", "Traflix Voice. Elaborazione della trascrizione. Doppio clic per aprire la console");
