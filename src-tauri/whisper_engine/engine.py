@@ -7,7 +7,12 @@ import time as pytime
 import numpy as np
 import sounddevice as sd
 
-from whisper_engine.constants import SAMPLE_RATE, BLOCK_SIZE
+from whisper_engine.constants import (
+    SAMPLE_RATE,
+    BLOCK_SIZE,
+    CLOUD_PRE_ROLL_SECONDS,
+    CLOUD_TAIL_DRAIN_SECONDS,
+)
 from whisper_engine import model as model_module
 from whisper_engine import audio as audio_module
 from whisper_engine import transcriber, ipc
@@ -27,12 +32,30 @@ class _RecordingSession:
         self.is_active = True
         self._stop_lock = threading.Lock()
         self._stop_sent = False
+        self._drain_timer = None
 
-    def stop(self):
+    def stop(self, drain_seconds=CLOUD_TAIL_DRAIN_SECONDS):
         with self._stop_lock:
             if self._stop_sent:
                 return
             self._stop_sent = True
+            # Keep callback enqueuing for a short tail window to capture
+            # weak fricative ends / reverb. The sentinel is delayed so the
+            # capture loop drains the last 200ms instead of discarding it.
+            if drain_seconds and drain_seconds > 0:
+                # Do not clear is_active yet; let callback continue to queue
+                self.active.clear()
+                def _delayed_stop():
+                    # Now actually stop enqueue and wake loop
+                    self.is_active = False
+                    try:
+                        self.queue.put(None)
+                    except Exception:
+                        pass
+                self._drain_timer = threading.Timer(drain_seconds, _delayed_stop)
+                self._drain_timer.daemon = True
+                self._drain_timer.start()
+                return
             self.is_active = False
             self.active.clear()
             self.queue.put(None)
@@ -254,7 +277,18 @@ class WhisperEngine:
 
             if not session.active.is_set():
                 return
+            # Pre-roll: prepend last 300ms captured while idle to compensate
+            # hotkey (8ms poll) + IPC + InputStream open latency (20-50ms)
+            # Without this, a weak onset spoken exactly on click is lost before
+            # the stream delivers its first block. Cost is ~4800 samples kept
+            # while trimming still reduces overall payload by ~70%.
+            pre_roll = audio_module.get_pre_roll()
             audio_data = []
+            if pre_roll is not None and pre_roll.size > 0:
+                # Keep float32 contract
+                if pre_roll.dtype != np.float32:
+                    pre_roll = pre_roll.astype(np.float32, copy=False)
+                audio_data.append(pre_roll)
 
             self.log({"status": "listening", "message": "In ascolto... parla ora."})
 
