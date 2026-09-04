@@ -262,6 +262,9 @@ function Overlay() {
 
       if (!stateChanged) {
         // Duplicate events must not replay sounds or trigger native work.
+        // Still re-sync visibility in case the window was closed via X
+        // while idle (overlay hidden). Next listening must force show.
+        syncOverlayVisibility();
         return;
       }
 
@@ -275,6 +278,13 @@ function Overlay() {
         widget.setAttribute("aria-label", "Traflix Voice. Registrazione in corso. Doppio clic per aprire la console");
         startSound.currentTime = 0;
         startSound.play().catch(() => {});
+        // In recording-only mode the window may have been hidden via X/CLOSE.
+        // Force show immediately in addition to queued sync to guarantee re-appearance.
+        if (widgetMode === "recording" && window.__TAURI__?.window?.getCurrentWindow) {
+          window.__TAURI__.window.getCurrentWindow().show().catch(() => {});
+          // Reset dedup so queued sync is not skipped
+          requestedVisibility = null;
+        }
       } else if (nextState === "processing") {
         setWidgetStateClass("proc");
         widget.setAttribute("aria-label", "Traflix Voice. Elaborazione della trascrizione. Doppio clic per aprire la console");
