@@ -1,6 +1,7 @@
 use log::info;
 use serde::Deserialize;
 use std::error::Error;
+use std::sync::{Mutex, OnceLock};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{
@@ -21,6 +22,53 @@ struct WidgetPositionPayload {
 fn parse_widget_position(payload: &str) -> Option<(i32, i32)> {
     let position = serde_json::from_str::<WidgetPositionPayload>(payload).ok()?;
     Some((position.x?, position.y?))
+}
+
+/// Ultima apertura della dash da widget: punto originale del widget e punto
+/// (clampato) dove la dash è stata effettivamente mostrata.
+/// Serve per far ricomparire il widget dove l'utente lo aveva lasciato:
+/// la dash viene clampata dentro lo schermo (è grande, 450x650), ma al
+/// ritorno il widget deve tornare al punto originale senza subire lo
+/// spostamento della dash, altrimenti sembra che "salti a sinistra".
+/// Si memorizzano entrambi i punti perché lo `set_position` programmatico
+/// genera a sua volta un evento `Moved`: confrontando la posizione attuale
+/// della dash con quella di apertura si capisce se l'utente l'ha trascinata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WidgetOpen {
+    widget: (i32, i32),
+    main: (i32, i32),
+}
+
+fn last_widget_open() -> &'static Mutex<Option<WidgetOpen>> {
+    static CELL: OnceLock<Mutex<Option<WidgetOpen>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(None))
+}
+
+fn remember_widget_open(open: Option<WidgetOpen>) {
+    if let Ok(mut slot) = last_widget_open().lock() {
+        *slot = open;
+    }
+}
+
+fn take_widget_open() -> Option<WidgetOpen> {
+    last_widget_open()
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
+}
+
+/// Posizione di ripristino del widget alla chiusura della dash:
+/// se la dash è ancora dove l'avevamo aperta (nessun trascinamento),
+/// torna al punto originale del widget; se l'utente l'ha spostata,
+/// segue la dash (comportamento precedente).
+fn overlay_restore_position(
+    stored_open: Option<WidgetOpen>,
+    main_position: (i32, i32),
+) -> (i32, i32) {
+    match stored_open {
+        Some(open) if open.main == main_position => open.widget,
+        _ => main_position,
+    }
 }
 
 pub fn setup_tray<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
@@ -89,10 +137,15 @@ fn show_main_window_at<R: Runtime>(app_handle: &AppHandle<R>, widget_position: O
             // Il widget è piccolo (170x50), la dash è grande (450x650):
             // riusare x,y così com'è la spinge fuori schermo a bordo destro/basso.
             let (clamped_x, clamped_y) = clamp_main_window_position(&main_win, x, y);
+            remember_widget_open(Some(WidgetOpen {
+                widget: (x, y),
+                main: (clamped_x, clamped_y),
+            }));
             let _ = main_win.set_position(Position::Physical(PhysicalPosition::new(
                 clamped_x, clamped_y,
             )));
         } else {
+            remember_widget_open(None);
             ensure_main_window_visible(&main_win);
         }
         let _ = main_win.show();
@@ -228,10 +281,21 @@ pub fn handle_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) 
             let app_state = app_handle.state::<AppState>();
             let settings = load_settings_from_file(&app_state.settings_path);
             if settings.widget_mode == "always" {
+                let restore = take_widget_open();
                 if let Ok(position) = window.outer_position() {
-                    sync_overlay_position(app_handle, position);
+                    let main_position = (position.x, position.y);
+                    let (restore_x, restore_y) = overlay_restore_position(restore, main_position);
+                    sync_overlay_position(app_handle, PhysicalPosition::new(restore_x, restore_y));
+                } else if let Some(open) = restore {
+                    sync_overlay_position(
+                        app_handle,
+                        PhysicalPosition::new(open.widget.0, open.widget.1),
+                    );
                 }
                 show_overlay_with_animation(app_handle);
+            } else {
+                // Nessun widget da ripristinare in modalità recording.
+                let _ = take_widget_open();
             }
         } else if window.label() == "overlay" {
             api.prevent_close();
@@ -242,7 +306,7 @@ pub fn handle_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) 
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_to_work_area, parse_widget_position};
+    use super::{clamp_to_work_area, overlay_restore_position, parse_widget_position, WidgetOpen};
 
     #[test]
     fn parses_physical_widget_position() {
@@ -308,5 +372,31 @@ mod tests {
             clamp_to_work_area((-100, 100), (450, 650), (-1920, 0), (1920, 1040)),
             (-450, 100)
         );
+    }
+
+    #[test]
+    fn widget_returns_to_original_spot_when_dash_not_dragged() {
+        // Widget a bordo destro (1790), dash clampata a 1470: alla chiusura
+        // il widget deve tornare a 1790, non restare a 1470.
+        let open = WidgetOpen {
+            widget: (1790, 200),
+            main: (1470, 200),
+        };
+        assert_eq!(
+            overlay_restore_position(Some(open), (1470, 200)),
+            (1790, 200)
+        );
+    }
+
+    #[test]
+    fn widget_follows_dash_when_dash_was_dragged() {
+        // Dash trascinata dall'utente: la posizione attuale non coincide
+        // più con quella di apertura, quindi segue la dash.
+        let open = WidgetOpen {
+            widget: (1790, 200),
+            main: (1470, 200),
+        };
+        assert_eq!(overlay_restore_position(Some(open), (500, 500)), (500, 500));
+        assert_eq!(overlay_restore_position(None, (500, 500)), (500, 500));
     }
 }
