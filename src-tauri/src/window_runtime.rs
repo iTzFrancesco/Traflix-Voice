@@ -4,6 +4,7 @@ use std::error::Error;
 use std::sync::{Mutex, OnceLock};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri::window::Monitor;
 use tauri::{
     App, AppHandle, Emitter, Listener, Manager, PhysicalPosition, Position, Runtime, WebviewWindow,
     Window, WindowEvent,
@@ -211,8 +212,48 @@ fn clamp_main_window_position<R: Runtime>(
                 .and_then(|monitors| monitors.into_iter().next())
         });
 
+    clamp_with_monitor(monitor, (desired_x, desired_y), (win_w, win_h))
+}
+
+fn clamp_overlay_position<R: Runtime>(
+    overlay: &WebviewWindow<R>,
+    desired_x: i32,
+    desired_y: i32,
+) -> (i32, i32) {
+    let (win_w, win_h) = overlay
+        .outer_size()
+        .map(|size| (size.width as i32, size.height as i32))
+        .unwrap_or_else(|_| {
+            let scale = overlay.scale_factor().unwrap_or(1.0);
+            (
+                (170.0 * scale).round() as i32,
+                (50.0 * scale).round() as i32,
+            )
+        });
+
+    let monitor = overlay
+        .monitor_from_point(desired_x as f64, desired_y as f64)
+        .ok()
+        .flatten()
+        .or_else(|| overlay.current_monitor().ok().flatten())
+        .or_else(|| overlay.primary_monitor().ok().flatten())
+        .or_else(|| {
+            overlay
+                .available_monitors()
+                .ok()
+                .and_then(|monitors| monitors.into_iter().next())
+        });
+
+    clamp_with_monitor(monitor, (desired_x, desired_y), (win_w, win_h))
+}
+
+fn clamp_with_monitor(
+    monitor: Option<Monitor>,
+    desired: (i32, i32),
+    window_size: (i32, i32),
+) -> (i32, i32) {
     let Some(monitor) = monitor else {
-        return (desired_x, desired_y);
+        return desired;
     };
 
     let work_area = monitor.work_area();
@@ -229,12 +270,7 @@ fn clamp_main_window_position<R: Runtime>(
         work_h = monitor.size().height as i32;
     }
 
-    clamp_to_work_area(
-        (desired_x, desired_y),
-        (win_w, win_h),
-        (work_x, work_y),
-        (work_w, work_h),
-    )
+    clamp_to_work_area(desired, window_size, (work_x, work_y), (work_w, work_h))
 }
 
 fn ensure_main_window_visible<R: Runtime>(main_win: &WebviewWindow<R>) {
@@ -267,7 +303,37 @@ pub fn handle_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) 
     if window.label() == "main" {
         if let WindowEvent::Moved(position) = event {
             let app_handle = window.app_handle();
+            // Trascinamento dash: impedisce di portarla fuori dallo schermo.
+            // Il `set_position` correttivo genera un secondo `Moved` già
+            // clampato, quindi converge senza loop.
+            if let Some(main_win) = app_handle.get_webview_window("main") {
+                let (clamped_x, clamped_y) =
+                    clamp_main_window_position(&main_win, position.x, position.y);
+                if clamped_x != position.x || clamped_y != position.y {
+                    let _ = main_win.set_position(Position::Physical(PhysicalPosition::new(
+                        clamped_x, clamped_y,
+                    )));
+                    return;
+                }
+            }
             sync_overlay_position(app_handle, PhysicalPosition::new(position.x, position.y));
+            return;
+        }
+    }
+
+    if window.label() == "overlay" {
+        if let WindowEvent::Moved(position) = event {
+            // Stesso vincolo per il widget: non può finire fuori schermo.
+            let app_handle = window.app_handle();
+            if let Some(overlay) = app_handle.get_webview_window("overlay") {
+                let (clamped_x, clamped_y) =
+                    clamp_overlay_position(&overlay, position.x, position.y);
+                if clamped_x != position.x || clamped_y != position.y {
+                    let _ = overlay.set_position(Position::Physical(PhysicalPosition::new(
+                        clamped_x, clamped_y,
+                    )));
+                }
+            }
             return;
         }
     }
@@ -398,5 +464,23 @@ mod tests {
         };
         assert_eq!(overlay_restore_position(Some(open), (500, 500)), (500, 500));
         assert_eq!(overlay_restore_position(None, (500, 500)), (500, 500));
+    }
+
+    #[test]
+    fn drag_cannot_push_widget_off_right_edge() {
+        // Widget 170x50 trascinato a 1850 su work area 1920: max x 1750.
+        assert_eq!(
+            clamp_to_work_area((1850, 200), (170, 50), (0, 0), (1920, 1040)),
+            (1750, 200)
+        );
+    }
+
+    #[test]
+    fn drag_cannot_push_widget_below_taskbar() {
+        // Widget 170x50 trascinato a y=1020 su work area alta 1040: max y 990.
+        assert_eq!(
+            clamp_to_work_area((200, 1020), (170, 50), (0, 0), (1920, 1040)),
+            (200, 990)
+        );
     }
 }
