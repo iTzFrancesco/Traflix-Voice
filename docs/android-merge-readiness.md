@@ -26,6 +26,12 @@ desktop window was inherited by the Android build. The Android override now
 replaces the window list with one visible `main` window and excludes the
 desktop overlay from the mobile process.
 
+A second startup audit found that the Rust builder still initialized the
+desktop clipboard, shell, opener, log, and updater plugins on Android. Those
+integrations are now registered only behind `cfg(desktop)`. Android registers
+the small `voice-runtime` bridge instead; the unsupported Tauri updater is not
+loaded on mobile.
+
 ## What is separated
 
 The two application surfaces now have different entry points:
@@ -72,16 +78,30 @@ against both desktop and Android builds.
 - The merged Android configuration contains only `main` with
   `transparent=false` and `alwaysOnTop=false`; the desktop `overlay` is not
   packaged as an Android startup window.
+- `cargo check --target aarch64-linux-android` passes with the desktop plugin
+  registrations excluded from the Android builder.
+- The Android release build passes Kotlin compilation, R8, and lint with the
+  mobile updater bridge retained in the R8 seeds. It reports versionName
+  `0.1.3` and versionCode `1006001`.
+- The mobile updater accepts only non-draft `android-vX.Y.Z` releases with the
+  exact `app-universal-release.apk` asset. It downloads into the app cache and
+  delegates installation to Android's package installer after the user grants
+  the unknown-sources permission when required.
 
 ## Installable preview artifact
 
 The corrected preview is published as
-[`android-v0.1.2`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.2).
+[`android-v0.1.3`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.3).
 Download `app-universal-release.apk` from that release. Its SHA-256 is:
 
 ```text
-45a22bbbf6b80d2c6c18753716a0af1347aa0eb425bdf931044ff2ac68f7389a
+7062cea6b6a488bb91560655749f8fd8743ff32822c2a758b58cc3a653146c66
 ```
+
+The APK is versionName `0.1.3`, versionCode `1006001`, and contains
+`arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64`. It is signed with the same
+private-preview certificate as `android-v0.1.2`, so an in-place update is
+possible for that preview installation.
 
 This is a private-preview APK signed with a preview keystore. It is suitable
 for testing installation, not for production distribution. If another Traflix
@@ -106,6 +126,9 @@ background behavior still need a physical-device pass.
    Android CI artifact. Do not commit a keystore or passwords.
 5. Complete the Play Data Safety, microphone foreground-service, IME, and
    privacy review. Run the device matrix described in the architecture plan.
+6. Decide whether the `REQUEST_INSTALL_PACKAGES` permission is acceptable for
+   the distribution channel. Direct APK previews need it for the updater;
+   Play distribution requires a separate policy review.
 
 Until these gates pass, label the Android artifact as a private preview and do
 not present it as a stable release. The direct BYOK path is especially
@@ -156,6 +179,8 @@ preview first or install the new artifact without `-r`.
 - [x] Desktop and Android entry points are separated.
 - [x] Desktop-only Rust runtime is platform guarded.
 - [x] Android configuration excludes the desktop sidecar and desktop overlay.
+- [x] Desktop plugins are excluded from Android startup; mobile updates use a
+      dedicated Android bridge and only `android-v*` GitHub releases.
 - [x] Launcher icon is Traflix Voice, including adaptive-icon resources and a
       non-white background.
 - [x] An installable signing path exists without committing credentials.

@@ -45,12 +45,14 @@ The Android port is developed on the
 [`feat/android-mobile-ime`](https://github.com/iTzFrancesco/Traflix-Voice/tree/feat/android-mobile-ime)
 branch. It provides a native Traflix Voice keyboard with hold-to-speak or
 toggle recording, Groq Cloud transcription, encrypted API-key persistence, and
-a small overview/settings/history Hub.
+a small overview/settings/history Hub. The Hub checks GitHub for newer Android
+releases after startup and only considers the `android-vX.Y.Z` tag family and
+the signed `app-universal-release.apk` asset; Windows releases are ignored.
 
 The Android branch is currently a private preview. Read the
 [Android architecture plan](docs/android-architecture-plan.md) and the
 [merge-readiness checklist](docs/android-merge-readiness.md) before merging it
-into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.2)
+into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.3)
 contains the installable signed APK. Never distribute an `*-unsigned.apk`;
 Android requires a signed APK for direct installation.
 
@@ -116,7 +118,12 @@ branch. Build and signing instructions are in
 [Android merge readiness](docs/android-merge-readiness.md). A release APK must
 be signed; files ending in `-unsigned.apk` are build intermediates and are not
 valid direct-install packages. The current preview can be downloaded from the
-[Android v0.1.2 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.2).
+[Android v0.1.3 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.3).
+
+The mobile updater checks for a newer Android tag in the background after the
+Hub opens. It downloads only the expected APK asset and opens Android’s package
+installer; Android still requires the user to confirm the update and, on some
+devices, allow installs from this app. Desktop updater behavior is unchanged.
 
 ## Development and testing
 
@@ -161,7 +168,8 @@ only as documentation.
 - **Python** captures audio, manages Whisper models, performs local inference,
   and optionally calls Groq.
 - **Android/Kotlin** owns the IME, microphone capture, native indicator,
-  Android Keystore secret storage, and `InputConnection` text insertion.
+  Android Keystore secret storage, `InputConnection` text insertion, and the
+  mobile-only GitHub release updater.
 
 The platform entry points are intentionally separated: `src/desktop/` contains
 the desktop console, `src/mobile/` contains the Android Hub, and
