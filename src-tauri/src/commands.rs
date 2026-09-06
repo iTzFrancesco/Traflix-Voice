@@ -105,6 +105,17 @@ pub async fn update_stats(
 /// Restituisce le statistiche correnti
 #[tauri::command]
 pub async fn get_stats(state: State<'_, AppState>) -> Result<AppStats, String> {
+    // The native Android IME updates stats.json while the Hub process stays
+    // alive. Refresh the in-memory snapshot so the mobile dashboard reflects
+    // dictation sessions made outside the WebView.
+    #[cfg(target_os = "android")]
+    if let Ok(data) = fs::read_to_string(&state.stats_path) {
+        if let Ok(stats) = serde_json::from_str::<AppStats>(&data) {
+            *state.stats.lock().unwrap() = stats.clone();
+            return Ok(stats);
+        }
+    }
+
     let stats = state.stats.lock().unwrap();
     Ok(stats.clone())
 }

@@ -8,6 +8,9 @@ import SistemaTab from "./components/SistemaTab";
 import ToastContainer from "./components/Toast";
 import LoadingOverlay from "./components/LoadingOverlay";
 import DownloadPopup from "./components/DownloadPopup";
+import MobileDashboard, {
+  type MobileSettingsScreen,
+} from "./components/MobileDashboard";
 import { convertToSRT } from "./lib/export";
 import { useHotkey } from "./hooks/useHotkey";
 import { useAudioDevices } from "./hooks/useAudioDevices";
@@ -29,6 +32,8 @@ const TRANSCRIPTION_COOLDOWN_MS = 80;
 
 // DEV mode badge
 const IS_DEV = import.meta.env.DEV;
+const IS_ANDROID =
+  typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
 
 export default function App() {
   const {
@@ -50,7 +55,9 @@ export default function App() {
   // ── STATE ──
   const [activeTab, setActiveTab] = useState("home");
   const [selectedModel, setSelectedModel] = useState("small");
-  const [selectedProvider, setSelectedProvider] = useState<Provider>("local");
+  const [selectedProvider, setSelectedProvider] = useState<Provider>(
+    IS_ANDROID ? "cloud" : "local",
+  );
   const [selectedLanguage, setSelectedLanguage] = useState("it");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [appVersion, setAppVersion] = useState("");
@@ -105,6 +112,7 @@ export default function App() {
     clearDownloadInfo,
     notifyOptimisticProcessing,
   } = usePythonOutput({
+    enabled: !IS_ANDROID,
     selectedProvider,
     showToast,
     updateStats,
@@ -118,10 +126,36 @@ export default function App() {
     if (!loaded) return null;
 
     setSelectedModel(loaded.model || "small");
-    setSelectedProvider((loaded.provider as Provider) || "local");
+    setSelectedProvider(IS_ANDROID ? "cloud" : (loaded.provider as Provider) || "local");
     setSelectedLanguage(loaded.selectedLanguage || "it");
     setHoldToSpeak(loaded.holdToSpeak ?? false);
     setWidgetMode(loaded.widgetMode ?? "always");
+    if (IS_ANDROID && window.__TAURI__?.core?.invoke) {
+      try {
+        await Promise.all([
+          window.__TAURI__.core.invoke(
+            "plugin:voice-runtime|setRecordingMode",
+            { mode: loaded.holdToSpeak ? "hold_to_speak" : "toggle" },
+          ),
+          window.__TAURI__.core.invoke(
+            "plugin:voice-runtime|setTranscriptionLanguage",
+            { language: loaded.selectedLanguage || "it" },
+          ),
+          window.__TAURI__.core.invoke(
+            "plugin:voice-runtime|setGroqApiKey",
+            { apiKey: loaded.groqApiKey || "" },
+          ),
+        ]);
+      } catch (error) {
+        console.error("[android-settings] initial sync error:", error);
+      }
+    }
+    if (IS_ANDROID && loaded.provider !== "cloud" && window.__TAURI__?.core?.invoke) {
+      const normalized = { ...loaded, provider: "cloud" };
+      await window.__TAURI__.core.invoke("save_settings", { settings: normalized });
+      setSettings(normalized);
+      return normalized;
+    }
     return loaded;
   }, [loadStoredSettings]);
 
@@ -179,13 +213,19 @@ export default function App() {
         }
       })();
       const modelTask =
-        initialSettings?.provider === "cloud"
+        IS_ANDROID || initialSettings?.provider === "cloud"
           ? Promise.resolve()
           : refreshAllModelStatus();
-      await Promise.all([versionTask, loadAudioDevices(), modelTask]);
+      const audioTask = IS_ANDROID ? Promise.resolve() : loadAudioDevices();
+      await Promise.all([versionTask, audioTask, modelTask]);
 
       // Load groq usage
       reloadGroqUsage();
+
+      if (IS_ANDROID) {
+        await loadHistory();
+        return;
+      }
 
       // Initialize sounds
       startSoundRef.current = new Audio("/assets/sounds/start.wav");
@@ -195,6 +235,7 @@ export default function App() {
 
       // Request Python status sync
       const statusTimer = setTimeout(async () => {
+        if (!window.__TAURI__?.core?.invoke) return;
         try {
           await window.__TAURI__.core.invoke("send_to_python", {
             message: JSON.stringify({ command: "get_status" }),
@@ -217,6 +258,7 @@ export default function App() {
 
   // ── HOTKEY EVENT LISTENERS (with refs to avoid re-registration) ──
   useEffect(() => {
+    if (IS_ANDROID) return;
     if (!window.__TAURI__?.event?.listen) return;
 
     // Clean up any stale listeners first
@@ -267,6 +309,7 @@ export default function App() {
 
   // ── LOCAL FALLBACK HOTKEY (Ctrl+Alt) ──
   useEffect(() => {
+    if (IS_ANDROID) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const isControlAlt = e.ctrlKey && e.altKey;
       if (!isControlAlt) return;
@@ -464,9 +507,9 @@ export default function App() {
 
       // Handle special cases that need immediate side effects
       if (key === "selectedLanguage") {
-        setSelectedLanguage(value as string);
+        if (typeof value === "string") setSelectedLanguage(value);
       }
-      if (key === "computeDevice") {
+      if (!IS_ANDROID && key === "computeDevice") {
         try {
           await window.__TAURI__.core.invoke("send_to_python", {
             message: JSON.stringify({
@@ -478,7 +521,7 @@ export default function App() {
           console.warn("[gpu] set_device error:", err);
         }
       }
-      if (key === "groqApiKey") {
+      if (!IS_ANDROID && key === "groqApiKey") {
         try {
           await window.__TAURI__.core.invoke("send_to_python", {
             message: JSON.stringify({
@@ -491,10 +534,64 @@ export default function App() {
         }
       }
 
+      if (IS_ANDROID && window.__TAURI__?.core?.invoke) {
+        try {
+          if (key === "groqApiKey") {
+            await window.__TAURI__.core.invoke(
+              "plugin:voice-runtime|setGroqApiKey",
+              { apiKey: typeof value === "string" ? value : "" },
+            );
+          }
+          if (key === "selectedLanguage" && typeof value === "string") {
+            await window.__TAURI__.core.invoke(
+              "plugin:voice-runtime|setTranscriptionLanguage",
+              { language: value },
+            );
+          }
+        } catch (error) {
+          console.error("[android-settings] setting sync error:", error);
+        }
+      }
+
       await persistSettings(updated);
       showToast("Impostazioni salvate", "info");
     },
     [settings, persistSettings, showToast]
+  );
+
+  const openAndroidSettings = useCallback(
+    async (screen: MobileSettingsScreen) => {
+      if (!window.__TAURI__?.core?.invoke) return;
+      try {
+        await window.__TAURI__.core.invoke(
+          "plugin:voice-runtime|openAndroidSettings",
+          { screen },
+        );
+      } catch (error) {
+        console.error("[android-settings] open error:", error);
+        showToast("Impostazioni Android non disponibili", "error");
+      }
+    },
+    [showToast],
+  );
+
+  const handleMobileHoldToSpeakChange = useCallback(
+    async (value: boolean) => {
+      setHoldToSpeak(value);
+      await persistSettings({ holdToSpeak: value, provider: "cloud" });
+      if (IS_ANDROID && window.__TAURI__?.core?.invoke) {
+        try {
+          await window.__TAURI__.core.invoke(
+            "plugin:voice-runtime|setRecordingMode",
+            { mode: value ? "hold_to_speak" : "toggle" },
+          );
+        } catch (error) {
+          console.error("[android-settings] recording mode error:", error);
+          showToast("Modalità tastiera non sincronizzata", "error");
+        }
+      }
+    },
+    [persistSettings, showToast],
   );
 
   // ── SAVE HOTKEY (salva hotkey + holdToSpeak + widgetMode) ──
@@ -594,6 +691,26 @@ export default function App() {
   }, [clearDownloadInfo]);
 
   // ── RENDER ──
+  if (IS_ANDROID) {
+    return (
+      <MobileDashboard
+        settings={settings}
+        stats={stats}
+        historyEntries={historyEntries}
+        groqUsage={groqUsage}
+        transcriptionStatus={transcriptionStatus}
+        appVersion={appVersion}
+        holdToSpeak={holdToSpeak}
+        onHoldToSpeakChange={handleMobileHoldToSpeakChange}
+        onSettingChange={handleSettingChange}
+        onClearHistory={clearHistory}
+        onHistoryClick={handleHistoryClick}
+        onOpenAndroidSettings={openAndroidSettings}
+        onReloadUsage={reloadGroqUsage}
+      />
+    );
+  }
+
   return (
     <div
       className="app-canvas flex h-dvh w-dvw"

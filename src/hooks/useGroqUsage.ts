@@ -12,6 +12,9 @@ const EMPTY_USAGE = (
   _lastHour: hour,
 });
 
+const IS_ANDROID_RUNTIME =
+  typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+
 function localDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -63,11 +66,39 @@ function readUsage(now = Date.now()): GroqUsage | null {
   }
 }
 
+function normalizeExternalUsage(value: unknown): GroqUsage | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  return normalizeUsage({
+    date: typeof record.date === "string" ? record.date : "",
+    audio_seconds: Number(record.audio_seconds),
+    audio_seconds_hourly: Number(
+      record.audio_seconds_hourly ?? record.audioSecondsHourly,
+    ),
+    hourly_reset: typeof record.hourly_reset === "string" ? record.hourly_reset : "",
+  });
+}
+
 export function useGroqUsage() {
   const [groqUsage, setGroqUsage] = useState<GroqUsage | null>(null);
   const usageRef = useRef<GroqUsage | null>(null);
 
   const reloadGroqUsage = useCallback(() => {
+    if (IS_ANDROID_RUNTIME && window.__TAURI__?.core?.invoke) {
+      void window.__TAURI__.core
+        .invoke("get_groq_usage")
+        .then((value) => {
+          const usage = normalizeExternalUsage(value);
+          usageRef.current = usage;
+          setGroqUsage(usage);
+        })
+        .catch(() => {
+          const usage = readUsage();
+          usageRef.current = usage;
+          setGroqUsage(usage);
+        });
+      return;
+    }
     const usage = readUsage();
     usageRef.current = usage;
     setGroqUsage(usage);

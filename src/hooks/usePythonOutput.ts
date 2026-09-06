@@ -11,6 +11,7 @@ export interface DownloadInfo {
 }
 
 interface UsePythonOutputOptions {
+  enabled?: boolean;
   selectedProvider: Provider;
   showToast: (message: string, type: ToastType) => void;
   updateStats: (
@@ -75,6 +76,7 @@ function clearLoading(status: ModelStatus): ModelStatus {
 }
 
 export function usePythonOutput({
+  enabled = true,
   selectedProvider,
   showToast,
   updateStats,
@@ -141,6 +143,7 @@ export function usePythonOutput({
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     if (!window.__TAURI__?.event?.listen) return;
 
     let cancelled = false;
@@ -333,6 +336,7 @@ export function usePythonOutput({
     saveTranscription,
     showToast,
     updateModelStatus,
+    enabled,
   ]);
 
   return {

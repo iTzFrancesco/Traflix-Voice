@@ -1,12 +1,17 @@
 mod commands;
 mod hotkey;
+#[cfg(desktop)]
 mod hotkey_runtime;
 mod settings;
+#[cfg(desktop)]
 mod sidecar;
 mod state;
+#[cfg(desktop)]
 mod window_runtime;
 
 mod clipboard;
+#[cfg(target_os = "android")]
+mod mobile_runtime;
 
 // Re-exports for compatibility — tests use `use super::*` and run() needs direct access
 pub use commands::*;
@@ -15,13 +20,16 @@ pub use hotkey::{parse_hotkey, str_to_vk};
 pub use settings::*;
 pub use state::*;
 
+#[cfg(desktop)]
 use log::info;
 use std::fs;
 use std::sync::atomic::AtomicBool;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, RwLock};
-use tauri::{Emitter, Manager};
+#[cfg(desktop)]
+use tauri::Emitter;
+use tauri::Manager;
 
 // ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
@@ -40,21 +48,26 @@ pub fn run() {
             let models_dir = app_data_dir.join("models");
             let _ = fs::create_dir_all(&models_dir);
 
-            let settings = load_settings_from_file(&settings_path);
-            let initial_config = [settings.hotkey.as_str(), settings.secondary_hotkey.as_str()]
-                .into_iter()
-                .filter(|hotkey| !hotkey.trim().is_empty())
-                .map(parse_hotkey)
-                .filter(|config| !config.vk_codes.is_empty())
-                .collect::<Vec<_>>();
-            info!("[Hotkey] Configurate: {:?}", initial_config);
-            let hotkey_config = Arc::new(RwLock::new(initial_config));
+            let hotkey_config = Arc::new(RwLock::new(Vec::new()));
+
+            #[cfg(desktop)]
+            {
+                let settings = load_settings_from_file(&settings_path);
+                let initial_config = [settings.hotkey.as_str(), settings.secondary_hotkey.as_str()]
+                    .into_iter()
+                    .filter(|hotkey| !hotkey.trim().is_empty())
+                    .map(parse_hotkey)
+                    .filter(|config| !config.vk_codes.is_empty())
+                    .collect::<Vec<_>>();
+                info!("[Hotkey] Configurate: {:?}", initial_config);
+                *hotkey_config.write().unwrap() = initial_config;
+            }
 
             app.manage(AppState {
                 stats: Mutex::new(load_stats_from_file(&stats_path)),
                 stats_write_lock: Mutex::new(()),
                 python_process: Mutex::new(None),
-                settings_path,
+                settings_path: settings_path.clone(),
                 stats_path,
                 history_path,
                 history_lock: Mutex::new(()),
@@ -63,34 +76,42 @@ pub fn run() {
                 is_shutting_down: AtomicBool::new(false),
             });
 
-            let app_handle = app.handle().clone();
-            hotkey_runtime::spawn(app_handle.clone(), hotkey_config);
+            #[cfg(desktop)]
+            {
+                let app_handle = app.handle().clone();
+                hotkey_runtime::spawn(app_handle.clone(), hotkey_config);
 
-            #[cfg(debug_assertions)]
-            let script_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            #[cfg(not(debug_assertions))]
-            let script_dir = app
-                .path()
-                .resource_dir()
-                .expect("Impossibile trovare resource dir");
-            let script_path = script_dir.join("whisper_engine.py");
-            sidecar::spawn(app_handle.clone(), script_path, models_dir.clone());
+                #[cfg(debug_assertions)]
+                let script_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                #[cfg(not(debug_assertions))]
+                let script_dir = app
+                    .path()
+                    .resource_dir()
+                    .expect("Impossibile trovare resource dir");
+                let script_path = script_dir.join("whisper_engine.py");
+                sidecar::spawn(app_handle.clone(), script_path, models_dir.clone());
 
-            // Emit initial widget mode for the overlay
-            let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());
-            window_runtime::setup_tray(app)?;
-            window_runtime::install_listeners(app);
+                let settings = load_settings_from_file(&settings_path);
+                let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());
+                window_runtime::setup_tray(app)?;
+                window_runtime::install_listeners(app);
+            }
 
             Ok(())
         })
-        .on_window_event(window_runtime::handle_window_event)
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init());
 
-    #[cfg(not(debug_assertions))]
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(mobile_runtime::init());
+
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(window_runtime::handle_window_event);
+
+    #[cfg(all(not(debug_assertions), desktop))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         window_runtime::show_main_window(app);
     }));

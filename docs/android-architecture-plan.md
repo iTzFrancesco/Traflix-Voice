@@ -1,0 +1,399 @@
+# Android architecture plan
+
+Status: implementation in progress on `feat/android-mobile-ime`. The plan is
+kept as the product and architecture contract for the Android port.
+
+## Problem
+
+Traflix Voice currently captures audio through a Python sidecar and inserts the
+result into the focused Windows application by using the clipboard and a
+simulated `Ctrl+V`. Android has a different boundary: a normal APK cannot add a
+button to Gboard, cannot use `Ctrl+V` to target an arbitrary field, and cannot
+depend on the current Python/sounddevice runtime. The Android product needs a
+native voice runtime that remains usable when the Tauri WebView is closed and
+can deliver the final transcript to the editor that the user selected.
+
+## Decision summary
+
+The MVP uses a native Kotlin `InputMethodService` named Traflix Voice Keyboard.
+Its microphone button starts and stops a dictation session; the final text is
+inserted through the current `InputConnection`. Tauri/React remains the Hub for
+onboarding, account settings, privacy, history, statistics, and diagnostics.
+
+The core coordinator is independent of the entry surface. A Wispr-like floating
+bubble using `AccessibilityService` and an overlay can be added later, but it
+is not the MVP path. It needs more permissions, OEM-specific recovery, Play
+Console disclosure, and a separate insertion strategy.
+
+## Mobile product decisions
+
+The Android Hub is intentionally smaller than the desktop dashboard. It has
+three primary areas: overview, essential settings, and local history. It does
+not expose a provider selector: Groq Cloud is the only supported transcription
+provider for Android. A Traflix gateway may own authentication and quotas, but
+its transcription route remains Groq-only.
+
+The settings area contains the recording mode (`Hold to Speak` or toggle),
+language and formatting defaults, privacy/history controls, account or cloud
+connection status, and shortcuts into Android's input-method, microphone, app
+notification, and battery settings when repair is needed. It does not add a
+second provider or a desktop-style hotkey editor.
+
+History is stored in the app-private device database/files and is available
+without network access. Temporary audio is not retained by default. Dashboard
+screens load small summaries first, paginate or cap history, and never own the
+recording thread; the native IME/coordinator remains responsive even when the
+Hub WebView is stopped.
+
+The microphone button is the primary interaction surface. Its touch behavior is
+defined once and shared by the keyboard UI and the coordinator:
+
+```text
+Hold to Speak: touch-down -> start capture; touch-up -> stop and transcribe
+Toggle:        tap -> start capture; next tap -> stop and transcribe
+```
+
+While recording, the keyboard renders a compact animated indicator in its own
+input view: listening/recording state, elapsed time, and a lightweight level
+animation. Processing, success, and error have distinct non-blocking states.
+The indicator is not a system overlay and requires no Accessibility or overlay
+permission. Volume updates stay native and are sampled before any UI event is
+sent to the Tauri Hub.
+
+## Caller usage
+
+The keyboard and a future bubble should see the same small interface:
+
+```kotlin
+val session = dictationCoordinator.start(targetSnapshot)
+dictationCoordinator.stop(session.id)
+dictationCoordinator.cancel(session.id)
+dictationCoordinator.events.collect { event -> render(event) }
+```
+
+The coordinator owns capture, upload, state transitions, target validation,
+retry classification, and result persistence. Callers do not build WAV files,
+manage foreground-service state, or call a cloud provider directly.
+
+The IME supplies the target snapshot and provides the text sink:
+
+```kotlin
+val target = editorTracker.currentTarget() ?: return
+dictationCoordinator.start(target)
+
+// When the cloud result is ready, the coordinator asks the sink to commit it.
+imeTextSink.commitIfStillCurrent(target, transcript.text)
+```
+
+## Domain shape
+
+```kotlin
+enum class SessionPhase {
+    IDLE, STARTING, RECORDING, FINALIZING_AUDIO,
+    UPLOADING, TRANSCRIBING, COMMITTING,
+    RESULT_PENDING, SUCCEEDED, FAILED, CANCELLED
+}
+
+data class EditorTarget(
+    val generation: Long,
+    val packageName: String?,
+    val fieldId: Int,
+    val inputType: Int,
+    val isSensitive: Boolean,
+    val capturedAtEpochMs: Long,
+)
+
+data class DictationSession(
+    val id: String,
+    val target: EditorTarget,
+    val phase: SessionPhase,
+    val startedAtEpochMs: Long,
+)
+
+enum class RecordingMode {
+    HOLD_TO_SPEAK, TOGGLE
+}
+
+enum class MicIndicatorState {
+    IDLE, STARTING, RECORDING, PROCESSING, SUCCESS, ERROR
+}
+
+data class Transcript(
+    val requestId: String,
+    val text: String,
+    val durationMs: Long,
+    val language: String?,
+)
+
+sealed interface DictationEvent {
+    data class State(val session: DictationSession) : DictationEvent
+    data class Partial(val sessionId: String, val text: String) : DictationEvent
+    data class Completed(val sessionId: String, val transcript: Transcript) : DictationEvent
+    data class Error(val sessionId: String?, val code: String, val retryable: Boolean) : DictationEvent
+}
+
+interface DictationCoordinator {
+    suspend fun start(target: EditorTarget): DictationSession
+    suspend fun stop(sessionId: String)
+    suspend fun cancel(sessionId: String)
+    fun events(): Flow<DictationEvent>
+}
+
+interface MicInteractionController {
+    fun onPressDown()
+    fun onPressUp()
+    fun onToggleTap()
+}
+
+interface AudioCapture {
+    suspend fun record(sessionId: String): AudioClip
+    fun stop(sessionId: String)
+    fun cancel(sessionId: String)
+}
+
+interface CloudTranscriber {
+    suspend fun transcribe(request: TranscriptionRequest): Transcript
+}
+
+interface TextSink {
+    fun commitIfStillCurrent(target: EditorTarget, text: String): InsertResult
+}
+```
+
+The `InputConnection` itself is not persisted across a network request. The
+IME rechecks the current editor generation and obtains the current connection
+only for the final commit. If the editor changed, the result becomes
+`RESULT_PENDING` instead of being inserted into a different application.
+
+## Runtime modules
+
+```text
+android/
+  VoiceInputMethodService       IME lifecycle and microphone UI
+  EditorTracker                 EditorInfo, generation, sensitive-field policy
+  DictationCoordinator           Session state machine and orchestration
+  AudioCapture                   AudioRecord, pre-roll, tail drain, level meter
+  RecordingForegroundService     Visible microphone capture lifecycle
+  CloudTranscriber               Authenticated API client and error mapping
+  InsertionController            InputConnection commit and pending results
+  PendingResultStore             Retry/copy state, private app storage
+  VoiceRuntimeTauriPlugin        JS/Rust bridge for the Tauri Hub
+```
+
+The Tauri plugin is a façade, not the runtime owner. The IME must work when the
+main activity or WebView has been stopped. Native storage is the source of truth
+for active sessions and pending results; React observes it through events and
+queries.
+
+The desktop implementation keeps its current Windows adapter:
+
+```text
+Desktop result -> clipboard + Ctrl+V
+Android result -> InputConnection.commitText
+Future bubble -> Accessibility action or explicit user paste
+```
+
+The shared contract is the session/result model and the status vocabulary, not
+the Python line protocol or Windows-specific shell commands.
+
+## End-to-end flow
+
+```text
+User focuses a text field
+  -> Traflix IME receives EditorInfo/InputConnection
+  -> user taps or holds the microphone button
+  -> validate field type and RECORD_AUDIO permission
+  -> start AudioRecord and visible microphone notification
+  -> stop, finalize PCM/WAV, and delete capture buffer after handoff
+  -> authenticated cloud transcription request
+  -> optional ordered partials via setComposingText
+  -> verify editor generation and commit final text
+  -> save history/statistics according to privacy settings
+  -> stop foreground capture service and remove temporary audio
+```
+
+The MVP uses final-result insertion only. Partial transcription is a later
+contract because unordered or late partials can duplicate text in an editor.
+
+The current private prototype has a direct Groq-only Android client so the IME
+can be exercised end to end before the gateway exists. The API key is encrypted
+with an Android Keystore-backed AES-GCM key and survives Hub/IME restarts; the
+Hub also persists the setting using the existing app settings contract so it is
+not requested again on every launch. The APK never contains a credential and
+the client does not log it. This direct BYOK path must be replaced or disabled
+for a public release in favor of the Traflix gateway and short-lived tokens.
+
+The Android build uses `tauri.android.conf.json` to exclude the desktop Python
+sidecar and Windows WebView loader from the APK. During capture the
+`InputMethodService` promotes itself to a microphone foreground service and
+removes the notification as soon as the audio file is finalized; upload and
+history work do not keep the microphone service active.
+
+## Cloud contract
+
+Use a Traflix-owned HTTPS gateway in production. The gateway owns the Groq
+credential, quotas, and redaction; the APK receives a short-lived user token.
+There is no Android provider switch. A prototype may authenticate a private
+Groq-only endpoint directly, but a key must be kept in Android Keystore-backed
+storage and must never be shipped in the APK or written to logs.
+
+Proposed request:
+
+```text
+POST /v1/transcriptions
+Authorization: Bearer <short-lived-token>
+Idempotency-Key: <session-id>
+Content-Type: multipart/form-data
+
+audio: mono PCM16/WAV, 16 kHz
+language: it | en | auto
+formatting: basic
+```
+
+Proposed response:
+
+```json
+{
+  "request_id": "req_123",
+  "text": "testo trascritto",
+  "duration_ms": 2400,
+  "language": "it"
+}
+```
+
+Map failures into stable client codes: `offline`, `permission_denied`,
+`timeout`, `unauthorized`, `rate_limited`, `payload_too_large`,
+`provider_error`, and `target_changed`. Retry only network/5xx errors with an
+idempotency key; respect `Retry-After` for 429 and never repeat a successful
+commit automatically.
+
+## Permissions and privacy
+
+MVP permissions/capabilities:
+
+- `INTERNET`;
+- runtime `RECORD_AUDIO`;
+- an IME service declared with `BIND_INPUT_METHOD`;
+- `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MICROPHONE` for Android 14+
+  when capture runs in a foreground service;
+- `POST_NOTIFICATIONS` for a visible recording/status notification.
+
+The first release does not request overlay or Accessibility permissions. The
+microphone is opened only after an explicit tap/hold, the foreground notification
+has a Stop action, and capture ends on Stop, cancellation, permission revocation,
+call/audio-focus loss, or editor invalidation.
+
+Do not send audio from password, PIN, payment-number, or phone fields. Do not
+read surrounding field content unless a future feature has a separately
+documented consent. Delete temporary audio after success; retain it only when a
+user-visible retry is explicitly enabled. Do not log audio, transcript text,
+tokens, API keys, or the active app's unrelated content.
+
+## Wispr-style alternative
+
+The alternative surface is:
+
+```text
+AccessibilityService detects editable field
+  -> TYPE_APPLICATION_OVERLAY bubble
+  -> AudioRecord/cloud
+  -> AccessibilityNodeInfo action or explicit copy/paste fallback
+```
+
+This keeps Gboard, matching Wispr Flow's Android UX, but requires overlay and
+Accessibility permissions, field-tree handling, OEM battery recovery, and a
+prominent Play disclosure/consent flow. It should be prototyped only after the
+IME core works. Both surfaces can share `DictationCoordinator`,
+`CloudTranscriber`, `PendingResultStore`, and the privacy policy.
+
+## Implementation phases and gates
+
+### Phase 0: IME risk spike
+
+Build a native test IME with a fake transcript and `commitText`. Test a normal
+EditText, browser, email, messaging app, field selection, rotation, editor
+change, and password/number fields on Pixel and Samsung.
+
+Also verify both recording modes, cancellation on a second tap/release, and
+the native listening/processing animation without dropped input events.
+
+Gate: one commit in the original field, no commit after target change, a
+working switch back to the user's previous keyboard, and no UI freeze while
+the cloud request is pending.
+
+### Phase 1: Android shell and onboarding
+
+Initialize the Tauri Android project, add the Kotlin runtime/plugin, declare the
+IME, build onboarding, account/token storage, privacy disclosure, and permission
+repair screens. Keep desktop modules behind platform guards; do not package the
+Python sidecar in Android.
+
+### Phase 2: native capture
+
+Implement `AudioRecord`, 16 kHz mono PCM, short pre-roll/tail handling, tap and
+press-to-talk modes, audio focus, foreground notification, and deterministic
+cleanup. Test Android 13–16 and OEM battery policies.
+
+### Phase 3: cloud path
+
+Implement the gateway contract, upload limits, timeout/rate-limit mapping,
+idempotency, retry persistence, and metrics that exclude transcript contents.
+Reuse the desktop cloud semantics but not its Python IPC.
+
+### Phase 4: insertion and Hub integration
+
+Implement final `InputConnection` commit, pending-result copy/retry, history,
+statistics, the compact overview/settings/history dashboard, Android-settings
+shortcuts, and React event/query adapters. Add real-device tests for standard
+and hostile editors. Keep dashboard rendering and history work off the capture
+and IME main paths.
+
+### Phase 5: release hardening
+
+Run Play Data Safety/privacy review, signing and AAB/APK builds, offline/error
+tests, accessibility/security review, and a device matrix including Pixel,
+Samsung, Xiaomi/Redmi/POCO, OnePlus, OPPO, Vivo, and Motorola. Consider the
+Wispr-like bubble only after deciding to accept its policy surface.
+
+## Alternatives considered
+
+### Wispr-like bubble first
+
+It preserves Gboard and is closer to Wispr's Android experience, but exposes
+more Android and Play policy surface and is less deterministic across custom
+editors. It is a good second adapter, not the safest first implementation for
+the explicit keyboard-button requirement.
+
+### Port the Python sidecar into the APK
+
+Rejected. The current process requires a Python runtime, `sounddevice`, model
+resources, and a desktop process supervisor. It adds packaging and lifecycle
+complexity without solving text insertion. Android native capture and a cloud
+client are the smaller boundary.
+
+### Tauri/React-only implementation
+
+Rejected for the runtime path. React can render the Hub, but a WebView cannot
+provide an IME service or reliably own microphone capture after the activity is
+stopped. Native Kotlin must own those lifecycle-sensitive operations.
+
+## MVP acceptance criteria
+
+- A user installs the APK, enables Traflix Voice Keyboard, and selects it.
+- The microphone button records only after explicit user action.
+- Hold-to-speak starts on press and stops on release; toggle mode starts and
+  stops on separate taps.
+- The keyboard shows a lightweight animated listening/processing state without
+  requiring a system overlay.
+- A successful cloud result is committed once at the current cursor/selection.
+- A changed editor never receives an old result; the result becomes copyable.
+- Sensitive fields are blocked with a clear explanation.
+- Network, quota, permission, audio-focus, and service-kill failures are visible
+  and recoverable without losing a user-approved retry result.
+- Temporary audio is deleted by default and no sensitive content appears in logs.
+- The Android Hub exposes only overview, essential settings, and local history;
+  Groq Cloud is the only transcription provider shown or supported.
+- The Hub can open the relevant Android settings screens when a permission or
+  keyboard activation needs repair.
+- The Hub displays the same session status and history whether or not its WebView
+  is currently open.
