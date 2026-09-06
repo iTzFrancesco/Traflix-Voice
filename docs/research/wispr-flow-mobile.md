@@ -2,7 +2,11 @@
 
 Data della ricerca: 6 settembre 2026 UTC
 Ambito: fonti ufficiali Wispr, Google Play, Google Play policy e Android Developers.
-Codice applicativo modificato: nessuno.
+Stato Traflix: implementazione preview su
+[`feat/android-mobile-ime`](https://github.com/iTzFrancesco/Traflix-Voice/tree/feat/android-mobile-ime).
+Il codice applicativo Android è in `src/mobile/` e `src-tauri/gen/android/`;
+la decisione di merge è in
+[`docs/android-merge-readiness.md`](../android-merge-readiness.md).
 
 ## Sintesi decisionale
 

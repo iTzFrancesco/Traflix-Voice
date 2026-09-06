@@ -4,6 +4,23 @@ This glossary defines the language shared by desktop and Android dictation
 flows. It separates the user's voice session, the cloud result, and the text
 destination so platform-specific adapters do not redefine the same concepts.
 
+## Platform boundaries
+
+Traflix Voice currently has two surfaces:
+
+- **Windows desktop**: `src/desktop/` and the desktop Rust modules own global
+  hotkeys, the Python sidecar, clipboard paste, tray behavior, and local
+  Whisper inference.
+- **Android preview**: `src/mobile/` and `src-tauri/gen/android/` own the Hub,
+  native input method, microphone capture, Groq Cloud request, Android Keystore
+  storage, and `InputConnection` insertion.
+
+`src/App.tsx` only selects the platform shell. Shared types, settings, history,
+statistics, and usage contracts are the narrow boundary between the surfaces.
+The Android branch and its merge gates are documented in
+[`docs/android-architecture-plan.md`](docs/android-architecture-plan.md) and
+[`docs/android-merge-readiness.md`](docs/android-merge-readiness.md).
+
 ## Dictation
 
 **Dictation session**:

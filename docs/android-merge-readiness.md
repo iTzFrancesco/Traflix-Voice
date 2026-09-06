@@ -1,0 +1,155 @@
+# Android merge readiness
+
+Status: conditional. The Android work on `feat/android-mobile-ime` is ready for
+private preview and code review. It is not yet a production-ready Android
+release for `main`.
+
+## Decision
+
+Do not merge this branch into `main` as a production release yet.
+
+The code is isolated enough for an integration pull request. A merge is
+reasonable only if `main` is explicitly allowed to contain an unsigned,
+Groq-BYOK Android preview and the team accepts the remaining release gates.
+That is a product decision, not a substitute for the checks below.
+
+The install failure had a concrete cause: the first Android build produced
+`app-universal-release-unsigned.apk`. It has no APK signature and Android
+rejects it as an invalid package. Do not distribute that artifact. Every
+installable preview must pass `apksigner verify` and use a preview or release
+keystore that is kept outside the repository.
+
+## What is separated
+
+The two application surfaces now have different entry points:
+
+```text
+src/App.tsx                  platform selector only
+src/desktop/DesktopApp.tsx   Windows dashboard, hotkeys, Python sidecar
+src/mobile/MobileApp.tsx     Android Hub lifecycle and native bridge
+src/mobile/MobileDashboard.tsx
+src/mobile/mobile.css        Android-only Hub styles
+
+src-tauri/src/               shared Rust contracts and desktop shell
+src-tauri/src/mobile_runtime.rs
+src-tauri/gen/android/       Android Gradle project and Kotlin IME runtime
+```
+
+The desktop shell, hotkey runtime, sidecar, tray, and window listeners are
+compiled behind desktop platform guards. The Android build uses
+`src-tauri/tauri.android.conf.json`, which excludes the desktop Python sidecar
+and Windows WebView resources. The shared code is limited to settings,
+statistics, history, usage types, and Tauri command contracts.
+
+When changing one surface, keep the change inside its surface directory unless
+the shared contract really changes. A shared-contract change must be checked
+against both desktop and Android builds.
+
+## Verified on this branch
+
+- `npm run build` passes after the desktop/mobile entry-point split.
+- `cargo fmt --all -- --check` passes.
+- `cargo test --all` passes with 22 tests.
+- The Android release build is configured to accept signing values through
+  `TRAFLIX_ANDROID_KEYSTORE`, `TRAFLIX_ANDROID_STORE_PASSWORD`,
+  `TRAFLIX_ANDROID_KEY_ALIAS`, and `TRAFLIX_ANDROID_KEY_PASSWORD`.
+- The Android launcher assets are sourced from `src-tauri/icons/android/`,
+  including the Traflix Voice adaptive icon and density-specific images.
+- The unsigned-artifact failure was reproduced with `apksigner`.
+- The signed preview APK verifies with APK Signature Scheme v2, contains
+  `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64`, and reports package
+  `it.traflix.voice` version `1.6.0`.
+
+## Installable preview artifact
+
+The corrected preview is published as
+[`android-v0.1.1`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.1).
+Download `app-universal-release.apk` from that release. Its SHA-256 is:
+
+```text
+5554a5358efffb363b310e7a79f99320384d02fc70c8788397ba7c01809f9379
+```
+
+This is a private-preview APK signed with a preview keystore. It is suitable
+for testing installation, not for production distribution. If another Traflix
+preview is already installed with a different signing key, uninstall it first.
+
+There is no Android device connected to this workspace, so installation,
+keyboard activation, microphone capture, `InputConnection` insertion, and OEM
+background behavior still need a physical-device pass.
+
+## Gates before a production merge
+
+1. Install the signed APK on at least one Android 13+ device and test both
+   recording modes in a normal text field, browser, messaging app, and a
+   password/PIN field.
+2. Verify editor changes, keyboard switching, rotation, service restart,
+   audio-focus loss, permission denial, offline mode, timeout, rate limit, and
+   a retry after a failed commit.
+3. Replace or disable the private direct-Groq BYOK path. Production Android
+   must use the Traflix gateway with short-lived tokens, quotas, privacy
+   disclosure, and a documented data-retention policy.
+4. Sign the release with the production-kept keystore and publish a repeatable
+   Android CI artifact. Do not commit a keystore or passwords.
+5. Complete the Play Data Safety, microphone foreground-service, IME, and
+   privacy review. Run the device matrix described in the architecture plan.
+
+Until these gates pass, label the Android artifact as a private preview and do
+not present it as a stable release. The direct BYOK path is especially
+important: Android Keystore protects the locally saved key, but it does not
+make a client-held provider key suitable for a public distribution model.
+
+## Reproducible checks
+
+From the repository root:
+
+```bash
+npm ci
+npm run build
+
+cd src-tauri
+cargo fmt --all -- --check
+cargo test --all
+cd ..
+```
+
+For a signed local preview, set the four `TRAFLIX_ANDROID_*` variables to a
+keystore outside the repository, then run:
+
+```bash
+export JAVA_HOME=/path/to/jdk-17
+export ANDROID_HOME=/path/to/android-sdk
+export NDK_HOME=/path/to/android-sdk/ndk/<version>
+export TRAFLIX_ANDROID_KEYSTORE=/path/to/preview.keystore
+export TRAFLIX_ANDROID_STORE_PASSWORD=<store-password>
+export TRAFLIX_ANDROID_KEY_ALIAS=<alias>
+export TRAFLIX_ANDROID_KEY_PASSWORD=<key-password>
+
+npm exec tauri -- android build --apk --ci
+```
+
+Validate the generated artifact before sharing it:
+
+```bash
+apksigner verify --verbose path/to/app-universal-release.apk
+aapt dump badging path/to/app-universal-release.apk
+```
+
+If a device already has a build signed with a different key, uninstall that
+preview first or install the new artifact without `-r`.
+
+## Merge checklist
+
+- [x] Desktop and Android entry points are separated.
+- [x] Desktop-only Rust runtime is platform guarded.
+- [x] Android configuration excludes the desktop sidecar.
+- [x] Launcher icon is Traflix Voice, including adaptive-icon resources.
+- [x] An installable signing path exists without committing credentials.
+- [ ] Physical Android installation and IME flow are verified.
+- [ ] Production gateway replaces direct Groq BYOK.
+- [ ] Production signing, Android CI, privacy review, and device matrix are
+      complete.
+
+Current recommendation: keep the branch open for review and private testing;
+merge only as an explicitly experimental integration. For the normal primary
+branch, wait for the unchecked gates.

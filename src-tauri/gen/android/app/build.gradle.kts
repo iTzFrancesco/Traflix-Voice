@@ -1,5 +1,16 @@
 import java.util.Properties
 
+val releaseKeystore = System.getenv("TRAFLIX_ANDROID_KEYSTORE")
+val releaseStorePassword = System.getenv("TRAFLIX_ANDROID_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("TRAFLIX_ANDROID_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("TRAFLIX_ANDROID_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseKeystore,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -24,6 +35,16 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("previewRelease") {
+                storeFile = file(releaseKeystore!!)
+                storePassword = releaseStorePassword!!
+                keyAlias = releaseKeyAlias!!
+                keyPassword = releaseKeyPassword!!
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -38,6 +59,9 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = true
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("previewRelease")
+            }
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))

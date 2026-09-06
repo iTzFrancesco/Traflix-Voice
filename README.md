@@ -1,12 +1,13 @@
 <h1 align="center">Traflix Voice</h1>
 
 <p align="center">
-  <strong>Local-first voice dictation for Windows.</strong><br/>
-  Transcribe speech and paste the result into the application that has focus.
+  <strong>Voice dictation for Windows and Android.</strong><br/>
+  Transcribe speech and deliver the result to the active editor.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Platform: Windows" />
+  <img src="https://img.shields.io/badge/platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform: Android" />
   <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=111827" alt="React 19" />
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12" />
@@ -25,9 +26,33 @@
   <img src="docs/assets/readme/traflix-voice-desktop.webp" alt="Traflix Voice desktop application" width="620" />
 </p>
 
-Traflix Voice is a Windows desktop application built with Tauri 2, Rust, React,
-TypeScript, and Python. It provides a local-first workflow with optional cloud
-transcription when the user explicitly enables Groq.
+Traflix Voice has two platform surfaces built from a shared product contract:
+the Windows desktop app is local-first with optional Groq Cloud transcription,
+while the Android preview is a native keyboard with Groq Cloud as its only
+transcription provider.
+
+## Platforms
+
+### Windows desktop
+
+The desktop application uses Tauri 2, Rust, React, TypeScript, and a Python
+sidecar. It captures speech globally and pastes the result into the focused
+Windows application.
+
+### Android preview
+
+The Android port is developed on the
+[`feat/android-mobile-ime`](https://github.com/iTzFrancesco/Traflix-Voice/tree/feat/android-mobile-ime)
+branch. It provides a native Traflix Voice keyboard with hold-to-speak or
+toggle recording, Groq Cloud transcription, encrypted API-key persistence, and
+a small overview/settings/history Hub.
+
+The Android branch is currently a private preview. Read the
+[Android architecture plan](docs/android-architecture-plan.md) and the
+[merge-readiness checklist](docs/android-merge-readiness.md) before merging it
+into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.1)
+contains the installable signed APK. Never distribute an `*-unsigned.apk`;
+Android requires a signed APK for direct installation.
 
 ## Features
 
@@ -43,17 +68,31 @@ transcription when the user explicitly enables Groq.
 
 ## Supported workflow
 
+### Windows desktop
+
 1. Start the application and select a microphone in **System**.
-2. Choose a local model in **AI**, or explicitly enable Groq cloud mode.
+2. Choose a local model in **AI**, or explicitly enable Groq Cloud mode.
 3. Press the configured hotkey and speak.
 4. Press it again to stop. The transcription is shown in the app and can be
    pasted into the focused application.
 
-Windows 10 and Windows 11 are the supported platforms. macOS and Linux are not
-currently validated. Local transcription requires a downloaded model; cloud
-mode does not require a local Whisper model.
+### Android
+
+1. Install a signed Android preview from the secondary branch or its release.
+2. Open the Hub, configure Groq Cloud once, grant microphone access, and
+   enable/select **Traflix Voice Keyboard** in Android settings.
+3. In any supported text field, choose Hold to Speak or Toggle in the Hub.
+4. Press the Traflix microphone key. The transcript is committed through the
+   active `InputConnection` and local history remains on the device.
+
+Windows 10 and Windows 11 are the supported desktop platforms. Android 13+
+is the target for the private mobile preview. macOS and Linux are not
+currently validated. Desktop local transcription requires a downloaded model;
+Android uses Groq Cloud only in the current preview.
 
 ## Installation
+
+### Windows desktop
 
 Prerequisites: Node.js 24, Python 3.12, a stable Rust toolchain, and the
 Microsoft Edge WebView2 Runtime.
@@ -69,6 +108,16 @@ npm run tauri dev
 On first use, open **AI** and download a local model. The Small model is a
 reasonable starting point for general dictation.
 
+### Android preview
+
+The Android implementation is maintained on the
+[`feat/android-mobile-ime`](https://github.com/iTzFrancesco/Traflix-Voice/tree/feat/android-mobile-ime)
+branch. Build and signing instructions are in
+[Android merge readiness](docs/android-merge-readiness.md). A release APK must
+be signed; files ending in `-unsigned.apk` are build intermediates and are not
+valid direct-install packages. The current preview can be downloaded from the
+[Android v0.1.1 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.1).
+
 ## Development and testing
 
 ```powershell
@@ -80,15 +129,24 @@ cargo clippy -- -D warnings
 cargo test
 ```
 
+For Android, also build the configured target with the Android SDK/NDK and a
+keystore kept outside the repository. Then run `apksigner verify --verbose` on
+the generated APK before sharing it. See the
+[Android architecture plan](docs/android-architecture-plan.md) for the device
+matrix and the [merge-readiness checklist](docs/android-merge-readiness.md) for
+the release gates.
+
 Focused benchmark scripts and technical reports are under `scripts/` and
 `docs/`. Their measurements are environment-specific and are not guarantees.
 
 ## Privacy and data handling
 
-Local mode processes audio on the device after the selected Whisper model has
-been downloaded. Cloud mode sends recorded audio to Groq only after the user
-configures that provider in the application. The optional API key is stored in
-the application's local settings and is not required in the repository.
+Desktop local mode processes audio on the device after the selected Whisper
+model has been downloaded. Desktop cloud mode and the Android preview send
+recorded audio to Groq only after the user configures cloud access. The Android
+preview stores its BYOK key in Android Keystore-backed storage and does not put
+it in the APK or repository. A public Android release must use the Traflix
+gateway instead of a client-held provider key.
 
 History, settings, statistics, usage data, and downloaded models are stored in
 the operating system's application-data directory. Never commit API keys,
@@ -102,6 +160,14 @@ only as documentation.
 - **React/TypeScript/Vite** provides the main interface and overlay.
 - **Python** captures audio, manages Whisper models, performs local inference,
   and optionally calls Groq.
+- **Android/Kotlin** owns the IME, microphone capture, native indicator,
+  Android Keystore secret storage, and `InputConnection` text insertion.
+
+The platform entry points are intentionally separated: `src/desktop/` contains
+the desktop console, `src/mobile/` contains the Android Hub, and
+`src-tauri/gen/android/` contains the Android Gradle/Kotlin project. Shared
+types and persistence contracts are kept small so a platform change does not
+silently alter the other runtime.
 
 ## Third-party components
 
