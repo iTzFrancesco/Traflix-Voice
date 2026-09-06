@@ -78,6 +78,11 @@ against both desktop and Android builds.
 - The merged Android configuration contains only `main` with
   `transparent=false` and `alwaysOnTop=false`; the desktop `overlay` is not
   packaged as an Android startup window.
+- `cpal`/`oboe` remain desktop-only; Android uses the native
+  `VoiceAudioRecorder`, avoiding the C++ runtime dependency that caused the
+  startup linker crash.
+- The Android startup smoke passes on the API 30 x86 emulator across three
+  consecutive install-and-launch cycles.
 - `cargo check --target aarch64-linux-android` passes with the desktop plugin
   registrations excluded from the Android builder.
 - The Android release build passes Kotlin compilation, R8, and lint with the
@@ -107,9 +112,10 @@ This is a private-preview APK signed with a preview keystore. It is suitable
 for testing installation, not for production distribution. If another Traflix
 preview is already installed with a different signing key, uninstall it first.
 
-There is no Android device connected to this workspace, so installation,
-keyboard activation, microphone capture, `InputConnection` insertion, and OEM
-background behavior still need a physical-device pass.
+There is no physical Android device connected to this workspace, so keyboard
+activation, microphone capture, `InputConnection` insertion, and OEM
+background behavior still need a physical-device pass. The API 30 x86 emulator
+has been used for the install-and-launch smoke test.
 
 ## Gates before a production merge
 
@@ -147,6 +153,8 @@ cd src-tauri
 cargo fmt --all -- --check
 cargo test --all
 cd ..
+
+pwsh -NoProfile -File scripts/android-startup-smoke.ps1 -ApkPath path/to/app-universal-debug.apk
 ```
 
 For a signed local preview, set the four `TRAFLIX_ANDROID_*` variables to a

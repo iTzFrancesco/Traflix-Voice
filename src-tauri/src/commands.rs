@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "android"))]
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::info;
 use std::fs;
@@ -121,6 +122,7 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<AppStats, String> {
 }
 
 /// Restituisce i dispositivi audio disponibili
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
     let host = cpal::default_host();
@@ -135,6 +137,13 @@ pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
         }
     }
     Ok(devices)
+}
+
+/// Android records through the native VoiceAudioRecorder instead of cpal.
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+    Ok(Vec::new())
 }
 
 /// Controlla se un modello esiste già su disco
