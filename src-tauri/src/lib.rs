@@ -35,70 +35,75 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
-        .setup(|app| {
-            let app_data_dir = app
+    let builder = tauri::Builder::default().setup(|app| {
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
+            .expect("Impossibile trovare directory dati");
+        let stats_path = app_data_dir.join("stats.json");
+        let settings_path = app_data_dir.join("settings.json");
+        let history_path = app_data_dir.join("history.json");
+        let groq_usage_path = app_data_dir.join("groq_usage.json");
+        let models_dir = app_data_dir.join("models");
+        let _ = fs::create_dir_all(&models_dir);
+
+        let hotkey_config = Arc::new(RwLock::new(Vec::new()));
+
+        #[cfg(desktop)]
+        {
+            let settings = load_settings_from_file(&settings_path);
+            let initial_config = [settings.hotkey.as_str(), settings.secondary_hotkey.as_str()]
+                .into_iter()
+                .filter(|hotkey| !hotkey.trim().is_empty())
+                .map(parse_hotkey)
+                .filter(|config| !config.vk_codes.is_empty())
+                .collect::<Vec<_>>();
+            info!("[Hotkey] Configurate: {:?}", initial_config);
+            *hotkey_config.write().unwrap() = initial_config;
+        }
+
+        app.manage(AppState {
+            stats: Mutex::new(load_stats_from_file(&stats_path)),
+            stats_write_lock: Mutex::new(()),
+            python_process: Mutex::new(None),
+            settings_path: settings_path.clone(),
+            stats_path,
+            history_path,
+            history_lock: Mutex::new(()),
+            groq_usage_path: groq_usage_path.clone(),
+            hotkey_config: hotkey_config.clone(),
+            is_shutting_down: AtomicBool::new(false),
+        });
+
+        #[cfg(desktop)]
+        {
+            let app_handle = app.handle().clone();
+            hotkey_runtime::spawn(app_handle.clone(), hotkey_config);
+
+            #[cfg(debug_assertions)]
+            let script_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            #[cfg(not(debug_assertions))]
+            let script_dir = app
                 .path()
-                .app_data_dir()
-                .expect("Impossibile trovare directory dati");
-            let stats_path = app_data_dir.join("stats.json");
-            let settings_path = app_data_dir.join("settings.json");
-            let history_path = app_data_dir.join("history.json");
-            let groq_usage_path = app_data_dir.join("groq_usage.json");
-            let models_dir = app_data_dir.join("models");
-            let _ = fs::create_dir_all(&models_dir);
+                .resource_dir()
+                .expect("Impossibile trovare resource dir");
+            let script_path = script_dir.join("whisper_engine.py");
+            sidecar::spawn(app_handle.clone(), script_path, models_dir.clone());
 
-            let hotkey_config = Arc::new(RwLock::new(Vec::new()));
+            let settings = load_settings_from_file(&settings_path);
+            let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());
+            window_runtime::setup_tray(app)?;
+            window_runtime::install_listeners(app);
+        }
 
-            #[cfg(desktop)]
-            {
-                let settings = load_settings_from_file(&settings_path);
-                let initial_config = [settings.hotkey.as_str(), settings.secondary_hotkey.as_str()]
-                    .into_iter()
-                    .filter(|hotkey| !hotkey.trim().is_empty())
-                    .map(parse_hotkey)
-                    .filter(|config| !config.vk_codes.is_empty())
-                    .collect::<Vec<_>>();
-                info!("[Hotkey] Configurate: {:?}", initial_config);
-                *hotkey_config.write().unwrap() = initial_config;
-            }
-
-            app.manage(AppState {
-                stats: Mutex::new(load_stats_from_file(&stats_path)),
-                stats_write_lock: Mutex::new(()),
-                python_process: Mutex::new(None),
-                settings_path: settings_path.clone(),
-                stats_path,
-                history_path,
-                history_lock: Mutex::new(()),
-                groq_usage_path: groq_usage_path.clone(),
-                hotkey_config: hotkey_config.clone(),
-                is_shutting_down: AtomicBool::new(false),
-            });
-
-            #[cfg(desktop)]
-            {
-                let app_handle = app.handle().clone();
-                hotkey_runtime::spawn(app_handle.clone(), hotkey_config);
-
-                #[cfg(debug_assertions)]
-                let script_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-                #[cfg(not(debug_assertions))]
-                let script_dir = app
-                    .path()
-                    .resource_dir()
-                    .expect("Impossibile trovare resource dir");
-                let script_path = script_dir.join("whisper_engine.py");
-                sidecar::spawn(app_handle.clone(), script_path, models_dir.clone());
-
-                let settings = load_settings_from_file(&settings_path);
-                let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());
-                window_runtime::setup_tray(app)?;
-                window_runtime::install_listeners(app);
-            }
-
-            Ok(())
-        })
+        Ok(())
+    });
+    // These plugins own desktop-only integrations (sidecar, clipboard paste,
+    // tray diagnostics, and the desktop updater). Keeping them out of the
+    // Android builder avoids loading unsupported platform adapters during
+    // application startup.
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
