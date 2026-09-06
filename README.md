@@ -50,7 +50,7 @@ a small overview/settings/history Hub.
 The Android branch is currently a private preview. Read the
 [Android architecture plan](docs/android-architecture-plan.md) and the
 [merge-readiness checklist](docs/android-merge-readiness.md) before merging it
-into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.1)
+into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.2)
 contains the installable signed APK. Never distribute an `*-unsigned.apk`;
 Android requires a signed APK for direct installation.
 
@@ -116,7 +116,7 @@ branch. Build and signing instructions are in
 [Android merge readiness](docs/android-merge-readiness.md). A release APK must
 be signed; files ending in `-unsigned.apk` are build intermediates and are not
 valid direct-install packages. The current preview can be downloaded from the
-[Android v0.1.1 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.1).
+[Android v0.1.2 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.2).
 
 ## Development and testing
 

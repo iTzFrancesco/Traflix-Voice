@@ -1,4 +1,21 @@
 {
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Traflix Voice",
+        "url": "index.html",
+        "width": 450,
+        "height": 650,
+        "resizable": false,
+        "maximizable": false,
+        "fullscreen": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "visible": true
+      }
+    ]
+  },
   "bundle": {
     "resources": []
   }

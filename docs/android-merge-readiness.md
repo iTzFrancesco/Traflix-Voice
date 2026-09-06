@@ -13,11 +13,18 @@ reasonable only if `main` is explicitly allowed to contain an unsigned,
 Groq-BYOK Android preview and the team accepts the remaining release gates.
 That is a product decision, not a substitute for the checks below.
 
-The install failure had a concrete cause: the first Android build produced
-`app-universal-release-unsigned.apk`. It has no APK signature and Android
-rejects it as an invalid package. Do not distribute that artifact. Every
-installable preview must pass `apksigner verify` and use a preview or release
-keystore that is kept outside the repository.
+The original install failure had a concrete cause: the first Android build
+produced `app-universal-release-unsigned.apk`. It has no APK signature and
+Android rejects it as an invalid package. Do not distribute that artifact.
+Every installable preview must pass `apksigner verify` and use a preview or
+release keystore that is kept outside the repository.
+
+The subsequent Android startup crash had a separate configuration cause. The
+desktop configuration contained a hidden transparent `overlay` window, and
+Tauri eagerly creates configured windows during startup. Before this fix that
+desktop window was inherited by the Android build. The Android override now
+replaces the window list with one visible `main` window and excludes the
+desktop overlay from the mobile process.
 
 ## What is separated
 
@@ -37,9 +44,10 @@ src-tauri/gen/android/       Android Gradle project and Kotlin IME runtime
 
 The desktop shell, hotkey runtime, sidecar, tray, and window listeners are
 compiled behind desktop platform guards. The Android build uses
-`src-tauri/tauri.android.conf.json`, which excludes the desktop Python sidecar
-and Windows WebView resources. The shared code is limited to settings,
-statistics, history, usage types, and Tauri command contracts.
+`src-tauri/tauri.android.conf.json`, which excludes the desktop Python sidecar,
+Windows WebView resources, and the desktop overlay window. The shared code is
+limited to settings, statistics, history, usage types, and Tauri command
+contracts.
 
 When changing one surface, keep the change inside its surface directory unless
 the shared contract really changes. A shared-contract change must be checked
@@ -54,20 +62,25 @@ against both desktop and Android builds.
   `TRAFLIX_ANDROID_KEYSTORE`, `TRAFLIX_ANDROID_STORE_PASSWORD`,
   `TRAFLIX_ANDROID_KEY_ALIAS`, and `TRAFLIX_ANDROID_KEY_PASSWORD`.
 - The Android launcher assets are sourced from `src-tauri/icons/android/`,
-  including the Traflix Voice adaptive icon and density-specific images.
+  including the Traflix Voice adaptive icon and density-specific images. The
+  adaptive background is the dark Traflix canvas rather than white, and the
+  manifest declares both `icon` and `roundIcon`.
 - The unsigned-artifact failure was reproduced with `apksigner`.
 - The signed preview APK verifies with APK Signature Scheme v2, contains
   `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64`, and reports package
   `it.traflix.voice` version `1.6.0`.
+- The merged Android configuration contains only `main` with
+  `transparent=false` and `alwaysOnTop=false`; the desktop `overlay` is not
+  packaged as an Android startup window.
 
 ## Installable preview artifact
 
 The corrected preview is published as
-[`android-v0.1.1`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.1).
+[`android-v0.1.2`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.2).
 Download `app-universal-release.apk` from that release. Its SHA-256 is:
 
 ```text
-5554a5358efffb363b310e7a79f99320384d02fc70c8788397ba7c01809f9379
+45a22bbbf6b80d2c6c18753716a0af1347aa0eb425bdf931044ff2ac68f7389a
 ```
 
 This is a private-preview APK signed with a preview keystore. It is suitable
@@ -142,8 +155,9 @@ preview first or install the new artifact without `-r`.
 
 - [x] Desktop and Android entry points are separated.
 - [x] Desktop-only Rust runtime is platform guarded.
-- [x] Android configuration excludes the desktop sidecar.
-- [x] Launcher icon is Traflix Voice, including adaptive-icon resources.
+- [x] Android configuration excludes the desktop sidecar and desktop overlay.
+- [x] Launcher icon is Traflix Voice, including adaptive-icon resources and a
+      non-white background.
 - [x] An installable signing path exists without committing credentials.
 - [ ] Physical Android installation and IME flow are verified.
 - [ ] Production gateway replaces direct Groq BYOK.
