@@ -7,6 +7,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
     #[cfg(target_os = "android")]
     let builder = builder.setup(|_, api| {
         api.register_android_plugin("it.traflix.voice", "VoiceRuntimePlugin")?;
+        api.register_android_plugin("it.traflix.voice", "MobileUpdatePlugin")?;
         Ok(())
     });
 

@@ -52,6 +52,10 @@
 .mobile-connection-badge.is-ready { color: var(--signal); }
 .mobile-connection-badge.is-pending { color: var(--accent); }
 .mobile-card-description { margin: 13px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.55; }
+.mobile-update-card { border-color: rgba(255,157,36,.28); background: linear-gradient(145deg, rgba(49,38,25,.94), rgba(28,27,23,.92)); }
+.mobile-update-card .mobile-primary-button { margin-top: 14px; }
+.mobile-primary-button:disabled { cursor: wait; opacity: .72; }
+.mobile-update-error { margin: 9px 0 0; color: #ff969b; font-size: .68rem; line-height: 1.45; }
 .mobile-usage-grid { display: grid; gap: 10px; margin-top: 16px; }
 .mobile-usage-meter { padding: 11px 12px; border: 1px solid rgba(255,255,255,.075); border-radius: 12px; background: rgba(0,0,0,.15); }
 .mobile-usage-label { display: flex; justify-content: space-between; gap: 10px; color: var(--quiet); font-size: .64rem; font-weight: 750; }

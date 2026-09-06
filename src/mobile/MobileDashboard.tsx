@@ -9,6 +9,27 @@ export type MobileSettingsScreen =
   | "battery"
   | "app";
 
+export interface MobileUpdateInfo {
+  available: true;
+  tag: string;
+  version: string;
+  currentVersion: string;
+  name: string;
+  notes: string;
+  publishedAt: string;
+  assetName: string;
+  size: number;
+}
+
+export type MobileUpdateState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "installing"
+  | "permission_required"
+  | "installer_opened"
+  | "error";
+
 interface MobileDashboardProps {
   settings: AppSettings | null;
   stats: AppStats;
@@ -23,6 +44,10 @@ interface MobileDashboardProps {
   onHistoryClick: (text: string, index: number) => Promise<void>;
   onOpenAndroidSettings: (screen: MobileSettingsScreen) => Promise<void>;
   onReloadUsage: () => void;
+  mobileUpdate: MobileUpdateInfo | null;
+  mobileUpdateState: MobileUpdateState;
+  mobileUpdateError: string;
+  onInstallMobileUpdate: () => Promise<void>;
 }
 
 type IconName =
@@ -217,6 +242,10 @@ export default function MobileDashboard({
   onHistoryClick,
   onOpenAndroidSettings,
   onReloadUsage,
+  mobileUpdate,
+  mobileUpdateState,
+  mobileUpdateError,
+  onInstallMobileUpdate,
 }: MobileDashboardProps) {
   const [destination, setDestination] = useState<MobileDestination>("overview");
   const [historyQuery, setHistoryQuery] = useState("");
@@ -264,6 +293,41 @@ export default function MobileDashboard({
           {status.label}
         </span>
       </div>
+
+      {mobileUpdate && (
+        <section className="mobile-card mobile-update-card" aria-labelledby="mobile-update-title">
+          <div className="mobile-card-header">
+            <div className="mobile-icon-tile"><MobileIcon name="arrow" size={21} /></div>
+            <div>
+              <span className="mobile-eyebrow">Aggiornamento mobile</span>
+              <h2 id="mobile-update-title">Traflix Voice {mobileUpdate.version}</h2>
+            </div>
+          </div>
+          <p className="mobile-card-description">
+            {mobileUpdate.notes || "È disponibile una nuova versione dell’app Android."}
+          </p>
+          <button
+            type="button"
+            className="mobile-primary-button"
+            disabled={mobileUpdateState === "installing"}
+            onClick={() => void onInstallMobileUpdate()}
+          >
+            {mobileUpdateState === "installing"
+              ? "Download aggiornamento…"
+              : mobileUpdateState === "permission_required"
+                ? "Riprova installazione"
+                : "Installa aggiornamento"}
+            <MobileIcon name="arrow" size={18} />
+          </button>
+          {mobileUpdateState === "permission_required" && (
+            <p className="mobile-helper-text">Abilita l’installazione da questa app nelle impostazioni Android, poi riprova.</p>
+          )}
+          {mobileUpdateState === "installer_opened" && (
+            <p className="mobile-helper-text">Il programma di installazione Android è stato aperto.</p>
+          )}
+          {mobileUpdateError && <p className="mobile-update-error">{mobileUpdateError}</p>}
+        </section>
+      )}
 
       <section className="mobile-card mobile-word-card" aria-label="Parole trascritte">
         <div className="mobile-card-kicker">Parole trascritte</div>

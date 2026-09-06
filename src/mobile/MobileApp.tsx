@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import MobileDashboard, {
+  type MobileUpdateInfo,
+  type MobileUpdateState,
   type MobileSettingsScreen,
 } from "./MobileDashboard";
 import "./mobile.css";
@@ -28,6 +30,9 @@ export default function MobileApp() {
 
   const [appVersion, setAppVersion] = useState("");
   const [holdToSpeak, setHoldToSpeak] = useState(false);
+  const [mobileUpdate, setMobileUpdate] = useState<MobileUpdateInfo | null>(null);
+  const [mobileUpdateState, setMobileUpdateState] = useState<MobileUpdateState>("idle");
+  const [mobileUpdateError, setMobileUpdateError] = useState("");
 
   const invoke = useCallback(
     (command: string, args?: Record<string, unknown>) =>
@@ -59,7 +64,11 @@ export default function MobileApp() {
 
     if (loaded.provider !== "cloud") {
       const normalized = { ...loaded, provider: "cloud" as const };
-      await invoke("save_settings", { settings: normalized });
+      try {
+        await invoke("save_settings", { settings: normalized });
+      } catch (error) {
+        console.error("[android-settings] provider normalization error:", error);
+      }
       setSettings(normalized);
       return normalized;
     }
@@ -76,32 +85,6 @@ export default function MobileApp() {
     await runStatsMutation(() => clearStoredHistory());
     await loadStats();
   }, [clearStoredHistory, loadStats, runStatsMutation]);
-
-  useEffect(() => {
-    if (IS_DEV) document.title = "Traflix Voice [DEV]";
-
-    let cancelled = false;
-    const init = async () => {
-      await loadSettings();
-      loadStats();
-      reloadGroqUsage();
-
-      if (window.__TAURI__?.app?.getVersion) {
-        try {
-          setAppVersion(await window.__TAURI__.app.getVersion());
-        } catch {
-          // The dashboard can operate without a version string in dev shells.
-        }
-      }
-
-      if (!cancelled) await loadHistory();
-    };
-
-    void init();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadHistory, loadSettings, loadStats, reloadGroqUsage]);
 
   const handleSettingChange = useCallback(
     async (key: string, value: string | boolean) => {
@@ -139,6 +122,91 @@ export default function MobileApp() {
     },
     [invoke],
   );
+
+  const checkMobileUpdate = useCallback(async () => {
+    if (!window.__TAURI__?.core?.invoke) return;
+
+    setMobileUpdateState("checking");
+    setMobileUpdateError("");
+    try {
+      const result = (await invoke("plugin:voice-runtime|checkMobileUpdate")) as Partial<MobileUpdateInfo> | null;
+      if (
+        result?.available === true &&
+        typeof result.tag === "string" &&
+        typeof result.version === "string" &&
+        typeof result.currentVersion === "string" &&
+        typeof result.name === "string" &&
+        typeof result.notes === "string" &&
+        typeof result.publishedAt === "string" &&
+        typeof result.assetName === "string" &&
+        typeof result.size === "number"
+      ) {
+        setMobileUpdate(result as MobileUpdateInfo);
+        setMobileUpdateState("available");
+      } else {
+        setMobileUpdate(null);
+        setMobileUpdateState("idle");
+      }
+    } catch (error) {
+      console.warn("[android-update] check failed:", error);
+      setMobileUpdateState("idle");
+    }
+  }, [invoke]);
+
+  const installMobileUpdate = useCallback(async () => {
+    if (!mobileUpdate || !window.__TAURI__?.core?.invoke) return;
+
+    setMobileUpdateState("installing");
+    setMobileUpdateError("");
+    try {
+      const result = (await invoke("plugin:voice-runtime|installMobileUpdate", {
+        tag: mobileUpdate.tag,
+      })) as { status?: string } | null;
+      if (result?.status === "permission_required") {
+        setMobileUpdateState("permission_required");
+        return;
+      }
+      setMobileUpdateState("installer_opened");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setMobileUpdateError(message || "Aggiornamento non riuscito");
+      setMobileUpdateState("error");
+    }
+  }, [invoke, mobileUpdate]);
+
+  useEffect(() => {
+    if (IS_DEV) document.title = "Traflix Voice [DEV]";
+
+    let cancelled = false;
+    const init = async () => {
+      try {
+        await loadSettings();
+        loadStats();
+        reloadGroqUsage();
+
+        if (window.__TAURI__?.app?.getVersion) {
+          try {
+            setAppVersion(await window.__TAURI__.app.getVersion());
+          } catch {
+            // The dashboard can operate without a version string in dev shells.
+          }
+        }
+
+        if (!cancelled) await loadHistory();
+      } catch (error) {
+        console.error("[android] startup data load failed:", error);
+      }
+    };
+
+    void init();
+    const updateTimer = window.setTimeout(() => {
+      if (!cancelled) void checkMobileUpdate();
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(updateTimer);
+    };
+  }, [checkMobileUpdate, loadHistory, loadSettings, loadStats, reloadGroqUsage]);
 
   const handleMobileHoldToSpeakChange = useCallback(
     async (value: boolean) => {
@@ -178,6 +246,10 @@ export default function MobileApp() {
       onHistoryClick={handleHistoryClick}
       onOpenAndroidSettings={openAndroidSettings}
       onReloadUsage={reloadGroqUsage}
+      mobileUpdate={mobileUpdate}
+      mobileUpdateState={mobileUpdateState}
+      mobileUpdateError={mobileUpdateError}
+      onInstallMobileUpdate={installMobileUpdate}
     />
   );
 }
