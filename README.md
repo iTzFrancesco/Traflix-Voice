@@ -52,7 +52,7 @@ the signed `app-universal-release.apk` asset; Windows releases are ignored.
 The Android branch is currently a private preview. Read the
 [Android architecture plan](docs/android-architecture-plan.md) and the
 [merge-readiness checklist](docs/android-merge-readiness.md) before merging it
-into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.3)
+into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.4)
 contains the installable signed APK. Never distribute an `*-unsigned.apk`;
 Android requires a signed APK for direct installation.
 
@@ -118,7 +118,7 @@ branch. Build and signing instructions are in
 [Android merge readiness](docs/android-merge-readiness.md). A release APK must
 be signed; files ending in `-unsigned.apk` are build intermediates and are not
 valid direct-install packages. The current preview can be downloaded from the
-[Android v0.1.3 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.3).
+[Android v0.1.4 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.4).
 
 The mobile updater checks for a newer Android tag in the background after the
 Hub opens. It downloads only the expected APK asset and opens Android’s package

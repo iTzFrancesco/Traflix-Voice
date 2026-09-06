@@ -17,7 +17,9 @@ The original install failure had a concrete cause: the first Android build
 produced `app-universal-release-unsigned.apk`. It has no APK signature and
 Android rejects it as an invalid package. Do not distribute that artifact.
 Every installable preview must pass `apksigner verify` and use a preview or
-release keystore that is kept outside the repository.
+release keystore that is kept outside the repository. A debug-keystore APK is
+limited to private smoke testing and is not an updater-compatible release for
+installations signed with another certificate.
 
 The subsequent Android startup crash had a separate configuration cause. The
 desktop configuration contained a hidden transparent `overlay` window, and
@@ -87,7 +89,7 @@ against both desktop and Android builds.
   registrations excluded from the Android builder.
 - The Android release build passes Kotlin compilation, R8, and lint with the
   mobile updater bridge retained in the R8 seeds. It reports versionName
-  `0.1.3` and versionCode `1006001`.
+  `0.1.4` and versionCode `1006002`.
 - The mobile updater accepts only non-draft `android-vX.Y.Z` releases with the
   exact `app-universal-release.apk` asset. It downloads into the app cache and
   delegates installation to Android's package installer after the user grants
@@ -95,22 +97,22 @@ against both desktop and Android builds.
 
 ## Installable preview artifact
 
-The corrected preview is published as
-[`android-v0.1.3`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.3).
+The corrected private test preview is published as
+[`android-v0.1.4`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.4).
 Download `app-universal-release.apk` from that release. Its SHA-256 is:
 
 ```text
-7062cea6b6a488bb91560655749f8fd8743ff32822c2a758b58cc3a653146c66
+bd512bc4c63d37efc1d94c552eec74ac5a823afd98715e811c24d47f11051561
 ```
 
-The APK is versionName `0.1.3`, versionCode `1006001`, and contains
-`arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64`. It is signed with the same
-private-preview certificate as `android-v0.1.2`, so an in-place update is
-possible for that preview installation.
+The APK is package `it.traflix.voice`, versionName `0.1.4`, and versionCode
+`1006002`. It is signed with the local Android debug keystore for private
+download and emulator testing, not with the private-preview or production
+certificate. Uninstall an existing preview signed with another key before
+installing it.
 
-This is a private-preview APK signed with a preview keystore. It is suitable
-for testing installation, not for production distribution. If another Traflix
-preview is already installed with a different signing key, uninstall it first.
+This is a private test APK. It is suitable for validating the startup fix, not
+for production distribution or guaranteed in-place updates.
 
 There is no physical Android device connected to this workspace, so keyboard
 activation, microphone capture, `InputConnection` insertion, and OEM
