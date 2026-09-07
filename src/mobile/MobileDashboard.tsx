@@ -309,6 +309,7 @@ export default function MobileDashboard({
           <p className="mobile-card-description">
             {mobileUpdate.notes || "È disponibile una nuova versione dell’app Android."}
           </p>
+          <p className="mobile-helper-text">Versione installata: v{mobileUpdate.currentVersion}</p>
           <button
             type="button"
             className="mobile-primary-button"

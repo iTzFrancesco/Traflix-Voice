@@ -3,6 +3,7 @@ package it.traflix.voice
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.ActivityManager
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -213,6 +214,13 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     Log.i(TAG, "recording finished durationMs=$durationMs")
     playStopSoundIfNeeded()
     stopRecordingForeground()
+    if (!isTraflixTaskOpen()) {
+      Log.i(TAG, "Traflix task closed before transcription; discarding recording")
+      file.delete()
+      cancelRecording()
+      hideOverlay()
+      return
+    }
     setOverlayState(MicIndicatorState.PROCESSING, "Trascrizione Groq Cloud")
     cloudTranscriber.transcribe(
       file,
@@ -275,6 +283,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     mainHandler.postDelayed(::refreshOverlay, OVERLAY_REFRESH_DELAY_MS)
   }
 
+  @Suppress("DEPRECATION")
   private fun refreshOverlay() {
     if (!::windowManager.isInitialized || !::settingsStore.isInitialized) {
       hideOverlay()
@@ -290,8 +299,9 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       return
     }
 
-    if (recordingEditorKey == null && isTraflixActivityForeground()) {
+    if (!shouldShowOverlay()) {
       hideOverlay()
+      scheduleOverlayRefresh()
       return
     }
 
@@ -306,7 +316,8 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       height,
       WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
       android.graphics.PixelFormat.TRANSLUCENT,
     ).also {
       it.gravity = Gravity.TOP or Gravity.START
@@ -326,6 +337,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       else windowManager.updateViewLayout(view, params)
     } catch (_: Exception) {
       hideOverlay()
+      scheduleOverlayRefresh()
       return
     }
     mainHandler.removeCallbacks(::refreshOverlay)
@@ -353,6 +365,15 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused }
       .mapNotNull { it.root?.packageName?.toString() }
       .any { it == packageName }
+  }.getOrDefault(false)
+
+  private fun shouldShowOverlay(): Boolean {
+    if (isDeviceLocked()) return true
+    return !isTraflixActivityForeground()
+  }
+
+  private fun isDeviceLocked(): Boolean = runCatching {
+    getSystemService(KeyguardManager::class.java).isKeyguardLocked
   }.getOrDefault(false)
 
   private fun findFocusedInputTarget(): AccessibilityNodeInfo? = runCatching {
@@ -594,6 +615,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
   private fun cancelRecording() {
     if (::recorder.isInitialized) recorder.cancel()
+    if (::cloudTranscriber.isInitialized) cloudTranscriber.cancel()
     stopRecordingForeground()
     recordingEditorKey = null
     recordingEditorPackage = null

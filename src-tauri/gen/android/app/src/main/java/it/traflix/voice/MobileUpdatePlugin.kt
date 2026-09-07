@@ -43,12 +43,13 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
   fun checkMobileUpdate(invoke: Invoke) {
     executor.execute {
       try {
+        val installedVersion = currentVersion()
         val update = findLatestUpdate()
         resolve(
           invoke,
-          update?.toMap(currentVersion()) ?: mapOf(
+          update?.toMap(installedVersion) ?: mapOf(
             "available" to false,
-            "currentVersion" to BuildConfig.VERSION_NAME,
+            "currentVersion" to installedVersion.toString(),
           ),
         )
       } catch (error: Exception) {
@@ -142,7 +143,10 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
       connectTimeout = NETWORK_TIMEOUT_MS
       readTimeout = NETWORK_TIMEOUT_MS
       instanceFollowRedirects = true
+      useCaches = false
       setRequestProperty("Accept", "application/vnd.github+json")
+      setRequestProperty("Cache-Control", "no-cache")
+      setRequestProperty("Pragma", "no-cache")
       setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
       setRequestProperty("User-Agent", "Traflix-Voice-Android")
     }
@@ -200,6 +204,7 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
       connectTimeout = NETWORK_TIMEOUT_MS
       readTimeout = DOWNLOAD_TIMEOUT_MS
       instanceFollowRedirects = true
+      useCaches = false
       setRequestProperty("Accept", "application/octet-stream")
       setRequestProperty("User-Agent", "Traflix-Voice-Android")
     }

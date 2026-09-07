@@ -83,20 +83,18 @@ export function useGroqUsage() {
   const [groqUsage, setGroqUsage] = useState<GroqUsage | null>(null);
   const usageRef = useRef<GroqUsage | null>(null);
 
-  const reloadGroqUsage = useCallback(() => {
+  const reloadGroqUsage = useCallback(async (): Promise<void> => {
     if (IS_ANDROID_RUNTIME && window.__TAURI__?.core?.invoke) {
-      void window.__TAURI__.core
-        .invoke("get_groq_usage")
-        .then((value) => {
-          const usage = normalizeExternalUsage(value);
-          usageRef.current = usage;
-          setGroqUsage(usage);
-        })
-        .catch(() => {
-          const usage = readUsage();
-          usageRef.current = usage;
-          setGroqUsage(usage);
-        });
+      try {
+        const value = await window.__TAURI__.core.invoke("get_groq_usage");
+        const usage = normalizeExternalUsage(value);
+        usageRef.current = usage;
+        setGroqUsage(usage);
+      } catch {
+        const usage = readUsage();
+        usageRef.current = usage;
+        setGroqUsage(usage);
+      }
       return;
     }
     const usage = readUsage();

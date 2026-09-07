@@ -49,12 +49,15 @@ a small overview/settings/history Hub. The Hub checks GitHub for newer Android
 releases after startup and only considers the `android-vX.Y.Z` tag family and
 the signed `app-universal-release.apk` asset; Windows releases are ignored. A
 newer mobile release is downloaded, verified, and sent to the Android installer
-automatically.
+automatically. While the Hub task remains open, the compact control stays
+available over other apps; it is also allowed to remain visible on the lock
+screen. Closing the Hub task cancels active capture, pending transcription, and
+the recording notification.
 
 The Android port is currently a private preview. Read the
 [Android architecture plan](docs/android-architecture-plan.md) and the
 [merge-readiness checklist](docs/android-merge-readiness.md) for the supported
-mobile boundaries. The current [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.12)
+mobile boundaries. The current [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.13)
 contains the installable signed APK. Never distribute an `*-unsigned.apk`;
 Android requires a signed APK for direct installation.
 
@@ -82,7 +85,7 @@ Android requires a signed APK for direct installation.
 
 ### Android
 
-1. Install a signed Android preview from the secondary branch or its release.
+1. Install a signed Android preview from the `main` branch or its release.
 2. Open the Hub, configure Groq Cloud once, grant microphone access, and
    enable/select **Traflix Voice Keyboard** in Android settings.
 3. In any supported text field, choose Hold to Speak or Toggle in the Hub.
@@ -120,7 +123,7 @@ signing instructions are in
 [Android merge readiness](docs/android-merge-readiness.md). A release APK must
 be signed; files ending in `-unsigned.apk` are build intermediates and are not
 valid direct-install packages. The current preview can be downloaded from the
-[Android v0.1.12 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.12).
+[Android v0.1.13 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.13).
 
 The mobile updater checks for a newer Android tag after the Hub opens and on
 return from the installer permission screen. It downloads only the expected APK

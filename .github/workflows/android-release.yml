@@ -92,6 +92,11 @@ jobs:
           apk='src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk'
           test -f "$apk"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
+          expected="${GITHUB_REF_NAME#android-v}"
+          actual="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n 1)"
+          test -n "$actual"
+          test "$actual" = "$expected"
+          echo "APK version matches release tag: $actual"
           sha256sum "$apk"
 
       - uses: softprops/action-gh-release@v2

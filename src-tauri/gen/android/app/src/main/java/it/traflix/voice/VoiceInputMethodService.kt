@@ -46,6 +46,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
 
   override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
     super.onStartInput(attribute, restarting)
+    cloudTranscriber.cancel()
     if (recordingGeneration != null) {
       recorder.cancel()
       stopRecordingForeground()
@@ -64,6 +65,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   }
 
   override fun onFinishInput() {
+    cloudTranscriber.cancel()
     recorder.cancel()
     stopRecordingForeground()
     recordingGeneration = null
@@ -154,6 +156,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   }
 
   override fun onRecordingError(message: String) {
+    cloudTranscriber.cancel()
     stopRecordingForeground()
     recordingGeneration = null
     keyboardView?.setState(MicIndicatorState.ERROR, message)
@@ -169,6 +172,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
+    cloudTranscriber.cancel()
     recorder.cancel()
     stopRecordingForeground()
     recordingGeneration = null
