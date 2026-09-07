@@ -3,6 +3,6 @@
     <string name="main_activity_title">"Traflix Voice"</string>
     <string name="ime_name">"Traflix Voice Keyboard"</string>
     <string name="ime_subtype_italian">"Italiano"</string>
-    <string name="accessibility_service_name">"Traflix Voice su Gboard"</string>
-    <string name="accessibility_service_description">"Mostra il controllo Traflix Voice sopra Gboard e inserisce la trascrizione nel campo di testo attivo."</string>
+    <string name="accessibility_service_name">"Widget Traflix Voice"</string>
+    <string name="accessibility_service_description">"Mostra il widget Traflix Voice sopra le app quando Traflix Voice è aperto in background e inserisce la trascrizione nel campo attivo."</string>
 </resources>
