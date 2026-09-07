@@ -1,0 +1,90 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - 'android-v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    name: Build and release Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platforms;android-36' \
+            'build-tools;35.0.0' \
+            'ndk;27.1.12297006'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
+
+      - run: npm ci
+
+      - name: Restore Android signing key
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.TRAFLIX_ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_B64"
+          printf '%s' "$ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/traflix-android.keystore"
+          chmod 600 "$RUNNER_TEMP/traflix-android.keystore"
+
+      - name: Set release metadata
+        id: release
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#android-}" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed universal APK
+        shell: bash
+        env:
+          TRAFLIX_ANDROID_KEYSTORE: ${{ runner.temp }}/traflix-android.keystore
+          TRAFLIX_ANDROID_STORE_PASSWORD: ${{ secrets.TRAFLIX_ANDROID_STORE_PASSWORD }}
+          TRAFLIX_ANDROID_KEY_ALIAS: ${{ secrets.TRAFLIX_ANDROID_KEY_ALIAS }}
+          TRAFLIX_ANDROID_KEY_PASSWORD: ${{ secrets.TRAFLIX_ANDROID_KEY_PASSWORD }}
+        run: npm exec tauri -- android build --apk --release --ci
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          apk='src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk'
+          test -f "$apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
+          sha256sum "$apk"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Traflix Voice Android ${{ steps.release.outputs.version }}
+          body: Android private preview ${{ steps.release.outputs.version }}. Signed universal APK with desktop-equivalent recording feedback and a clearer transcription state.
+          prerelease: true
+          files: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+          fail_on_unmatched_files: true

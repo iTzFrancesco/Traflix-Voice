@@ -41,8 +41,8 @@ Windows application.
 
 ### Android preview
 
-The Android port is developed on the
-[`feat/android-mobile-ime`](https://github.com/iTzFrancesco/Traflix-Voice/tree/feat/android-mobile-ime)
+The Android port is maintained on the
+[`main`](https://github.com/iTzFrancesco/Traflix-Voice/tree/main)
 branch. It provides a native Traflix Voice keyboard with hold-to-speak or
 toggle recording, Groq Cloud transcription, encrypted API-key persistence, and
 a small overview/settings/history Hub. The Hub checks GitHub for newer Android
@@ -51,10 +51,10 @@ the signed `app-universal-release.apk` asset; Windows releases are ignored. A
 newer mobile release is downloaded, verified, and sent to the Android installer
 automatically.
 
-The Android branch is currently a private preview. Read the
+The Android port is currently a private preview. Read the
 [Android architecture plan](docs/android-architecture-plan.md) and the
-[merge-readiness checklist](docs/android-merge-readiness.md) before merging it
-into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.5)
+[merge-readiness checklist](docs/android-merge-readiness.md) for the supported
+mobile boundaries. The current [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.8)
 contains the installable signed APK. Never distribute an `*-unsigned.apk`;
 Android requires a signed APK for direct installation.
 
@@ -114,13 +114,13 @@ reasonable starting point for general dictation.
 
 ### Android preview
 
-The Android implementation is maintained on the
-[`feat/android-mobile-ime`](https://github.com/iTzFrancesco/Traflix-Voice/tree/feat/android-mobile-ime)
-branch. Build and signing instructions are in
+The Android implementation is maintained on
+[`main`](https://github.com/iTzFrancesco/Traflix-Voice/tree/main). Build and
+signing instructions are in
 [Android merge readiness](docs/android-merge-readiness.md). A release APK must
 be signed; files ending in `-unsigned.apk` are build intermediates and are not
 valid direct-install packages. The current preview can be downloaded from the
-[Android v0.1.5 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.5).
+[Android v0.1.8 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.8).
 
 The mobile updater checks for a newer Android tag after the Hub opens and on
 return from the installer permission screen. It downloads only the expected APK
