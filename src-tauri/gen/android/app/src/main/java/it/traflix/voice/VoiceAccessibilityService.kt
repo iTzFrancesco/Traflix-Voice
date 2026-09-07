@@ -17,16 +17,17 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.SoundPool
 import android.net.Uri
+import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.view.Choreographer
 import android.view.Gravity
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import android.view.accessibility.AccessibilityWindowInfo
 import java.io.File
 
 /**
@@ -38,6 +39,7 @@ import java.io.File
 class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Listener,
   VoiceAudioRecorder.Listener {
   private val mainHandler = Handler(Looper.getMainLooper())
+  private val overlayRefreshRunnable = Runnable { refreshOverlay() }
   private lateinit var settingsStore: VoiceSettingsStore
   private lateinit var recorder: VoiceAudioRecorder
   private lateinit var cloudTranscriber: GroqCloudTranscriber
@@ -47,8 +49,21 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
   private var overlay: VoiceOverlayView? = null
   private var overlayParams: WindowManager.LayoutParams? = null
+  private var overlayMoveFramePosted = false
+  private var pendingOverlayX: Int? = null
+  private var pendingOverlayY: Int? = null
+  private val overlayMoveFrameCallback = Choreographer.FrameCallback {
+    overlayMoveFramePosted = false
+    applyPendingOverlayMove()
+  }
   private var focusedEditor: AccessibilityNodeInfo? = null
   private var focusedPackage: String? = null
+  private var focusedEditorViewId: String? = null
+  private var focusedEditorClassName: String? = null
+  private var focusedEditorBounds: Rect? = null
+  private var focusedEditorSensitive = false
+  private var lastApplicationPackage: String? = null
+  private var recordingEditor: AccessibilityNodeInfo? = null
   private var recordingEditorKey: String? = null
   private var recordingEditorPackage: String? = null
   private var recordingEditorViewId: String? = null
@@ -100,12 +115,20 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     val eventPackage = event.packageName?.toString()
     val source = event.source
 
+    if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+      eventPackage != null &&
+      eventPackage != GBOARD_PACKAGE
+    ) {
+      lastApplicationPackage = eventPackage
+    }
+
     if (source != null &&
       eventPackage != null &&
       eventPackage != packageName &&
       eventPackage != GBOARD_PACKAGE &&
       isPotentialInputTarget(source)
     ) {
+      lastApplicationPackage = eventPackage
       replaceFocusedEditor(source, eventPackage)
     } else if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
@@ -151,36 +174,38 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   override fun onRecordingStartRequested() {
     Log.d(TAG, "recording start requested")
     if (!::settingsStore.isInitialized) return
-    val editor = findFocusedInputTarget() ?: run {
+    if (!hasFocusedInputTarget() && !refreshFocusedInputTargetFromActiveWindow()) {
       setOverlayState(MicIndicatorState.ERROR, "Apri un campo di testo o un terminale")
       return
     }
-    if (isSensitiveField(editor)) {
-      editor.recycle()
+    if (focusedEditorSensitive) {
+      clearFocusedEditor()
       setOverlayState(MicIndicatorState.ERROR, "Campo protetto")
       return
     }
     if (!hasMicrophonePermission()) {
-      editor.recycle()
+      clearFocusedEditor()
       setOverlayState(MicIndicatorState.ERROR, "Abilita il microfono nel Mobile Hub")
       openAppSettings()
       return
     }
 
-    recordingEditorKey = editorKey(editor)
-    recordingEditorPackage = editor.packageName?.toString() ?: focusedPackage
-    recordingEditorViewId = editor.viewIdResourceName
-    recordingEditorClassName = editor.className?.toString()
-    recordingEditorBounds = Rect().also { editor.getBoundsInScreen(it) }
+    recordingEditorKey = listOf(focusedPackage, focusedEditorViewId, focusedEditorClassName)
+      .joinToString("|")
+    recordingEditorPackage = focusedPackage
+    recordingEditorViewId = focusedEditorViewId
+    recordingEditorClassName = focusedEditorClassName
+    recordingEditorBounds = focusedEditorBounds?.let(::Rect)
+    clearRecordingEditor()
+    recordingEditor = focusedEditor?.let { AccessibilityNodeInfo.obtain(it) }
     Log.i(
       TAG,
       "recording target package=${recordingEditorPackage} " +
         "class=${recordingEditorClassName} viewId=${recordingEditorViewId} " +
-        "editable=${editor.isEditable} " +
-        "actions=${editor.actionList.joinToString(",") { it.id.toString() }}",
+        "bounds=${recordingEditorBounds}",
     )
-    editor.recycle()
     if (!startRecordingForeground()) {
+      clearRecordingEditor()
       recordingEditorKey = null
       setOverlayState(MicIndicatorState.ERROR, "Impossibile avviare il microfono")
       return
@@ -189,6 +214,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     setOverlayState(MicIndicatorState.STARTING)
     if (!recorder.start()) {
       stopRecordingForeground()
+      clearRecordingEditor()
       recordingEditorKey = null
     } else {
       stopSoundPlayed = false
@@ -204,6 +230,32 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     playStopSoundIfNeeded()
     setOverlayState(MicIndicatorState.PROCESSING)
     recorder.stop()
+  }
+
+  override fun onOverlayMoved(deltaX: Int, deltaY: Int) {
+    val params = overlayParams ?: return
+    val displayBounds = currentDisplayBounds()
+    val width = params.width.coerceAtLeast(1)
+    val height = params.height.coerceAtLeast(1)
+    val minX = displayBounds.left
+    val maxX = (displayBounds.right - width).coerceAtLeast(minX)
+    val minY = displayBounds.top
+    val maxY = (displayBounds.bottom - height).coerceAtLeast(minY)
+    val baseX = pendingOverlayX ?: params.x
+    val baseY = pendingOverlayY ?: params.y
+    pendingOverlayX = (baseX + deltaX).coerceIn(minX, maxX)
+    pendingOverlayY = (baseY + deltaY).coerceIn(minY, maxY)
+    if (!overlayMoveFramePosted) {
+      overlayMoveFramePosted = true
+      Choreographer.getInstance().postFrameCallback(overlayMoveFrameCallback)
+    }
+  }
+
+  override fun onOverlayDragFinished() {
+    flushPendingOverlayMove()
+    val params = overlayParams ?: return
+    settingsStore.setOverlayPosition(VoiceOverlayPosition(params.x, params.y))
+    Log.d(TAG, "voice overlay position saved x=${params.x} y=${params.y}")
   }
 
   override fun onMeter(value: Float) {
@@ -242,6 +294,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
             }
             setOverlayState(MicIndicatorState.SUCCESS, detail)
           } else {
+            clearRecordingEditor()
             recordingEditorKey = null
             setOverlayState(MicIndicatorState.ERROR, "Impossibile inserire il testo")
           }
@@ -250,6 +303,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
         override fun onFailure(message: String) {
           Log.e(TAG, "Groq transcription failed: $message")
           file.delete()
+          clearRecordingEditor()
           recordingEditorKey = null
           setOverlayState(MicIndicatorState.ERROR, message)
         }
@@ -261,6 +315,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     Log.e(TAG, "recording error: $message")
     playStopSoundIfNeeded()
     stopRecordingForeground()
+    clearRecordingEditor()
     recordingEditorKey = null
     setOverlayState(MicIndicatorState.ERROR, message)
   }
@@ -269,17 +324,25 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     clearFocusedEditor()
     focusedEditor = AccessibilityNodeInfo.obtain(source)
     focusedPackage = packageName
+    focusedEditorViewId = source.viewIdResourceName
+    focusedEditorClassName = source.className?.toString()
+    focusedEditorBounds = Rect().also { source.getBoundsInScreen(it) }
+    focusedEditorSensitive = isSensitiveField(source)
   }
 
   private fun clearFocusedEditor() {
     focusedEditor?.recycle()
     focusedEditor = null
     focusedPackage = null
+    focusedEditorViewId = null
+    focusedEditorClassName = null
+    focusedEditorBounds = null
+    focusedEditorSensitive = false
   }
 
   private fun scheduleOverlayRefresh() {
-    mainHandler.removeCallbacks(::refreshOverlay)
-    mainHandler.postDelayed(::refreshOverlay, OVERLAY_REFRESH_DELAY_MS)
+    mainHandler.removeCallbacks(overlayRefreshRunnable)
+    mainHandler.postDelayed(overlayRefreshRunnable, OVERLAY_REFRESH_DELAY_MS)
   }
 
   @Suppress("DEPRECATION")
@@ -310,6 +373,8 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     }
     val width = dp(40)
     val height = dp(40)
+    val displayBounds = currentDisplayBounds()
+    val savedPosition = settingsStore.overlayPosition()
     val params = overlayParams ?: WindowManager.LayoutParams(
       width,
       height,
@@ -320,35 +385,94 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       android.graphics.PixelFormat.TRANSLUCENT,
     ).also {
       it.gravity = Gravity.TOP or Gravity.START
+      it.x = savedPosition?.x ?: defaultOverlayX(displayBounds, width)
+      it.y = savedPosition?.y ?: defaultOverlayY(displayBounds, height)
       overlayParams = it
     }
-
-    val displayBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      windowManager.maximumWindowMetrics.bounds
-    } else {
-      Rect(0, 0, resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+    val minX = displayBounds.left
+    val maxX = (displayBounds.right - width).coerceAtLeast(minX)
+    val minY = displayBounds.top
+    val maxY = (displayBounds.bottom - height).coerceAtLeast(minY)
+    val clampedX = params.x.coerceIn(minX, maxX)
+    val clampedY = params.y.coerceIn(minY, maxY)
+    val boundsChanged = params.x != clampedX || params.y != clampedY
+    if (boundsChanged) {
+      params.x = clampedX
+      params.y = clampedY
+      if (savedPosition != null) {
+        settingsStore.setOverlayPosition(VoiceOverlayPosition(clampedX, clampedY))
+      }
     }
-    params.x = (displayBounds.right - width - dp(12)).coerceAtLeast(displayBounds.left)
-    params.y = (displayBounds.top + (displayBounds.height() - height) / 2)
-      .coerceAtLeast(displayBounds.top + dp(4))
     try {
       if (view.parent == null) windowManager.addView(view, params)
-      else windowManager.updateViewLayout(view, params)
+      else if (boundsChanged) {
+        windowManager.updateViewLayout(view, params)
+      }
     } catch (_: Exception) {
       hideOverlay()
       scheduleOverlayRefresh()
       return
     }
-    mainHandler.removeCallbacks(::refreshOverlay)
-    mainHandler.postDelayed(::refreshOverlay, OVERLAY_REFRESH_INTERVAL_MS)
+    mainHandler.removeCallbacks(overlayRefreshRunnable)
+    mainHandler.postDelayed(overlayRefreshRunnable, OVERLAY_REFRESH_INTERVAL_MS)
   }
 
   private fun hideOverlay() {
+    if (overlayMoveFramePosted) {
+      Choreographer.getInstance().removeFrameCallback(overlayMoveFrameCallback)
+    }
+    overlayMoveFramePosted = false
+    pendingOverlayX = null
+    pendingOverlayY = null
     val view = overlay ?: return
     runCatching { windowManager.removeView(view) }
     overlay = null
     overlayParams = null
   }
+
+  private fun flushPendingOverlayMove() {
+    if (overlayMoveFramePosted) {
+      Choreographer.getInstance().removeFrameCallback(overlayMoveFrameCallback)
+      overlayMoveFramePosted = false
+    }
+    applyPendingOverlayMove()
+  }
+
+  private fun applyPendingOverlayMove() {
+    val view = overlay ?: run {
+      pendingOverlayX = null
+      pendingOverlayY = null
+      return
+    }
+    val params = overlayParams ?: run {
+      pendingOverlayX = null
+      pendingOverlayY = null
+      return
+    }
+    val nextX = pendingOverlayX ?: return
+    val nextY = pendingOverlayY ?: return
+    pendingOverlayX = null
+    pendingOverlayY = null
+    if (params.x == nextX && params.y == nextY) return
+    params.x = nextX
+    params.y = nextY
+    runCatching { windowManager.updateViewLayout(view, params) }
+      .onFailure { Log.w(TAG, "unable to move voice overlay", it) }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun currentDisplayBounds(): Rect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    windowManager.maximumWindowMetrics.bounds
+  } else {
+    Rect(0, 0, resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+  }
+
+  private fun defaultOverlayX(displayBounds: Rect, width: Int): Int =
+    (displayBounds.right - width - dp(12)).coerceAtLeast(displayBounds.left)
+
+  private fun defaultOverlayY(displayBounds: Rect, height: Int): Int =
+    (displayBounds.top + (displayBounds.height() - height) / 2)
+      .coerceAtLeast(displayBounds.top + dp(4))
 
   private fun isTraflixTaskOpen(): Boolean = runCatching {
     getSystemService(ActivityManager::class.java).appTasks.any { task ->
@@ -360,11 +484,13 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
   private fun isTraflixActivityForeground(): Boolean = runCatching {
     val activePackage = rootInActiveWindow?.packageName?.toString()
-    activePackage == packageName || windows.asSequence()
-      .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused }
-      .mapNotNull { it.root?.packageName?.toString() }
-      .any { it == packageName }
-  }.getOrDefault(false)
+    when {
+      activePackage == packageName -> true
+      activePackage == GBOARD_PACKAGE -> lastApplicationPackage == packageName
+      activePackage.isNullOrBlank() -> lastApplicationPackage == packageName
+      else -> false
+    }
+  }.getOrDefault(lastApplicationPackage == packageName)
 
   private fun shouldShowOverlay(): Boolean {
     if (isDeviceLocked()) return true
@@ -375,21 +501,47 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     getSystemService(KeyguardManager::class.java).isKeyguardLocked
   }.getOrDefault(false)
 
-  private fun findFocusedInputTarget(): AccessibilityNodeInfo? = runCatching {
-    val current = windows.asSequence()
-      .filter { it.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-      .sortedByDescending { it.isFocused || it.isActive }
-      .mapNotNull { it.root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }
-      .firstOrNull { isPotentialInputTarget(it) }
-    if (current != null) return@runCatching current
+  private fun findFocusedInputTarget(): AccessibilityNodeInfo? {
+    val cached = focusedEditor ?: return null
+    val cachedPackage = focusedPackage ?: return null
+    return cached.takeIf { lastApplicationPackage == cachedPackage }
+  }
 
-    val cached = focusedEditor?.let { AccessibilityNodeInfo.obtain(it) }
-    if (cached != null) {
-      if (isPotentialInputTarget(cached)) return@runCatching cached
-      cached.recycle()
+  private fun hasFocusedInputTarget(): Boolean =
+    focusedEditor != null &&
+      focusedPackage != null &&
+      lastApplicationPackage == focusedPackage
+
+  /**
+   * Accessibility focus events are not delivered consistently by every
+   * editor (Keep can expose a focused EditText without sending a usable
+   * source node). Resolve the active input once, at tap time, instead of
+   * walking all windows on every accessibility event.
+   */
+  private fun refreshFocusedInputTargetFromActiveWindow(): Boolean {
+    val root = runCatching { rootInActiveWindow }.getOrNull() ?: return false
+    var candidate: AccessibilityNodeInfo? = null
+    return try {
+      val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+      candidate = focused
+      val candidatePackage = focused.packageName?.toString()
+      if (
+        !candidatePackage.isNullOrBlank() &&
+        candidatePackage != packageName &&
+        candidatePackage != GBOARD_PACKAGE &&
+        isPotentialInputTarget(focused)
+      ) {
+        lastApplicationPackage = candidatePackage
+        replaceFocusedEditor(focused, candidatePackage)
+        true
+      } else {
+        false
+      }
+    } finally {
+      candidate?.recycle()
+      root.recycle()
     }
-    null
-  }.getOrNull()
+  }
 
   private fun isPotentialInputTarget(node: AccessibilityNodeInfo): Boolean {
     val nodePackage = node.packageName?.toString()
@@ -413,7 +565,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   }
 
   private fun insertIntoFocusedEditor(text: String): TranscriptionInsertResult {
-    val editor = findFocusedInputTarget() ?: run {
+    val editor = recordingEditor ?: findFocusedInputTarget() ?: run {
       Log.w(TAG, "transcription insert skipped: no focused input target")
       return TranscriptionInsertResult.FAILED
     }
@@ -436,25 +588,39 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
           "packageMatches=$packageMatches viewIdMatches=$viewIdMatches " +
           "classAndBoundsMatch=$classAndBoundsMatch",
       )
-      editor.recycle()
+      clearFocusedEditor()
       return TranscriptionInsertResult.FAILED
     }
 
     val clipboard = getSystemService(ClipboardManager::class.java)
     val previous = clipboard.primaryClip
     clipboard.setPrimaryClip(ClipData.newPlainText("Traflix Voice", text))
+    val terminalSurface = isTerminalSurface(editor)
     val exposesPasteAction = editor.actionList.any { action ->
       action.id == AccessibilityNodeInfo.ACTION_PASTE
     }
     val pasted = editor.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-    val terminalSurface = isTerminalSurface(editor)
+    val exposesSetTextAction = editor.actionList.any { action ->
+      action.id == AccessibilityNodeInfo.ACTION_SET_TEXT
+    }
+    val setText = if (!pasted && terminalSurface && exposesSetTextAction) {
+      Bundle().apply {
+        putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+      }.let { arguments ->
+        editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+      }
+    } else {
+      false
+    }
     Log.d(
       TAG,
       "clipboard paste action result=$pasted exposesPasteAction=$exposesPasteAction " +
+        "setTextActionResult=$setText exposesSetTextAction=$exposesSetTextAction " +
         "terminalSurface=$terminalSurface",
     )
-    editor.recycle()
-    if (pasted) {
+    clearFocusedEditor()
+    clearRecordingEditor()
+    if (pasted || setText) {
       restoreClipboardLater(clipboard, previous)
       return TranscriptionInsertResult.INSERTED
     }
@@ -609,18 +775,25 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   }
 
   private fun setOverlayState(state: MicIndicatorState, detail: String? = null) {
-    mainHandler.post { overlay?.setState(state, detail) }
+    val update = Runnable { overlay?.setState(state, detail) }
+    if (Looper.myLooper() == Looper.getMainLooper()) update.run() else mainHandler.post(update)
   }
 
   private fun cancelRecording() {
     if (::recorder.isInitialized) recorder.cancel()
     if (::cloudTranscriber.isInitialized) cloudTranscriber.cancel()
     stopRecordingForeground()
+    clearRecordingEditor()
     recordingEditorKey = null
     recordingEditorPackage = null
     recordingEditorViewId = null
     recordingEditorClassName = null
     recordingEditorBounds = null
+  }
+
+  private fun clearRecordingEditor() {
+    recordingEditor?.recycle()
+    recordingEditor = null
   }
 
   @Suppress("DEPRECATION")

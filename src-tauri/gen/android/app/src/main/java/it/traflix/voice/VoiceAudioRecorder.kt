@@ -21,6 +21,7 @@ import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 class VoiceAudioRecorder(
@@ -174,6 +175,7 @@ class VoiceAudioRecorder(
     try {
       output = FileOutputStream(file)
       output.write(wavHeader(0))
+      val pcm = ByteBuffer.allocate(buffer.size * BYTES_PER_SAMPLE).order(ByteOrder.LITTLE_ENDIAN)
 
       while (recording.get()) {
         val count = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
@@ -183,20 +185,26 @@ class VoiceAudioRecorder(
         }
         if (count == 0) continue
 
-        val pcm = ByteBuffer.allocate(count * BYTES_PER_SAMPLE).order(ByteOrder.LITTLE_ENDIAN)
+        pcm.clear()
         var energy = 0.0
+        var peak = 0
         for (index in 0 until count) {
           val sample = buffer[index].toInt()
           energy += sample.toDouble() * sample.toDouble()
+          peak = maxOf(peak, abs(sample))
           pcm.putShort(buffer[index])
         }
-        output.write(pcm.array())
-        bytesWritten += count * BYTES_PER_SAMPLE
+        val pcmLength = count * BYTES_PER_SAMPLE
+        output.write(pcm.array(), 0, pcmLength)
+        bytesWritten += pcmLength
         val now = System.currentTimeMillis()
         if (now - lastMeterAt >= METER_INTERVAL_MS) {
           lastMeterAt = now
-          val level = sqrt(energy / count) / Short.MAX_VALUE
-          mainHandler.post { listener.onMeter(level.toFloat().coerceIn(0f, 1f)) }
+          val rmsLevel = sqrt(energy / count).toFloat() / Short.MAX_VALUE
+          val peakLevel = peak.toFloat() / Short.MAX_VALUE
+          val level = maxOf(rmsLevel * RMS_METER_GAIN, peakLevel * PEAK_METER_WEIGHT)
+            .coerceIn(0f, 1f)
+          mainHandler.post { listener.onMeter(level) }
         }
 
         if (now - startedAt >= MAX_DURATION_MS) {
@@ -283,6 +291,8 @@ class VoiceAudioRecorder(
     private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
     private const val FRAME_SIZE = 512
     private const val METER_INTERVAL_MS = 50L
+    private const val RMS_METER_GAIN = 1.25f
+    private const val PEAK_METER_WEIGHT = 0.32f
     private const val MAX_DURATION_MS = 5 * 60 * 1000L
   }
 

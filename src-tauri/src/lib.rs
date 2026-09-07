@@ -35,6 +35,10 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // reqwest 0.13 disables implicit rustls provider selection. Install the
+    // ring provider before any updater/client code can construct a TLS client.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let builder = tauri::Builder::default().setup(|app| {
         let app_data_dir = app
             .path()
