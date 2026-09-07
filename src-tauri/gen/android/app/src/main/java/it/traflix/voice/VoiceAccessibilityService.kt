@@ -1,0 +1,506 @@
+package it.traflix.voice
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.ActivityManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.graphics.Rect
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.util.Log
+import android.view.Gravity
+import android.view.WindowManager
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import java.io.File
+
+/**
+ * Shows the Traflix control while Gboard remains the active input method.
+ * Android does not expose an extension API for Gboard, so this service uses
+ * an accessibility overlay and pastes only the approved transcription into
+ * the currently focused editable field.
+ */
+class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Listener,
+  VoiceAudioRecorder.Listener {
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private lateinit var settingsStore: VoiceSettingsStore
+  private lateinit var recorder: VoiceAudioRecorder
+  private lateinit var cloudTranscriber: GroqCloudTranscriber
+  private lateinit var historyStore: VoiceHistoryStore
+  private lateinit var metricsStore: VoiceMetricsStore
+  private lateinit var windowManager: WindowManager
+
+  private var overlay: VoiceOverlayView? = null
+  private var overlayParams: WindowManager.LayoutParams? = null
+  private var focusedEditor: AccessibilityNodeInfo? = null
+  private var focusedPackage: String? = null
+  private var recordingEditorKey: String? = null
+  private var recordingEditorPackage: String? = null
+  private var recordingEditorViewId: String? = null
+  private var recordingEditorClassName: String? = null
+  private var recordingEditorBounds: Rect? = null
+  private var recordingForegroundActive = false
+  private var lastKeyboardBounds: Rect? = null
+  private var toneGenerator: ToneGenerator? = null
+  private var stopTonePlayed = false
+
+  override fun onServiceConnected() {
+    super.onServiceConnected()
+    Log.i(TAG, "accessibility service connected")
+    settingsStore = VoiceSettingsStore(this)
+    recorder = VoiceAudioRecorder(this, this)
+    cloudTranscriber = GroqCloudTranscriber(this)
+    historyStore = VoiceHistoryStore(this)
+    metricsStore = VoiceMetricsStore(this)
+    windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+    toneGenerator = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 75) }
+      .onFailure { Log.w(TAG, "unable to initialize feedback tones", it) }
+      .getOrNull()
+
+    serviceInfo = serviceInfo.apply {
+      eventTypes = AccessibilityEvent.TYPE_VIEW_FOCUSED or
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+        AccessibilityEvent.TYPE_WINDOWS_CHANGED or
+        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED
+      feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+      flags = flags or
+        AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+        AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+      notificationTimeout = 100
+    }
+    scheduleOverlayRefresh()
+  }
+
+  override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+    if (event == null) return
+    val eventPackage = event.packageName?.toString()
+    val source = event.source
+
+    if (source?.isEditable == true && eventPackage != packageName && eventPackage != GBOARD_PACKAGE) {
+      replaceFocusedEditor(source, eventPackage)
+    } else if (
+      event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+      eventPackage != null &&
+      eventPackage != packageName &&
+      eventPackage != GBOARD_PACKAGE &&
+      eventPackage != focusedPackage
+    ) {
+      clearFocusedEditor()
+    }
+
+    scheduleOverlayRefresh()
+  }
+
+  override fun onInterrupt() {
+    Log.w(TAG, "accessibility service interrupted recording=${recordingEditorKey != null}")
+    playStopToneIfNeeded()
+    hideOverlay()
+    cancelRecording()
+  }
+
+  override fun onDestroy() {
+    Log.w(TAG, "accessibility service destroyed recording=${recordingEditorKey != null}")
+    playStopToneIfNeeded()
+    hideOverlay()
+    cancelRecording()
+    if (::recorder.isInitialized) recorder.shutdown()
+    if (::cloudTranscriber.isInitialized) cloudTranscriber.shutdown()
+    toneGenerator?.release()
+    toneGenerator = null
+    mainHandler.removeCallbacksAndMessages(null)
+    clearFocusedEditor()
+    super.onDestroy()
+  }
+
+  override fun onRecordingStartRequested() {
+    Log.d(TAG, "recording start requested")
+    if (!::settingsStore.isInitialized) return
+    val editor = findFocusedEditable() ?: run {
+      setOverlayState(MicIndicatorState.ERROR, "Apri un campo di testo")
+      return
+    }
+    if (isSensitiveField(editor)) {
+      editor.recycle()
+      setOverlayState(MicIndicatorState.ERROR, "Campo protetto")
+      return
+    }
+    if (!hasMicrophonePermission()) {
+      editor.recycle()
+      setOverlayState(MicIndicatorState.ERROR, "Abilita il microfono nel Mobile Hub")
+      openAppSettings()
+      return
+    }
+
+    recordingEditorKey = editorKey(editor)
+    recordingEditorPackage = editor.packageName?.toString() ?: focusedPackage
+    recordingEditorViewId = editor.viewIdResourceName
+    recordingEditorClassName = editor.className?.toString()
+    recordingEditorBounds = Rect().also { editor.getBoundsInScreen(it) }
+    editor.recycle()
+    if (!startRecordingForeground()) {
+      recordingEditorKey = null
+      setOverlayState(MicIndicatorState.ERROR, "Impossibile avviare il microfono")
+      return
+    }
+
+    setOverlayState(MicIndicatorState.STARTING)
+    if (!recorder.start()) {
+      stopRecordingForeground()
+      recordingEditorKey = null
+    } else {
+      stopTonePlayed = false
+      setOverlayState(MicIndicatorState.RECORDING)
+      playTone(ToneGenerator.TONE_PROP_BEEP2)
+      Log.i(TAG, "recording started for focused editor")
+    }
+  }
+
+  override fun onRecordingStopRequested() {
+    if (recordingEditorKey == null) return
+    Log.d(TAG, "recording stop requested")
+    playStopToneIfNeeded()
+    setOverlayState(MicIndicatorState.PROCESSING)
+    recorder.stop()
+  }
+
+  override fun onMeter(value: Float) {
+    // The Gboard overlay is intentionally icon-only; the meter is kept for the standalone IME.
+  }
+
+  override fun onRecordingFinished(file: File, durationMs: Long) {
+    Log.i(TAG, "recording finished durationMs=$durationMs")
+    playStopToneIfNeeded()
+    stopRecordingForeground()
+    setOverlayState(MicIndicatorState.PROCESSING, "Trascrizione Groq Cloud")
+    cloudTranscriber.transcribe(
+      file,
+      settingsStore.transcriptionLanguage(),
+      object : GroqCloudTranscriber.Listener {
+        override fun onSuccess(text: String) {
+          Log.i(TAG, "Groq transcription succeeded textChars=${text.length}")
+          file.delete()
+          val inserted = insertIntoFocusedEditor(text)
+          Log.i(TAG, "transcription insert result=$inserted")
+          if (inserted) {
+            historyStore.append(text)
+            metricsStore.record(text, durationMs)
+            recordingEditorKey = null
+            setOverlayState(MicIndicatorState.SUCCESS, "Testo inserito")
+            mainHandler.postDelayed({ setOverlayState(MicIndicatorState.IDLE) }, 1_200L)
+          } else {
+            recordingEditorKey = null
+            setOverlayState(MicIndicatorState.ERROR, "Impossibile inserire il testo")
+          }
+        }
+
+        override fun onFailure(message: String) {
+          Log.e(TAG, "Groq transcription failed: $message")
+          file.delete()
+          recordingEditorKey = null
+          setOverlayState(MicIndicatorState.ERROR, message)
+        }
+      },
+    )
+  }
+
+  override fun onRecordingError(message: String) {
+    Log.e(TAG, "recording error: $message")
+    playStopToneIfNeeded()
+    stopRecordingForeground()
+    recordingEditorKey = null
+    setOverlayState(MicIndicatorState.ERROR, message)
+  }
+
+  private fun replaceFocusedEditor(source: AccessibilityNodeInfo, packageName: String?) {
+    clearFocusedEditor()
+    focusedEditor = AccessibilityNodeInfo.obtain(source)
+    focusedPackage = packageName
+  }
+
+  private fun clearFocusedEditor() {
+    focusedEditor?.recycle()
+    focusedEditor = null
+    focusedPackage = null
+  }
+
+  private fun scheduleOverlayRefresh() {
+    mainHandler.removeCallbacks(::refreshOverlay)
+    mainHandler.postDelayed(::refreshOverlay, OVERLAY_REFRESH_DELAY_MS)
+  }
+
+  private fun refreshOverlay() {
+    if (!::windowManager.isInitialized ||
+      (focusedEditor == null && recordingEditorKey == null) ||
+      (focusedPackage == null && recordingEditorKey == null)
+    ) {
+      hideOverlay()
+      return
+    }
+
+    if (!isTraflixTaskOpen() && recordingEditorKey == null) {
+      hideOverlay()
+      return
+    }
+
+    val gboardWindow = findGboardWindow()
+    val bounds = Rect()
+    if (gboardWindow != null) {
+      gboardWindow.getBoundsInScreen(bounds)
+      if (bounds.width() > 0 && bounds.height() > 0) {
+        lastKeyboardBounds = Rect(bounds)
+      }
+    } else {
+      lastKeyboardBounds?.let(bounds::set)
+    }
+    if (bounds.width() <= 0 || bounds.height() <= 0) {
+      if (recordingEditorKey == null) hideOverlay()
+      return
+    }
+
+    val view = overlay ?: VoiceOverlayView(this, this).also {
+      overlay = it
+      it.setRecordingMode(settingsStore.recordingMode())
+    }
+    val width = dp(40)
+    val height = dp(40)
+    val params = overlayParams ?: WindowManager.LayoutParams(
+      width,
+      height,
+      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+      android.graphics.PixelFormat.TRANSLUCENT,
+    ).also {
+      it.gravity = Gravity.TOP or Gravity.START
+      overlayParams = it
+    }
+
+    val displayBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      windowManager.maximumWindowMetrics.bounds
+    } else {
+      Rect(0, 0, resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+    }
+    params.x = (displayBounds.width() - width - dp(12)).coerceAtLeast(0)
+    params.y = ((displayBounds.height() - height) / 2).coerceAtLeast(dp(4))
+    try {
+      if (view.parent == null) windowManager.addView(view, params)
+      else windowManager.updateViewLayout(view, params)
+    } catch (_: Exception) {
+      hideOverlay()
+    }
+  }
+
+  private fun hideOverlay() {
+    val view = overlay ?: return
+    runCatching { windowManager.removeView(view) }
+    overlay = null
+    overlayParams = null
+    lastKeyboardBounds = null
+  }
+
+  private fun findGboardWindow(): AccessibilityWindowInfo? = runCatching {
+    windows.firstOrNull { window ->
+      window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
+        window.root?.packageName?.toString() == GBOARD_PACKAGE
+    }
+  }.getOrNull()
+
+  private fun isTraflixTaskOpen(): Boolean = runCatching {
+    getSystemService(ActivityManager::class.java).appTasks.any { task ->
+      val taskInfo = task.taskInfo
+      taskInfo.baseActivity?.packageName == packageName ||
+        taskInfo.baseIntent?.component?.packageName == packageName
+    }
+  }.getOrDefault(false)
+
+  private fun findFocusedEditable(): AccessibilityNodeInfo? = runCatching {
+    windows.asSequence()
+      .filter { it.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+      .sortedByDescending { it.isFocused || it.isActive }
+      .mapNotNull { it.root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }
+      .firstOrNull { it.isEditable && it.isVisibleToUser && it.packageName?.toString() != packageName }
+  }.getOrNull()
+
+  private fun insertIntoFocusedEditor(text: String): Boolean {
+    val editor = findFocusedEditable() ?: run {
+      Log.w(TAG, "transcription insert skipped: no focused editable")
+      return false
+    }
+    val key = editorKey(editor)
+    val currentBounds = Rect().also { editor.getBoundsInScreen(it) }
+    val currentPackage = editor.packageName?.toString()
+    val packageMatches = currentPackage == recordingEditorPackage
+    val viewIdMatches = !recordingEditorViewId.isNullOrBlank() &&
+      editor.viewIdResourceName == recordingEditorViewId
+    val classAndBoundsMatch = recordingEditorViewId.isNullOrBlank() &&
+      editor.className?.toString() == recordingEditorClassName &&
+      recordingEditorBounds == currentBounds
+    if (!packageMatches ||
+      (key != recordingEditorKey && !viewIdMatches && !classAndBoundsMatch)
+    ) {
+      Log.w(
+        TAG,
+        "transcription insert skipped: focused editor changed " +
+          "expectedPackage=$recordingEditorPackage currentPackage=$currentPackage " +
+          "packageMatches=$packageMatches viewIdMatches=$viewIdMatches " +
+          "classAndBoundsMatch=$classAndBoundsMatch",
+      )
+      editor.recycle()
+      return false
+    }
+
+    val clipboard = getSystemService(ClipboardManager::class.java)
+    val previous = clipboard.primaryClip
+    clipboard.setPrimaryClip(ClipData.newPlainText("Traflix Voice", text))
+    val pasted = editor.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+    Log.d(TAG, "clipboard paste action result=$pasted")
+    editor.recycle()
+    mainHandler.postDelayed({
+      runCatching {
+        if (previous != null) clipboard.setPrimaryClip(previous) else clipboard.clearPrimaryClip()
+      }
+    }, CLIPBOARD_RESTORE_DELAY_MS)
+    return pasted
+  }
+
+  private fun editorKey(editor: AccessibilityNodeInfo): String {
+    val uniqueId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) editor.uniqueId else null
+    return uniqueId?.takeIf { it.isNotBlank() }
+      ?: listOf(editor.packageName, editor.viewIdResourceName, editor.className).joinToString("|")
+  }
+
+  private fun isSensitiveField(editor: AccessibilityNodeInfo): Boolean {
+    val className = editor.className?.toString().orEmpty()
+    val viewId = editor.viewIdResourceName.orEmpty()
+    return editor.isPassword ||
+      className.contains("password", ignoreCase = true) ||
+      viewId.contains("password", ignoreCase = true)
+  }
+
+  private fun playStopToneIfNeeded() {
+    if (recordingEditorKey == null || stopTonePlayed) return
+    stopTonePlayed = true
+    playTone(ToneGenerator.TONE_PROP_BEEP)
+  }
+
+  private fun playTone(toneType: Int) {
+    val started = runCatching {
+      toneGenerator?.startTone(toneType, TONE_DURATION_MS) == true
+    }.getOrElse {
+      Log.w(TAG, "feedback tone failed", it)
+      false
+    }
+    if (!started) Log.d(TAG, "feedback tone unavailable type=$toneType")
+  }
+
+  private fun hasMicrophonePermission(): Boolean =
+    checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+      android.content.pm.PackageManager.PERMISSION_GRANTED
+
+  private fun openAppSettings() {
+    startActivity(
+      Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        android.net.Uri.parse("package:$packageName"),
+      ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
+  }
+
+  private fun setOverlayState(state: MicIndicatorState, detail: String? = null) {
+    mainHandler.post { overlay?.setState(state, detail) }
+  }
+
+  private fun cancelRecording() {
+    if (!::recorder.isInitialized) return
+    recorder.cancel()
+    stopRecordingForeground()
+    recordingEditorKey = null
+  }
+
+  @Suppress("DEPRECATION")
+  private fun startRecordingForeground(): Boolean = runCatching {
+    if (recordingForegroundActive) return true
+    createRecordingNotificationChannel()
+    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+    val contentIntent = launchIntent?.let {
+      PendingIntent.getActivity(
+        this,
+        0,
+        it,
+        PendingIntent.FLAG_UPDATE_CURRENT or pendingIntentMutabilityFlag(),
+      )
+    }
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      Notification.Builder(this, RECORDING_CHANNEL_ID)
+    } else {
+      Notification.Builder(this)
+    }
+    val notification = builder
+      .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+      .setContentTitle("Traflix Voice")
+      .setContentText("Registrazione in corso")
+      .setCategory(Notification.CATEGORY_PROGRESS)
+      .setOngoing(true)
+      .apply { if (contentIntent != null) setContentIntent(contentIntent) }
+      .build()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      startForeground(
+        RECORDING_NOTIFICATION_ID,
+        notification,
+        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+      )
+    } else {
+      startForeground(RECORDING_NOTIFICATION_ID, notification)
+    }
+    recordingForegroundActive = true
+    true
+  }.getOrElse { false }
+
+  @Suppress("DEPRECATION")
+  private fun stopRecordingForeground() {
+    if (!recordingForegroundActive) return
+    runCatching { stopForeground(true) }
+    recordingForegroundActive = false
+  }
+
+  private fun createRecordingNotificationChannel() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    getSystemService(NotificationManager::class.java).createNotificationChannel(
+      NotificationChannel(
+        RECORDING_CHANNEL_ID,
+        "Registrazione vocale",
+        NotificationManager.IMPORTANCE_LOW,
+      ).apply {
+        description = "Stato della registrazione Traflix Voice"
+        setShowBadge(false)
+      },
+    )
+  }
+
+  private fun pendingIntentMutabilityFlag(): Int =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+
+  private fun dp(value: Int): Int =
+    (value * resources.displayMetrics.density).toInt().coerceAtLeast(1)
+
+  private companion object {
+    const val TAG = "VoiceAccessibilityService"
+    const val GBOARD_PACKAGE = "com.google.android.inputmethod.latin"
+    const val RECORDING_CHANNEL_ID = "traflix_voice_recording"
+    const val RECORDING_NOTIFICATION_ID = 7102
+    const val OVERLAY_REFRESH_DELAY_MS = 180L
+    const val CLIPBOARD_RESTORE_DELAY_MS = 800L
+    const val TONE_DURATION_MS = 120
+  }
+}

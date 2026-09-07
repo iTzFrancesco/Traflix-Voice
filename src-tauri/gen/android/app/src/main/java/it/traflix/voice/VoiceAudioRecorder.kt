@@ -11,6 +11,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -47,15 +48,19 @@ class VoiceAudioRecorder(
   private var audioFocusRequest: AudioFocusRequest? = null
 
   private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { change ->
+    Log.d(TAG, "audio focus change=$change recording=${recording.get()}")
     if (change == AudioManager.AUDIOFOCUS_LOSS ||
       change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
     ) {
+      Log.w(TAG, "stopping because audio focus was lost")
       stop()
     }
   }
 
   fun start(): Boolean {
+    Log.d(TAG, "start requested")
     if (appContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+      Log.w(TAG, "start rejected: microphone permission missing")
       listener.onRecordingError("Microfono non autorizzato")
       return false
     }
@@ -69,6 +74,7 @@ class VoiceAudioRecorder(
         AUDIO_FORMAT,
       )
       if (minimumBuffer <= 0) {
+        Log.e(TAG, "start rejected: invalid minimum buffer=$minimumBuffer")
         listener.onRecordingError("Microfono non disponibile")
         return false
       }
@@ -88,6 +94,7 @@ class VoiceAudioRecorder(
       }
 
       if (record.state != AudioRecord.STATE_INITIALIZED) {
+        Log.e(TAG, "start rejected: AudioRecord not initialized")
         record.release()
         listener.onRecordingError("Microfono non inizializzato")
         return false
@@ -102,6 +109,7 @@ class VoiceAudioRecorder(
 
       val file = File(directory, "${UUID.randomUUID()}.wav")
       if (!requestAudioFocus()) {
+        Log.w(TAG, "start rejected: audio focus not granted")
         record.release()
         listener.onRecordingError("Un'altra app sta usando il microfono")
         return false
@@ -114,6 +122,7 @@ class VoiceAudioRecorder(
       recording.set(true)
 
       runCatching { record.startRecording() }.onFailure {
+        Log.e(TAG, "AudioRecord.startRecording failed", it)
         recording.set(false)
         audioRecord = null
         outputFile = null
@@ -123,20 +132,25 @@ class VoiceAudioRecorder(
         return false
       }
 
+      Log.i(TAG, "recording started bufferSize=$bufferSize")
       executor.execute { capture(record, file, bufferSize) }
       return true
     }
   }
 
   fun stop() {
-    if (!recording.compareAndSet(true, false)) return
+    val wasRecording = recording.compareAndSet(true, false)
+    Log.d(TAG, "stop requested active=$wasRecording")
+    if (!wasRecording) return
     synchronized(lock) {
       runCatching { audioRecord?.stop() }
     }
   }
 
   fun cancel() {
-    if (!recording.compareAndSet(true, false)) return
+    val wasRecording = recording.compareAndSet(true, false)
+    Log.d(TAG, "cancel requested active=$wasRecording")
+    if (!wasRecording) return
     cancelled.set(true)
     val file = synchronized(lock) {
       runCatching { audioRecord?.stop() }
@@ -151,6 +165,7 @@ class VoiceAudioRecorder(
   }
 
   private fun capture(record: AudioRecord, file: File, bufferSize: Int) {
+    Log.d(TAG, "capture loop started")
     var output: FileOutputStream? = null
     var bytesWritten = 0
     var lastMeterAt = 0L
@@ -162,7 +177,11 @@ class VoiceAudioRecorder(
 
       while (recording.get()) {
         val count = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-        if (count <= 0) continue
+        if (count < 0) {
+          if (!recording.get()) break
+          throw IllegalStateException("AudioRecord.read returned $count")
+        }
+        if (count == 0) continue
 
         val pcm = ByteBuffer.allocate(count * BYTES_PER_SAMPLE).order(ByteOrder.LITTLE_ENDIAN)
         var energy = 0.0
@@ -181,11 +200,13 @@ class VoiceAudioRecorder(
         }
 
         if (now - startedAt >= MAX_DURATION_MS) {
+          Log.w(TAG, "maximum recording duration reached")
           recording.set(false)
           runCatching { record.stop() }
         }
       }
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+      Log.e(TAG, "capture loop failed", error)
       file.delete()
       abandonAudioFocus()
       if (!cancelled.get()) {
@@ -201,6 +222,10 @@ class VoiceAudioRecorder(
         outputFile = null
       }
       abandonAudioFocus()
+      Log.d(
+        TAG,
+        "capture loop finished bytes=$bytesWritten cancelled=${cancelled.get()} recording=${recording.get()}",
+      )
     }
 
     if (cancelled.get()) {
@@ -226,6 +251,7 @@ class VoiceAudioRecorder(
     }
 
     val duration = System.currentTimeMillis() - startedAt
+    Log.i(TAG, "recording finished durationMs=$duration bytes=$bytesWritten")
     mainHandler.post { listener.onRecordingFinished(file, duration) }
   }
 
@@ -248,6 +274,7 @@ class VoiceAudioRecorder(
   }
 
   companion object {
+    private const val TAG = "VoiceAudioRecorder"
     private const val SAMPLE_RATE = 16_000
     private const val CHANNELS = 1
     private const val BITS_PER_SAMPLE = 16
@@ -281,6 +308,7 @@ class VoiceAudioRecorder(
       )
     }
     val granted = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    Log.d(TAG, "audio focus request result=$result granted=$granted")
     if (!granted) abandonAudioFocus()
     return granted
   }

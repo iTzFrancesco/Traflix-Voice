@@ -134,6 +134,7 @@ class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun settingsIntent(screen: String?): Intent = when (screen) {
     "input_method" -> Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
+    "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
     "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
       putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
     }

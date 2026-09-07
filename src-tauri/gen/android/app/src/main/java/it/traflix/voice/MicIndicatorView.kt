@@ -28,6 +28,7 @@ class MicIndicatorView @JvmOverloads constructor(
   private var indicatorState = MicIndicatorState.IDLE
   private var volume = 0f
   private var animationPhase = 0f
+  private var compact = false
 
   private val animationTick = object : Runnable {
     override fun run() {
@@ -45,6 +46,12 @@ class MicIndicatorView @JvmOverloads constructor(
   init {
     isClickable = true
     contentDescription = "Microfono Traflix Voice"
+  }
+
+  fun setCompact(value: Boolean) {
+    if (compact == value) return
+    compact = value
+    invalidate()
   }
 
   fun setIndicatorState(state: MicIndicatorState) {
@@ -82,8 +89,21 @@ class MicIndicatorView @JvmOverloads constructor(
     backgroundPaint.color = backgroundColor()
     canvas.drawRoundRect(RectF(0f, 0f, width, height), radius, radius, backgroundPaint)
 
-    val iconCenterX = height * 0.55f
     val centerY = height / 2f
+
+    if (compact) {
+      when (indicatorState) {
+        MicIndicatorState.STARTING,
+        MicIndicatorState.PROCESSING -> drawProgress(canvas, width / 2f, centerY)
+        MicIndicatorState.SUCCESS -> drawCheck(canvas, width / 2f, centerY)
+        MicIndicatorState.ERROR -> drawError(canvas, width / 2f, centerY)
+        MicIndicatorState.IDLE,
+        MicIndicatorState.RECORDING -> drawMicrophone(canvas, width / 2f, centerY)
+      }
+      return
+    }
+
+    val iconCenterX = height * 0.55f
     drawMicrophone(canvas, iconCenterX, centerY)
 
     foregroundPaint.color = Color.WHITE

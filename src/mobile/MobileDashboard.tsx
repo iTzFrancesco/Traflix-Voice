@@ -4,6 +4,7 @@ import type { AppSettings, AppStats, GroqUsage, TranscriptionEntry } from "../ty
 export type MobileDestination = "overview" | "settings" | "history";
 export type MobileSettingsScreen =
   | "input_method"
+  | "accessibility"
   | "microphone"
   | "notifications"
   | "battery"
@@ -470,6 +471,7 @@ export default function MobileDashboard({
         </div>
         <div className="mobile-shortcuts">
           <SettingShortcut icon="keyboard" title="Tastiera Android" description="Attiva Traflix Voice come tastiera" onClick={() => void onOpenAndroidSettings("input_method")} />
+          <SettingShortcut icon="android" title="Widget su Gboard" description="Abilita Accessibilità per mostrare Traflix Voice" onClick={() => void onOpenAndroidSettings("accessibility")} />
           <SettingShortcut icon="android" title="Permesso microfono" description="Consenti la registrazione vocale" onClick={() => void onOpenAndroidSettings("microphone")} />
           <SettingShortcut icon="cloud" title="Notifiche" description="Mostra lo stato della registrazione" onClick={() => void onOpenAndroidSettings("notifications")} />
           <SettingShortcut icon="shield" title="Batteria" description="Riduci le limitazioni in background" onClick={() => void onOpenAndroidSettings("battery")} />

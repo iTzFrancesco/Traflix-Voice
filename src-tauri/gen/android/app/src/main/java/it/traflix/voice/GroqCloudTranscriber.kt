@@ -3,6 +3,7 @@ package it.traflix.voice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -25,12 +26,20 @@ class GroqCloudTranscriber(context: Context) {
   }
 
   fun transcribe(file: File, language: String, listener: Listener) {
+    Log.i(TAG, "transcription queued bytes=${file.length()} language=$language")
     executor.execute {
+      Log.d(TAG, "transcription request started")
       val result = runCatching { request(file, language) }
       mainHandler.post {
         result.fold(
-          onSuccess = { text -> listener.onSuccess(text) },
-          onFailure = { error -> listener.onFailure(error.message ?: "Errore Groq Cloud") },
+          onSuccess = { text ->
+            Log.i(TAG, "transcription request succeeded textChars=${text.length}")
+            listener.onSuccess(text)
+          },
+          onFailure = { error ->
+            Log.e(TAG, "transcription request failed", error)
+            listener.onFailure(error.message ?: "Errore Groq Cloud")
+          },
         )
       }
     }
@@ -81,6 +90,8 @@ class GroqCloudTranscriber(context: Context) {
         ?.use { it.readText() }
         .orEmpty()
 
+      Log.d(TAG, "Groq response code=$responseCode bodyChars=${response.length}")
+
       if (responseCode !in 200..299) throw cloudError(responseCode)
       val text = JSONObject(response).optString("text").trim()
       if (text.isEmpty()) throw IllegalStateException("Groq Cloud non ha restituito testo")
@@ -107,6 +118,7 @@ class GroqCloudTranscriber(context: Context) {
   }
 
   private companion object {
+    const val TAG = "GroqCloudTranscriber"
     const val ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
     const val MODEL = "whisper-large-v3-turbo"
     const val CONNECT_TIMEOUT_MS = 10_000
