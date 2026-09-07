@@ -206,9 +206,6 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
       if (committed) "Testo inserito" else "Impossibile inserire il testo",
     )
     recordingGeneration = null
-    if (committed) {
-      mainHandler.postDelayed({ keyboardView?.setState(MicIndicatorState.IDLE) }, 1_200L)
-    }
   }
 
   private fun isSensitiveField(): Boolean {

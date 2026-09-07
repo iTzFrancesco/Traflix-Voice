@@ -21,6 +21,11 @@ class VoiceKeyboardView(
   private val indicator = MicIndicatorView(context)
   private val status = TextView(context)
   private var indicatorState = MicIndicatorState.IDLE
+  private val transientStateReset = Runnable {
+    if (indicatorState == MicIndicatorState.SUCCESS || indicatorState == MicIndicatorState.ERROR) {
+      setState(MicIndicatorState.IDLE)
+    }
+  }
 
   init {
     orientation = VERTICAL
@@ -71,13 +76,22 @@ class VoiceKeyboardView(
   }
 
   fun setState(state: MicIndicatorState, detail: String? = null) {
+    removeCallbacks(transientStateReset)
     indicatorState = state
     indicator.setIndicatorState(state)
     if (detail != null) {
       status.text = detail
-      return
+    } else {
+      refreshMode()
     }
-    refreshMode()
+    if (state == MicIndicatorState.SUCCESS || state == MicIndicatorState.ERROR) {
+      postDelayed(transientStateReset, TRANSIENT_STATE_DURATION_MS)
+    }
+  }
+
+  override fun onDetachedFromWindow() {
+    removeCallbacks(transientStateReset)
+    super.onDetachedFromWindow()
   }
 
   fun setVolume(value: Float) {
@@ -115,4 +129,8 @@ class VoiceKeyboardView(
 
   private fun dp(value: Int): Int =
     (value * resources.displayMetrics.density).roundToInt()
+
+  private companion object {
+    const val TRANSIENT_STATE_DURATION_MS = 1_800L
+  }
 }

@@ -241,7 +241,6 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
               "Copiato negli appunti"
             }
             setOverlayState(MicIndicatorState.SUCCESS, detail)
-            mainHandler.postDelayed({ setOverlayState(MicIndicatorState.IDLE) }, 1_200L)
           } else {
             recordingEditorKey = null
             setOverlayState(MicIndicatorState.ERROR, "Impossibile inserire il testo")

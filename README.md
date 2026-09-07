@@ -57,7 +57,7 @@ the recording notification.
 The Android port is currently a private preview. Read the
 [Android architecture plan](docs/android-architecture-plan.md) and the
 [merge-readiness checklist](docs/android-merge-readiness.md) for the supported
-mobile boundaries. The current [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.13)
+mobile boundaries. The current [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.14)
 contains the installable signed APK. Never distribute an `*-unsigned.apk`;
 Android requires a signed APK for direct installation.
 
@@ -123,7 +123,7 @@ signing instructions are in
 [Android merge readiness](docs/android-merge-readiness.md). A release APK must
 be signed; files ending in `-unsigned.apk` are build intermediates and are not
 valid direct-install packages. The current preview can be downloaded from the
-[Android v0.1.13 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.13).
+[Android v0.1.14 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.14).
 
 The mobile updater checks for a newer Android tag after the Hub opens and on
 return from the installer permission screen. It downloads only the expected APK
