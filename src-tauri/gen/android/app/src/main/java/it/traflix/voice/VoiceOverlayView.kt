@@ -38,6 +38,10 @@ class VoiceOverlayView(
     if (detail != null) indicator.contentDescription = detail
   }
 
+  fun setVolume(value: Float) {
+    indicator.setVolume(value)
+  }
+
   private fun handleTouch(event: MotionEvent): Boolean {
     when (recordingMode) {
       RecordingMode.HOLD_TO_SPEAK -> when (event.actionMasked) {

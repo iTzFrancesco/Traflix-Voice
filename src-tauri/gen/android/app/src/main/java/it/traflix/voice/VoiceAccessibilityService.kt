@@ -12,6 +12,8 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Rect
 import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.SoundPool
 import android.os.Build
 import android.os.Handler
@@ -52,11 +54,18 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   private var recordingEditorBounds: Rect? = null
   private var recordingForegroundActive = false
   private var feedbackSoundPool: SoundPool? = null
+  private var feedbackFallbackPlayer: MediaPlayer? = null
   private val feedbackSoundLock = Any()
   private val loadedFeedbackSounds = mutableSetOf<Int>()
   private var startSoundId = 0
   private var stopSoundId = 0
   private var stopSoundPlayed = false
+
+  private enum class TranscriptionInsertResult {
+    INSERTED,
+    COPIED_TO_CLIPBOARD,
+    FAILED,
+  }
 
   override fun onServiceConnected() {
     super.onServiceConnected()
@@ -187,7 +196,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   }
 
   override fun onMeter(value: Float) {
-    // The Gboard overlay is intentionally icon-only; the meter is kept for the standalone IME.
+    overlay?.setVolume(value)
   }
 
   override fun onRecordingFinished(file: File, durationMs: Long) {
@@ -202,13 +211,18 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
         override fun onSuccess(text: String) {
           Log.i(TAG, "Groq transcription succeeded textChars=${text.length}")
           file.delete()
-          val inserted = insertIntoFocusedEditor(text)
-          Log.i(TAG, "transcription insert result=$inserted")
-          if (inserted) {
+          val insertionResult = insertIntoFocusedEditor(text)
+          Log.i(TAG, "transcription insert result=$insertionResult")
+          if (insertionResult != TranscriptionInsertResult.FAILED) {
             historyStore.append(text)
             metricsStore.record(text, durationMs)
             recordingEditorKey = null
-            setOverlayState(MicIndicatorState.SUCCESS, "Testo inserito")
+            val detail = if (insertionResult == TranscriptionInsertResult.INSERTED) {
+              "Testo inserito"
+            } else {
+              "Copiato negli appunti"
+            }
+            setOverlayState(MicIndicatorState.SUCCESS, detail)
             mainHandler.postDelayed({ setOverlayState(MicIndicatorState.IDLE) }, 1_200L)
           } else {
             recordingEditorKey = null
@@ -352,17 +366,19 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       action.id == AccessibilityNodeInfo.ACTION_PASTE ||
         action.id == AccessibilityNodeInfo.ACTION_SET_TEXT
     }
-    val className = node.className?.toString().orEmpty()
-    val viewId = node.viewIdResourceName.orEmpty()
-    val isTerminalSurface = className.endsWith("TerminalView") ||
-      viewId.endsWith(":id/terminalView")
-    return supportsTextAction || isTerminalSurface
+    return supportsTextAction || isTerminalSurface(node)
   }
 
-  private fun insertIntoFocusedEditor(text: String): Boolean {
+  private fun isTerminalSurface(node: AccessibilityNodeInfo): Boolean {
+    val className = node.className?.toString().orEmpty()
+    val viewId = node.viewIdResourceName.orEmpty()
+    return className.endsWith("TerminalView") || viewId.endsWith(":id/terminalView")
+  }
+
+  private fun insertIntoFocusedEditor(text: String): TranscriptionInsertResult {
     val editor = findFocusedInputTarget() ?: run {
       Log.w(TAG, "transcription insert skipped: no focused input target")
-      return false
+      return TranscriptionInsertResult.FAILED
     }
     val key = editorKey(editor)
     val currentBounds = Rect().also { editor.getBoundsInScreen(it) }
@@ -384,21 +400,41 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
           "classAndBoundsMatch=$classAndBoundsMatch",
       )
       editor.recycle()
-      return false
+      return TranscriptionInsertResult.FAILED
     }
 
     val clipboard = getSystemService(ClipboardManager::class.java)
     val previous = clipboard.primaryClip
     clipboard.setPrimaryClip(ClipData.newPlainText("Traflix Voice", text))
+    val exposesPasteAction = editor.actionList.any { action ->
+      action.id == AccessibilityNodeInfo.ACTION_PASTE
+    }
     val pasted = editor.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-    Log.d(TAG, "clipboard paste action result=$pasted")
+    val terminalSurface = isTerminalSurface(editor)
+    Log.d(
+      TAG,
+      "clipboard paste action result=$pasted exposesPasteAction=$exposesPasteAction " +
+        "terminalSurface=$terminalSurface",
+    )
     editor.recycle()
+    if (pasted) {
+      restoreClipboardLater(clipboard, previous)
+      return TranscriptionInsertResult.INSERTED
+    }
+    if (terminalSurface) {
+      Log.i(TAG, "terminal target does not accept accessibility paste; transcription left in clipboard")
+      return TranscriptionInsertResult.COPIED_TO_CLIPBOARD
+    }
+    restoreClipboardLater(clipboard, previous)
+    return TranscriptionInsertResult.FAILED
+  }
+
+  private fun restoreClipboardLater(clipboard: ClipboardManager, previous: ClipData?) {
     mainHandler.postDelayed({
       runCatching {
         if (previous != null) clipboard.setPrimaryClip(previous) else clipboard.clearPrimaryClip()
       }
     }, CLIPBOARD_RESTORE_DELAY_MS)
-    return pasted
   }
 
   private fun editorKey(editor: AccessibilityNodeInfo): String {
@@ -424,17 +460,14 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   private fun initializeFeedbackSounds() {
     releaseFeedbackSounds()
     runCatching {
-      val attributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-        .build()
       val pool = SoundPool.Builder()
         .setMaxStreams(1)
-        .setAudioAttributes(attributes)
+        .setAudioAttributes(feedbackAudioAttributes())
         .build()
       pool.setOnLoadCompleteListener { _, sampleId, status ->
         if (status == 0) {
           synchronized(feedbackSoundLock) { loadedFeedbackSounds.add(sampleId) }
+          Log.i(TAG, "feedback sound loaded sampleId=$sampleId")
         } else {
           Log.w(TAG, "feedback sound load failed status=$status")
         }
@@ -442,6 +475,14 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       feedbackSoundPool = pool
       startSoundId = pool.load(this, R.raw.start, 1)
       stopSoundId = pool.load(this, R.raw.stop, 1)
+      val audioManager = getSystemService(AudioManager::class.java)
+      Log.i(
+        TAG,
+        "feedback audio configured stream=accessibility volume=" +
+          "${audioManager.getStreamVolume(AudioManager.STREAM_ACCESSIBILITY)}/" +
+          "${audioManager.getStreamMaxVolume(AudioManager.STREAM_ACCESSIBILITY)} " +
+          "muted=${audioManager.isStreamMute(AudioManager.STREAM_ACCESSIBILITY)}",
+      )
     }.onFailure {
       Log.w(TAG, "unable to initialize feedback sounds", it)
       releaseFeedbackSounds()
@@ -451,6 +492,8 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   private fun releaseFeedbackSounds() {
     feedbackSoundPool?.release()
     feedbackSoundPool = null
+    feedbackFallbackPlayer?.release()
+    feedbackFallbackPlayer = null
     startSoundId = 0
     stopSoundId = 0
     synchronized(feedbackSoundLock) { loadedFeedbackSounds.clear() }
@@ -461,12 +504,54 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   }
 
   private fun playFeedbackSound(soundId: Int) {
-    if (soundId == 0) return
-    val pool = feedbackSoundPool ?: return
+    if (soundId == 0) {
+      Log.w(TAG, "feedback sound skipped: sample id is not initialized")
+      return
+    }
+    val pool = feedbackSoundPool
     val isLoaded = synchronized(feedbackSoundLock) { loadedFeedbackSounds.contains(soundId) }
-    if (!isLoaded) return
-    pool.play(soundId, FEEDBACK_VOLUME, FEEDBACK_VOLUME, 1, 0, 1f)
+    if (pool == null || !isLoaded) {
+      Log.w(TAG, "feedback sound not ready sampleId=$soundId loaded=$isLoaded")
+      playFeedbackSoundWithMediaPlayer(soundId)
+      return
+    }
+    val streamId = pool.play(soundId, FEEDBACK_VOLUME, FEEDBACK_VOLUME, 1, 0, 1f)
+    Log.i(TAG, "feedback sound played sampleId=$soundId streamId=$streamId volume=$FEEDBACK_VOLUME")
+    if (streamId == 0) playFeedbackSoundWithMediaPlayer(soundId)
   }
+
+  private fun playFeedbackSoundWithMediaPlayer(soundId: Int) {
+    val resourceId = when (soundId) {
+      startSoundId -> R.raw.start
+      stopSoundId -> R.raw.stop
+      else -> return
+    }
+    runCatching {
+      feedbackFallbackPlayer?.release()
+      val player = MediaPlayer.create(this, resourceId, feedbackAudioAttributes())
+        ?: error("MediaPlayer.create returned null")
+      feedbackFallbackPlayer = player
+      player.setVolume(FEEDBACK_VOLUME, FEEDBACK_VOLUME)
+      player.setOnCompletionListener {
+        if (feedbackFallbackPlayer === it) feedbackFallbackPlayer = null
+        it.release()
+      }
+      player.setOnErrorListener { failedPlayer, _, _ ->
+        if (feedbackFallbackPlayer === failedPlayer) feedbackFallbackPlayer = null
+        failedPlayer.release()
+        true
+      }
+      player.start()
+      Log.i(TAG, "feedback sound fallback played resource=$resourceId volume=$FEEDBACK_VOLUME")
+    }.onFailure {
+      Log.w(TAG, "feedback sound fallback failed resource=$resourceId", it)
+    }
+  }
+
+  private fun feedbackAudioAttributes(): AudioAttributes = AudioAttributes.Builder()
+    .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+    .build()
 
   private fun hasMicrophonePermission(): Boolean =
     checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
@@ -565,6 +650,6 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     const val RECORDING_NOTIFICATION_ID = 7102
     const val OVERLAY_REFRESH_DELAY_MS = 180L
     const val CLIPBOARD_RESTORE_DELAY_MS = 800L
-    const val FEEDBACK_VOLUME = 0.28f
+    const val FEEDBACK_VOLUME = 0.52f
   }
 }

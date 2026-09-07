@@ -57,6 +57,7 @@ class MicIndicatorView @JvmOverloads constructor(
   fun setIndicatorState(state: MicIndicatorState) {
     if (indicatorState == state) return
     indicatorState = state
+    if (state != MicIndicatorState.RECORDING) volume = 0f
     contentDescription = when (state) {
       MicIndicatorState.IDLE -> "Avvia dettatura"
       MicIndicatorState.STARTING -> "Avvio dettatura"
@@ -97,8 +98,8 @@ class MicIndicatorView @JvmOverloads constructor(
         MicIndicatorState.PROCESSING -> drawProgress(canvas, width / 2f, centerY)
         MicIndicatorState.SUCCESS -> drawCheck(canvas, width / 2f, centerY)
         MicIndicatorState.ERROR -> drawError(canvas, width / 2f, centerY)
-        MicIndicatorState.IDLE,
-        MicIndicatorState.RECORDING -> drawMicrophone(canvas, width / 2f, centerY)
+        MicIndicatorState.IDLE -> drawMicrophone(canvas, width / 2f, centerY)
+        MicIndicatorState.RECORDING -> drawWaveform(canvas, width / 2f, centerY)
       }
       return
     }
@@ -202,7 +203,7 @@ class MicIndicatorView @JvmOverloads constructor(
   }
 
   private fun backgroundColor(): Int = when (indicatorState) {
-    MicIndicatorState.IDLE -> Color.rgb(58, 58, 69)
+    MicIndicatorState.IDLE -> Color.rgb(24, 24, 30)
     MicIndicatorState.STARTING -> Color.rgb(54, 93, 140)
     MicIndicatorState.RECORDING -> Color.rgb(154, 54, 70)
     MicIndicatorState.PROCESSING -> Color.rgb(80, 70, 142)
