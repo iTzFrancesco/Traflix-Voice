@@ -102,7 +102,14 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           name: Traflix Voice Android ${{ steps.release.outputs.version }}
-          body: Android private preview ${{ steps.release.outputs.version }}. Signed universal APK with desktop-equivalent recording feedback and a clearer transcription state.
+          body: |
+            Android private preview ${{ steps.release.outputs.version }}.
+
+            This release improves mobile startup, responsive Hub navigation,
+            copy and history feedback, runtime-state synchronization, audio
+            recorder lifecycle handling, meter rendering, and background
+            persistence. The attached universal APK is signed for direct
+            installation.
           prerelease: true
           files: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
           fail_on_unmatched_files: true

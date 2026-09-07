@@ -26,7 +26,11 @@ class MicIndicatorView @JvmOverloads constructor(
     strokeCap = Paint.Cap.ROUND
     strokeWidth = dp(3f)
   }
+  private val backgroundRect = RectF()
+  private val microphoneCapsuleRect = RectF()
+  private val microphoneArcRect = RectF()
   private val arcRect = RectF()
+  private val waveformHeights = floatArrayOf(0.35f, 0.65f, 1f, 0.55f, 0.8f)
   private var indicatorState = MicIndicatorState.IDLE
   private var targetVolume = 0f
   private var smoothedVolume = 0f
@@ -105,9 +109,6 @@ class MicIndicatorView @JvmOverloads constructor(
     } else {
       0f
     }
-    if (indicatorState == MicIndicatorState.RECORDING) {
-      postInvalidateOnAnimation()
-    }
   }
 
   override fun onDraw(canvas: Canvas) {
@@ -117,7 +118,8 @@ class MicIndicatorView @JvmOverloads constructor(
     val radius = height / 2f
 
     backgroundPaint.color = currentBackgroundColor()
-    canvas.drawRoundRect(RectF(0f, 0f, width, height), radius, radius, backgroundPaint)
+    backgroundRect.set(0f, 0f, width, height)
+    canvas.drawRoundRect(backgroundRect, radius, radius, backgroundPaint)
 
     val centerY = height / 2f
 
@@ -172,22 +174,22 @@ class MicIndicatorView @JvmOverloads constructor(
   private fun drawMicrophone(canvas: Canvas, centerX: Float, centerY: Float) {
     foregroundPaint.color = Color.WHITE
     foregroundPaint.style = Paint.Style.FILL
-    val capsule = RectF(
+    microphoneCapsuleRect.set(
       centerX - dp(7f),
       centerY - dp(12f),
       centerX + dp(7f),
       centerY + dp(4f),
     )
-    canvas.drawRoundRect(capsule, dp(7f), dp(7f), foregroundPaint)
+    canvas.drawRoundRect(microphoneCapsuleRect, dp(7f), dp(7f), foregroundPaint)
     foregroundPaint.style = Paint.Style.STROKE
     foregroundPaint.strokeWidth = dp(2f)
-    canvas.drawArc(
-      RectF(centerX - dp(11f), centerY - dp(8f), centerX + dp(11f), centerY + dp(10f)),
-      0f,
-      180f,
-      false,
-      foregroundPaint,
+    microphoneArcRect.set(
+      centerX - dp(11f),
+      centerY - dp(8f),
+      centerX + dp(11f),
+      centerY + dp(10f),
     )
+    canvas.drawArc(microphoneArcRect, 0f, 180f, false, foregroundPaint)
     canvas.drawLine(centerX, centerY + dp(10f), centerX, centerY + dp(15f), foregroundPaint)
     canvas.drawLine(centerX - dp(5f), centerY + dp(15f), centerX + dp(5f), centerY + dp(15f), foregroundPaint)
     foregroundPaint.style = Paint.Style.FILL
@@ -195,8 +197,7 @@ class MicIndicatorView @JvmOverloads constructor(
 
   private fun drawWaveform(canvas: Canvas, centerX: Float, centerY: Float) {
     waveformPaint.color = Color.WHITE
-    val heights = floatArrayOf(0.35f, 0.65f, 1f, 0.55f, 0.8f)
-    heights.forEachIndexed { index, baseHeight ->
+    waveformHeights.forEachIndexed { index, baseHeight ->
       val pulse = 0.65f + 0.35f * abs(sin(animationPhase + index * 0.8f))
       val level = 0.14f + smoothedVolume * 0.86f
       val barHeight = dp(18f) * max(0.14f, level) * baseHeight * pulse

@@ -29,6 +29,8 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.io.File
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Shows the Traflix control while the Traflix Voice task remains open in the
@@ -39,12 +41,16 @@ import java.io.File
 class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Listener,
   VoiceAudioRecorder.Listener {
   private val mainHandler = Handler(Looper.getMainLooper())
+  private val persistenceExecutor: ExecutorService = Executors.newSingleThreadExecutor {
+    Thread(it, "traflix-voice-persistence").apply { isDaemon = true }
+  }
   private val overlayRefreshRunnable = Runnable { refreshOverlay() }
   private lateinit var settingsStore: VoiceSettingsStore
   private lateinit var recorder: VoiceAudioRecorder
   private lateinit var cloudTranscriber: GroqCloudTranscriber
   private lateinit var historyStore: VoiceHistoryStore
   private lateinit var metricsStore: VoiceMetricsStore
+  private lateinit var runtimeStateStore: VoiceRuntimeStateStore
   private lateinit var windowManager: WindowManager
 
   private var overlay: VoiceOverlayView? = null
@@ -52,6 +58,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   private var overlayMoveFramePosted = false
   private var pendingOverlayX: Int? = null
   private var pendingOverlayY: Int? = null
+  private var overlayDragDisplayBounds: Rect? = null
   private val overlayMoveFrameCallback = Choreographer.FrameCallback {
     overlayMoveFramePosted = false
     applyPendingOverlayMove()
@@ -92,6 +99,8 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     cloudTranscriber = GroqCloudTranscriber(this)
     historyStore = VoiceHistoryStore(this)
     metricsStore = VoiceMetricsStore(this)
+    runtimeStateStore = VoiceRuntimeStateStore(this)
+    runtimeStateStore.reset()
     windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
     removeRecordingNotification()
     initializeFeedbackSounds()
@@ -114,33 +123,36 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     if (event == null) return
     val eventPackage = event.packageName?.toString()
     val source = event.source
+    try {
+      if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+        eventPackage != null &&
+        eventPackage != GBOARD_PACKAGE
+      ) {
+        lastApplicationPackage = eventPackage
+      }
 
-    if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-      eventPackage != null &&
-      eventPackage != GBOARD_PACKAGE
-    ) {
-      lastApplicationPackage = eventPackage
+      if (source != null &&
+        eventPackage != null &&
+        eventPackage != packageName &&
+        eventPackage != GBOARD_PACKAGE &&
+        isPotentialInputTarget(source)
+      ) {
+        lastApplicationPackage = eventPackage
+        replaceFocusedEditor(source, eventPackage)
+      } else if (
+        event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+        eventPackage != null &&
+        eventPackage != packageName &&
+        eventPackage != GBOARD_PACKAGE &&
+        eventPackage != focusedPackage
+      ) {
+        clearFocusedEditor()
+      }
+
+      scheduleOverlayRefresh()
+    } finally {
+      source?.recycle()
     }
-
-    if (source != null &&
-      eventPackage != null &&
-      eventPackage != packageName &&
-      eventPackage != GBOARD_PACKAGE &&
-      isPotentialInputTarget(source)
-    ) {
-      lastApplicationPackage = eventPackage
-      replaceFocusedEditor(source, eventPackage)
-    } else if (
-      event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-      eventPackage != null &&
-      eventPackage != packageName &&
-      eventPackage != GBOARD_PACKAGE &&
-      eventPackage != focusedPackage
-    ) {
-      clearFocusedEditor()
-    }
-
-    scheduleOverlayRefresh()
   }
 
   override fun onInterrupt() {
@@ -165,6 +177,8 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     cancelRecording()
     if (::recorder.isInitialized) recorder.shutdown()
     if (::cloudTranscriber.isInitialized) cloudTranscriber.shutdown()
+    if (::runtimeStateStore.isInitialized) runtimeStateStore.reset()
+    persistenceExecutor.shutdown()
     releaseFeedbackSounds()
     mainHandler.removeCallbacksAndMessages(null)
     clearFocusedEditor()
@@ -234,7 +248,8 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
   override fun onOverlayMoved(deltaX: Int, deltaY: Int) {
     val params = overlayParams ?: return
-    val displayBounds = currentDisplayBounds()
+    val displayBounds = overlayDragDisplayBounds
+      ?: currentDisplayBounds().also { overlayDragDisplayBounds = it }
     val width = params.width.coerceAtLeast(1)
     val height = params.height.coerceAtLeast(1)
     val minX = displayBounds.left
@@ -253,6 +268,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
   override fun onOverlayDragFinished() {
     flushPendingOverlayMove()
+    overlayDragDisplayBounds = null
     val params = overlayParams ?: return
     settingsStore.setOverlayPosition(VoiceOverlayPosition(params.x, params.y))
     Log.d(TAG, "voice overlay position saved x=${params.x} y=${params.y}")
@@ -284,8 +300,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
           val insertionResult = insertIntoFocusedEditor(text)
           Log.i(TAG, "transcription insert result=$insertionResult")
           if (insertionResult != TranscriptionInsertResult.FAILED) {
-            historyStore.append(text)
-            metricsStore.record(text, durationMs)
+            persistTranscript(text, durationMs)
             recordingEditorKey = null
             val detail = if (insertionResult == TranscriptionInsertResult.INSERTED) {
               "Testo inserito"
@@ -320,6 +335,19 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     setOverlayState(MicIndicatorState.ERROR, message)
   }
 
+  private fun persistTranscript(text: String, durationMs: Long) {
+    runCatching {
+      persistenceExecutor.execute {
+        runCatching { historyStore.append(text) }
+          .onFailure { Log.w(TAG, "unable to persist transcription history", it) }
+        runCatching { metricsStore.record(text, durationMs) }
+          .onFailure { Log.w(TAG, "unable to persist transcription metrics", it) }
+      }
+    }.onFailure {
+      Log.w(TAG, "unable to schedule transcription persistence", it)
+    }
+  }
+
   private fun replaceFocusedEditor(source: AccessibilityNodeInfo, packageName: String?) {
     clearFocusedEditor()
     focusedEditor = AccessibilityNodeInfo.obtain(source)
@@ -340,9 +368,9 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     focusedEditorSensitive = false
   }
 
-  private fun scheduleOverlayRefresh() {
+  private fun scheduleOverlayRefresh(delayMs: Long = OVERLAY_REFRESH_DELAY_MS) {
     mainHandler.removeCallbacks(overlayRefreshRunnable)
-    mainHandler.postDelayed(overlayRefreshRunnable, OVERLAY_REFRESH_DELAY_MS)
+    mainHandler.postDelayed(overlayRefreshRunnable, delayMs)
   }
 
   @Suppress("DEPRECATION")
@@ -363,7 +391,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
     if (!shouldShowOverlay()) {
       hideOverlay()
-      scheduleOverlayRefresh()
+      scheduleOverlayRefresh(OVERLAY_REFRESH_HIDDEN_INTERVAL_MS)
       return
     }
 
@@ -424,6 +452,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     overlayMoveFramePosted = false
     pendingOverlayX = null
     pendingOverlayY = null
+    overlayDragDisplayBounds = null
     val view = overlay ?: return
     runCatching { windowManager.removeView(view) }
     overlay = null
@@ -483,12 +512,17 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   }.getOrDefault(false)
 
   private fun isTraflixActivityForeground(): Boolean = runCatching {
-    val activePackage = rootInActiveWindow?.packageName?.toString()
-    when {
-      activePackage == packageName -> true
-      activePackage == GBOARD_PACKAGE -> lastApplicationPackage == packageName
-      activePackage.isNullOrBlank() -> lastApplicationPackage == packageName
-      else -> false
+    val root = rootInActiveWindow
+    try {
+      val activePackage = root?.packageName?.toString()
+      when {
+        activePackage == packageName -> true
+        activePackage == GBOARD_PACKAGE -> lastApplicationPackage == packageName
+        activePackage.isNullOrBlank() -> lastApplicationPackage == packageName
+        else -> false
+      }
+    } finally {
+      root?.recycle()
     }
   }.getOrDefault(lastApplicationPackage == packageName)
 
@@ -775,6 +809,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   }
 
   private fun setOverlayState(state: MicIndicatorState, detail: String? = null) {
+    if (::runtimeStateStore.isInitialized) runtimeStateStore.set(state, detail)
     val update = Runnable { overlay?.setState(state, detail) }
     if (Looper.myLooper() == Looper.getMainLooper()) update.run() else mainHandler.post(update)
   }
@@ -889,6 +924,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     const val RECORDING_CHANNEL_ID = "traflix_voice_recording"
     const val RECORDING_NOTIFICATION_ID = 7102
     const val OVERLAY_REFRESH_DELAY_MS = 180L
+    const val OVERLAY_REFRESH_HIDDEN_INTERVAL_MS = 2_500L
     const val OVERLAY_REFRESH_INTERVAL_MS = 750L
     const val CLIPBOARD_RESTORE_DELAY_MS = 800L
     const val FEEDBACK_VOLUME = 0.52f

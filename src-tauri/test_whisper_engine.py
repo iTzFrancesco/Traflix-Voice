@@ -473,7 +473,10 @@ class TestGroqUsageTracker(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = os.path.join(temp_dir, "models")
             usage_path = groq_tracker.get_groq_usage_path(models_dir)
-            first_now = time.time()
+            # Keep both samples on the same local calendar day while still
+            # crossing an hourly bucket; wall-clock time may be close to
+            # midnight when the suite runs.
+            first_now = (int(time.time()) // 86400) * 86400 + 12 * 3600
 
             with patch.object(groq_tracker.pytime, "time", return_value=first_now):
                 groq_tracker.record_groq_usage(models_dir, duration_seconds=12.0)

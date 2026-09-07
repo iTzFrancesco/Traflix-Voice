@@ -69,6 +69,7 @@ function readUsage(now = Date.now()): GroqUsage | null {
 function normalizeExternalUsage(value: unknown): GroqUsage | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
+  const hourKey = Number(record.hour_key);
   return normalizeUsage({
     date: typeof record.date === "string" ? record.date : "",
     audio_seconds: Number(record.audio_seconds),
@@ -76,6 +77,7 @@ function normalizeExternalUsage(value: unknown): GroqUsage | null {
       record.audio_seconds_hourly ?? record.audioSecondsHourly,
     ),
     hourly_reset: typeof record.hourly_reset === "string" ? record.hourly_reset : "",
+    _lastHour: Number.isFinite(hourKey) && hourKey > 0 ? hourKey : undefined,
   });
 }
 

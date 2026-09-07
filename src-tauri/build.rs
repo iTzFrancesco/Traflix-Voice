@@ -28,6 +28,7 @@ fn main() {
         "openAndroidSettings",
         "setRecordingMode",
         "getRecordingMode",
+        "getRuntimeState",
         "setGroqApiKey",
         "setTranscriptionLanguage",
     ];

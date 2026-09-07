@@ -1,5 +1,5 @@
 {
-  "version": "0.1.15",
+  "version": "0.1.16",
   "app": {
     "windows": [
       {
@@ -20,7 +20,7 @@
   "bundle": {
     "resources": [],
     "android": {
-      "versionCode": 1006013
+      "versionCode": 1006014
     }
   }
 }

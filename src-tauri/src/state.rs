@@ -89,6 +89,8 @@ pub struct GroqUsage {
     #[serde(rename = "audioSecondsHourly")]
     pub audio_seconds_hourly: f32,
     pub hourly_reset: String,
+    #[serde(default)]
+    pub hour_key: i64,
 }
 
 impl Default for GroqUsage {
@@ -98,6 +100,7 @@ impl Default for GroqUsage {
             audio_seconds: 0.0,
             audio_seconds_hourly: 0.0,
             hourly_reset: String::new(),
+            hour_key: 0,
         }
     }
 }

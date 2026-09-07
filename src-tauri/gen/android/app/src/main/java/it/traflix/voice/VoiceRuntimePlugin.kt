@@ -93,6 +93,11 @@ class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Command
+  fun getRuntimeState(invoke: Invoke) {
+    invoke.resolveObject(VoiceRuntimeStateStore(activity).snapshot())
+  }
+
+  @Command
   fun setGroqApiKey(invoke: Invoke) {
     val args = invoke.parseArgs(GroqApiKeyArgs::class.java)
     VoiceSecretsStore(activity).setGroqApiKey(args.apiKey.orEmpty())

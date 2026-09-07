@@ -5,7 +5,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -161,10 +163,9 @@ class GroqCloudTranscriber(context: Context) {
       val responseCode = connection.responseCode
       responseHeadersAt = SystemClock.elapsedRealtime()
       ensureCurrent(generation)
-      val response = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
-        ?.bufferedReader(Charsets.UTF_8)
-        ?.use { it.readText() }
-        .orEmpty()
+      val response = readResponseBody(
+        if (responseCode in 200..299) connection.inputStream else connection.errorStream,
+      )
       responseBodyFinishedAt = SystemClock.elapsedRealtime()
 
       Log.d(TAG, "Groq response code=$responseCode bodyChars=${response.length}")
@@ -210,6 +211,25 @@ class GroqCloudTranscriber(context: Context) {
     output.write("\r\n".toByteArray())
   }
 
+  private fun readResponseBody(input: InputStream?): String {
+    if (input == null) return ""
+    val body = ByteArrayOutputStream()
+    val buffer = ByteArray(RESPONSE_READ_BUFFER_BYTES)
+    var totalBytes = 0
+    input.buffered(RESPONSE_READ_BUFFER_BYTES).use { bufferedInput ->
+      while (true) {
+        val count = bufferedInput.read(buffer)
+        if (count < 0) break
+        if (totalBytes + count > MAX_RESPONSE_BODY_BYTES) {
+          throw IllegalStateException("Risposta Groq Cloud troppo grande")
+        }
+        body.write(buffer, 0, count)
+        totalBytes += count
+      }
+    }
+    return body.toString(Charsets.UTF_8.name())
+  }
+
   private fun cloudError(responseCode: Int): IllegalStateException = when (responseCode) {
     401, 403 -> IllegalStateException("Chiave Groq Cloud non autorizzata")
     408 -> IllegalStateException("Groq Cloud ha esaurito il tempo di attesa")
@@ -227,5 +247,7 @@ class GroqCloudTranscriber(context: Context) {
     const val READ_TIMEOUT_MS = 45_000
     const val WAV_HEADER_BYTES = 44L
     const val BUFFER_SIZE_BYTES = 64 * 1024
+    const val RESPONSE_READ_BUFFER_BYTES = 8 * 1024
+    const val MAX_RESPONSE_BODY_BYTES = 1024 * 1024
   }
 }

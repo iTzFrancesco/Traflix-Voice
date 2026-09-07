@@ -44,22 +44,29 @@ export function useHistory() {
     }
   }, [enqueueMutation]);
 
-  const clearHistory = useCallback(async () => {
-    if (!window.__TAURI__?.core?.invoke) return;
+  const clearHistory = useCallback(async (): Promise<boolean> => {
+    if (!window.__TAURI__?.core?.invoke) return false;
     const clearId = ++clearIdRef.current;
     ++mutationIdRef.current;
     ++loadIdRef.current;
 
-    await enqueueMutation(async () => {
-      try {
-        await window.__TAURI__.core.invoke("clear_history");
-        if (clearId !== clearIdRef.current) return;
-        setEntries([]);
-      } catch (err) {
-        if (clearId !== clearIdRef.current) return;
-        console.error("[cronologia] Errore cancellazione:", err);
-      }
-    });
+    let cleared = false;
+    try {
+      await enqueueMutation(async () => {
+        try {
+          await window.__TAURI__.core.invoke("clear_history");
+          if (clearId !== clearIdRef.current) return;
+          setEntries([]);
+          cleared = true;
+        } catch (err) {
+          if (clearId !== clearIdRef.current) return;
+          console.error("[cronologia] Errore cancellazione:", err);
+        }
+      });
+    } catch (err) {
+      console.error("[cronologia] Errore coda cancellazione:", err);
+    }
+    return cleared;
   }, [enqueueMutation]);
 
   const saveTranscription = useCallback(

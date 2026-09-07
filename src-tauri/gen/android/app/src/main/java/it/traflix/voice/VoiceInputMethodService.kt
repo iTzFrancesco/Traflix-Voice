@@ -12,10 +12,13 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Toast
 import java.io.File
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener,
   VoiceAudioRecorder.Listener {
@@ -23,11 +26,15 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     get() = this
 
   private val mainHandler = Handler(Looper.getMainLooper())
+  private val persistenceExecutor: ExecutorService = Executors.newSingleThreadExecutor {
+    Thread(it, "traflix-voice-persistence").apply { isDaemon = true }
+  }
   private lateinit var settingsStore: VoiceSettingsStore
   private lateinit var recorder: VoiceAudioRecorder
   private lateinit var cloudTranscriber: GroqCloudTranscriber
   private lateinit var historyStore: VoiceHistoryStore
   private lateinit var metricsStore: VoiceMetricsStore
+  private lateinit var runtimeStateStore: VoiceRuntimeStateStore
   private var keyboardView: VoiceKeyboardView? = null
   private var currentEditorInfo: EditorInfo? = null
   private var editorGeneration = 0L
@@ -41,6 +48,8 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     cloudTranscriber = GroqCloudTranscriber(this)
     historyStore = VoiceHistoryStore(this)
     metricsStore = VoiceMetricsStore(this)
+    runtimeStateStore = VoiceRuntimeStateStore(this)
+    runtimeStateStore.reset()
     removeRecordingNotification()
   }
 
@@ -141,8 +150,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
       object : GroqCloudTranscriber.Listener {
         override fun onSuccess(text: String) {
           file.delete()
-          historyStore.append(text)
-          metricsStore.record(text, durationMs)
+          persistTranscript(text, durationMs)
           commitIfEditorStillCurrent(text)
         }
 
@@ -166,6 +174,8 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     recorder.shutdown()
     stopRecordingForeground()
     cloudTranscriber.shutdown()
+    runtimeStateStore.reset()
+    persistenceExecutor.shutdown()
     mainHandler.removeCallbacksAndMessages(null)
     keyboardView = null
     super.onDestroy()
@@ -178,6 +188,19 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     recordingGeneration = null
     keyboardView?.setState(MicIndicatorState.IDLE)
     super.onTaskRemoved(rootIntent)
+  }
+
+  private fun persistTranscript(text: String, durationMs: Long) {
+    runCatching {
+      persistenceExecutor.execute {
+        runCatching { historyStore.append(text) }
+          .onFailure { Log.w(TAG, "unable to persist transcription history", it) }
+        runCatching { metricsStore.record(text, durationMs) }
+          .onFailure { Log.w(TAG, "unable to persist transcription metrics", it) }
+      }
+    }.onFailure {
+      Log.w(TAG, "unable to schedule transcription persistence", it)
+    }
   }
 
   private fun commitIfEditorStillCurrent(text: String) {
@@ -325,6 +348,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     }
 
   private companion object {
+    const val TAG = "VoiceInputMethodService"
     const val RECORDING_CHANNEL_ID = "traflix_voice_recording"
     const val RECORDING_NOTIFICATION_ID = 7101
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, AppStats, GroqUsage, TranscriptionEntry } from "../types";
 
 export type MobileDestination = "overview" | "settings" | "history";
@@ -42,7 +42,7 @@ interface MobileDashboardProps {
   onHoldToSpeakChange: (value: boolean) => Promise<void>;
   onSettingChange: (key: string, value: string | boolean) => Promise<void>;
   onClearHistory: () => Promise<void>;
-  onHistoryClick: (text: string, index: number) => Promise<void>;
+  onHistoryClick: (text: string) => Promise<boolean>;
   onOpenAndroidSettings: (screen: MobileSettingsScreen) => Promise<void>;
   androidSettingsError: string;
   onReloadUsage: () => void;
@@ -64,6 +64,10 @@ type IconName =
   | "shield"
   | "android"
   | "arrow";
+
+function historyEntryKey(entry: TranscriptionEntry): string {
+  return `${entry.timestamp}\u0000${entry.word_count}\u0000${entry.text}`;
+}
 
 function MobileIcon({ name, size = 20 }: { name: IconName; size?: number }) {
   const common = {
@@ -253,19 +257,44 @@ export default function MobileDashboard({
   const [destination, setDestination] = useState<MobileDestination>("overview");
   const [historyQuery, setHistoryQuery] = useState("");
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [historyActionError, setHistoryActionError] = useState("");
+  const [copyFeedback, setCopyFeedback] = useState<{
+    key: string;
+    state: "copying" | "copied" | "error";
+  } | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState(settings?.groqApiKey ?? "");
+  const mainRef = useRef<HTMLElement>(null);
+  const apiKeySaveTimerRef = useRef<number | null>(null);
+  const copyFeedbackTimerRef = useRef<number | null>(null);
+  const copyRequestRef = useRef(0);
 
   useEffect(() => {
     setApiKeyDraft(settings?.groqApiKey ?? "");
   }, [settings?.groqApiKey]);
 
+  const commitApiKeyDraft = useCallback(() => {
+    if (apiKeySaveTimerRef.current !== null) {
+      window.clearTimeout(apiKeySaveTimerRef.current);
+      apiKeySaveTimerRef.current = null;
+    }
+    if (apiKeyDraft !== (settings?.groqApiKey ?? "")) {
+      void onSettingChange("groqApiKey", apiKeyDraft);
+    }
+  }, [apiKeyDraft, onSettingChange, settings?.groqApiKey]);
+
   useEffect(() => {
     const persistedKey = settings?.groqApiKey ?? "";
     if (apiKeyDraft === persistedKey) return;
     const timer = window.setTimeout(() => {
+      apiKeySaveTimerRef.current = null;
       void onSettingChange("groqApiKey", apiKeyDraft);
     }, 350);
-    return () => window.clearTimeout(timer);
+    apiKeySaveTimerRef.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+      if (apiKeySaveTimerRef.current === timer) apiKeySaveTimerRef.current = null;
+    };
   }, [apiKeyDraft, onSettingChange, settings?.groqApiKey]);
 
   const status = statusMeta[transcriptionStatus] ?? statusMeta.idle;
@@ -280,18 +309,58 @@ export default function MobileDashboard({
 
   const openDestination = (next: MobileDestination) => {
     setDestination(next);
-    if (next === "overview") onReloadUsage();
+    if (next === "overview") void onReloadUsage();
+    window.requestAnimationFrame(() => {
+      mainRef.current?.focus({ preventScroll: true });
+    });
   };
+
+  const handleHistoryEntryClick = async (text: string, key: string) => {
+    const requestId = ++copyRequestRef.current;
+    if (copyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimerRef.current);
+    }
+    setCopyFeedback({ key, state: "copying" });
+    const copied = await onHistoryClick(text);
+    if (copyRequestRef.current !== requestId) return;
+    setCopyFeedback({ key, state: copied ? "copied" : "error" });
+    copyFeedbackTimerRef.current = window.setTimeout(() => {
+      if (copyRequestRef.current !== requestId) return;
+      setCopyFeedback(null);
+      copyFeedbackTimerRef.current = null;
+    }, 1_800);
+  };
+
+  const handleClearHistory = async () => {
+    if (clearingHistory) return;
+    setClearingHistory(true);
+    setHistoryActionError("");
+    try {
+      await onClearHistory();
+      setConfirmingClear(false);
+    } catch (error) {
+      console.error("[mobile-history] clear failed:", error);
+      setHistoryActionError("Impossibile cancellare la cronologia. Riprova.");
+    } finally {
+      setClearingHistory(false);
+    }
+  };
+
+  useEffect(() => () => {
+    if (copyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimerRef.current);
+    }
+  }, []);
 
   const renderOverview = () => (
     <div className="mobile-page mobile-page-enter">
       <div className="mobile-page-heading">
         <div>
           <span className="mobile-eyebrow">Console mobile</span>
-          <h1>Panoramica</h1>
+          <h1 id="mobile-overview-title">Panoramica</h1>
           <p>Dettatura rapida, direttamente dalla tastiera.</p>
         </div>
-        <span className="mobile-status-chip" style={{ color: status.tone }}>
+        <span className="mobile-status-chip" role="status" aria-live="polite" aria-atomic="true" style={{ color: status.tone }}>
           <span className="mobile-status-dot" style={{ backgroundColor: status.tone }} />
           {status.label}
         </span>
@@ -389,7 +458,7 @@ export default function MobileDashboard({
       <div className="mobile-page-heading">
         <div>
           <span className="mobile-eyebrow">Controlli essenziali</span>
-          <h1>Impostazioni</h1>
+          <h1 id="mobile-settings-title">Impostazioni</h1>
           <p>Configura una volta. Poi torna alla tastiera.</p>
         </div>
       </div>
@@ -459,9 +528,7 @@ export default function MobileDashboard({
           autoComplete="off"
           aria-label="Chiave API Groq"
           onChange={(event) => setApiKeyDraft(event.target.value)}
-          onBlur={() => {
-            if (apiKeyDraft !== (settings?.groqApiKey ?? "")) void onSettingChange("groqApiKey", apiKeyDraft);
-          }}
+          onBlur={commitApiKeyDraft}
         />
         <p className="mobile-helper-text">La chiave viene usata solo per il percorso cloud configurato.</p>
       </section>
@@ -492,23 +559,24 @@ export default function MobileDashboard({
       <div className="mobile-page-heading">
         <div>
           <span className="mobile-eyebrow">Solo sul dispositivo</span>
-          <h1>Cronologia</h1>
+          <h1 id="mobile-history-title">Cronologia</h1>
           <p>{historyEntries.length} trascrizioni salvate localmente.</p>
         </div>
         {historyEntries.length > 0 && (
           <button
             type="button"
             className={`mobile-clear-button ${confirmingClear ? "is-confirming" : ""}`}
+            disabled={clearingHistory}
+            aria-busy={clearingHistory}
             onClick={() => {
-              if (confirmingClear) {
-                void onClearHistory();
-                setConfirmingClear(false);
-              } else {
+              if (confirmingClear) void handleClearHistory();
+              else {
+                setHistoryActionError("");
                 setConfirmingClear(true);
               }
             }}
           >
-            {confirmingClear ? "Conferma" : "Cancella"}
+            {clearingHistory ? "Cancello…" : confirmingClear ? "Conferma" : "Cancella"}
           </button>
         )}
       </div>
@@ -520,27 +588,44 @@ export default function MobileDashboard({
       </label>
 
       {confirmingClear && <p className="mobile-danger-note">La cancellazione rimuove definitivamente le trascrizioni locali.</p>}
+      {historyActionError && <p className="mobile-settings-error" role="alert">{historyActionError}</p>}
+      <p className="mobile-live-region" role="status" aria-live="polite" aria-atomic="true">
+        {copyFeedback?.state === "copying"
+          ? "Copia in corso…"
+          : copyFeedback?.state === "copied"
+            ? "Testo copiato negli appunti."
+            : copyFeedback?.state === "error"
+              ? "Impossibile copiare il testo."
+              : ""}
+      </p>
 
       <div className="mobile-history-list" role="list" aria-label="Cronologia trascrizioni">
         {visibleHistory.length === 0 ? (
-          <div className="mobile-empty-state">
+          <div className="mobile-empty-state" role="listitem">
             <span className="mobile-icon-tile"><MobileIcon name="history" size={21} /></span>
             <strong>{historyEntries.length === 0 ? "Nessuna trascrizione ancora" : "Nessun risultato"}</strong>
             <p>{historyEntries.length === 0 ? "Le prossime sessioni appariranno qui." : "Prova con una parola diversa."}</p>
           </div>
-        ) : visibleHistory.map(({ entry, originalIndex }) => (
-          <button
-            type="button"
-            className="mobile-history-entry"
-            key={`${entry.timestamp}-${originalIndex}`}
-            onClick={() => void onHistoryClick(entry.text, originalIndex)}
-            title="Copia negli appunti"
-            role="listitem"
-          >
-            <div className="mobile-history-meta"><span>{entry.timestamp}</span><span>{entry.word_count > 0 ? `${entry.word_count} parole` : "Trascrizione"}</span></div>
-            <p>{entry.text.length > 190 ? `${entry.text.slice(0, 190)}…` : entry.text}</p>
-          </button>
-        ))}
+        ) : visibleHistory.map(({ entry, originalIndex }) => {
+          const key = historyEntryKey(entry);
+          const isCopying = copyFeedback?.key === key && copyFeedback.state === "copying";
+          const isCopied = copyFeedback?.key === key && copyFeedback.state === "copied";
+          return (
+            <div key={key} role="listitem">
+              <button
+                type="button"
+                className="mobile-history-entry"
+                onClick={() => void handleHistoryEntryClick(entry.text, key)}
+                title="Copia negli appunti"
+                aria-label={`${isCopied ? "Copiato: " : "Copia: "}${entry.text}`}
+                disabled={isCopying}
+              >
+                <div className="mobile-history-meta"><span>{entry.timestamp}</span><span>{isCopying ? "Copia…" : isCopied ? "Copiato" : entry.word_count > 0 ? `${entry.word_count} parole` : "Trascrizione"}</span></div>
+                <p>{entry.text.length > 190 ? `${entry.text.slice(0, 190)}…` : entry.text}</p>
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -555,7 +640,12 @@ export default function MobileDashboard({
         <span className="mobile-cloud-pill"><span />Groq Cloud</span>
       </header>
 
-      <main className="mobile-main">
+      <main
+        ref={mainRef}
+        className="mobile-main"
+        tabIndex={-1}
+        aria-labelledby={`mobile-${destination}-title`}
+      >
         <div className="mobile-content">
           {destination === "overview" && renderOverview()}
           {destination === "settings" && renderSettings()}

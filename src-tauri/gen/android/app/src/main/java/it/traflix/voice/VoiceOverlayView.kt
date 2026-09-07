@@ -19,6 +19,7 @@ class VoiceOverlayView(
   }
 
   private val indicator = MicIndicatorView(context)
+  private val runtimeStateStore = VoiceRuntimeStateStore(context)
   private var recordingMode = RecordingMode.TOGGLE
   private var indicatorState = MicIndicatorState.IDLE
   private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
@@ -49,6 +50,7 @@ class VoiceOverlayView(
   fun setState(state: MicIndicatorState, detail: String? = null) {
     removeCallbacks(transientStateReset)
     indicatorState = state
+    runtimeStateStore.set(state, detail)
     indicator.setIndicatorState(state)
     if (detail != null) indicator.contentDescription = detail
     if (state == MicIndicatorState.SUCCESS || state == MicIndicatorState.ERROR) {

@@ -20,6 +20,7 @@ class VoiceKeyboardView(
 
   private val indicator = MicIndicatorView(context)
   private val status = TextView(context)
+  private val runtimeStateStore = VoiceRuntimeStateStore(context)
   private var indicatorState = MicIndicatorState.IDLE
   private val transientStateReset = Runnable {
     if (indicatorState == MicIndicatorState.SUCCESS || indicatorState == MicIndicatorState.ERROR) {
@@ -78,6 +79,7 @@ class VoiceKeyboardView(
   fun setState(state: MicIndicatorState, detail: String? = null) {
     removeCallbacks(transientStateReset)
     indicatorState = state
+    runtimeStateStore.set(state, detail)
     indicator.setIndicatorState(state)
     if (detail != null) {
       status.text = detail
