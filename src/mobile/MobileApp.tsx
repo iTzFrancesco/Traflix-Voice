@@ -33,6 +33,7 @@ export default function MobileApp() {
   const [mobileUpdate, setMobileUpdate] = useState<MobileUpdateInfo | null>(null);
   const [mobileUpdateState, setMobileUpdateState] = useState<MobileUpdateState>("idle");
   const [mobileUpdateError, setMobileUpdateError] = useState("");
+  const [androidSettingsError, setAndroidSettingsError] = useState("");
   const mobileUpdateRef = useRef<MobileUpdateInfo | null>(null);
   const autoUpdateAttemptedTagRef = useRef<string | null>(null);
   const autoUpdatePermissionPendingRef = useRef(false);
@@ -117,10 +118,23 @@ export default function MobileApp() {
 
   const openAndroidSettings = useCallback(
     async (screen: MobileSettingsScreen) => {
+      setAndroidSettingsError("");
+      if (!window.__TAURI__?.core?.invoke) {
+        setAndroidSettingsError("I collegamenti alle impostazioni Android funzionano nell’app installata.");
+        return;
+      }
+
       try {
         await invoke("plugin:voice-runtime|openAndroidSettings", { screen });
       } catch (error) {
         console.error("[android-settings] open error:", error);
+        const message =
+          error && typeof error === "object" && "message" in error
+            ? String((error as { message?: unknown }).message ?? "")
+            : error instanceof Error
+              ? error.message
+              : String(error);
+        setAndroidSettingsError(message || "Impossibile aprire le impostazioni Android.");
       }
     },
     [invoke],
@@ -135,7 +149,7 @@ export default function MobileApp() {
       setMobileUpdateState("installing");
       setMobileUpdateError("");
       try {
-        const result = (await invoke("plugin:voice-runtime|installMobileUpdate", {
+        const result = (await invoke("plugin:mobile-update|installMobileUpdate", {
           tag: update.tag,
         })) as { status?: string } | null;
         if (result?.status === "permission_required") {
@@ -163,7 +177,7 @@ export default function MobileApp() {
       setMobileUpdateState("checking");
       setMobileUpdateError("");
       try {
-        const result = (await invoke("plugin:voice-runtime|checkMobileUpdate")) as Partial<MobileUpdateInfo> | null;
+        const result = (await invoke("plugin:mobile-update|checkMobileUpdate")) as Partial<MobileUpdateInfo> | null;
         if (
           result?.available === true &&
           typeof result.tag === "string" &&
@@ -279,6 +293,7 @@ export default function MobileApp() {
       onClearHistory={clearHistory}
       onHistoryClick={handleHistoryClick}
       onOpenAndroidSettings={openAndroidSettings}
+      androidSettingsError={androidSettingsError}
       onReloadUsage={reloadGroqUsage}
       mobileUpdate={mobileUpdate}
       mobileUpdateState={mobileUpdateState}

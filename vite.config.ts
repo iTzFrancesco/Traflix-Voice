@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: { preserveSymlinks: true },
   plugins: [tailwindcss(), react()],
   build: {
+    target: "es2019",
     rollupOptions: {
       input: {
         main: "index.html",

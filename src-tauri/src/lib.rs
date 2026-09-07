@@ -111,7 +111,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init());
 
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(mobile_runtime::init());
+    let builder = builder
+        .plugin(mobile_runtime::init())
+        .plugin(mobile_runtime::updater_init());
 
     #[cfg(desktop)]
     let builder = builder.on_window_event(window_runtime::handle_window_event);

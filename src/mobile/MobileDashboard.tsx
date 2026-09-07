@@ -43,6 +43,7 @@ interface MobileDashboardProps {
   onClearHistory: () => Promise<void>;
   onHistoryClick: (text: string, index: number) => Promise<void>;
   onOpenAndroidSettings: (screen: MobileSettingsScreen) => Promise<void>;
+  androidSettingsError: string;
   onReloadUsage: () => void;
   mobileUpdate: MobileUpdateInfo | null;
   mobileUpdateState: MobileUpdateState;
@@ -241,6 +242,7 @@ export default function MobileDashboard({
   onClearHistory,
   onHistoryClick,
   onOpenAndroidSettings,
+  androidSettingsError,
   onReloadUsage,
   mobileUpdate,
   mobileUpdateState,
@@ -472,6 +474,7 @@ export default function MobileDashboard({
           <SettingShortcut icon="cloud" title="Notifiche" description="Mostra lo stato della registrazione" onClick={() => void onOpenAndroidSettings("notifications")} />
           <SettingShortcut icon="shield" title="Batteria" description="Riduci le limitazioni in background" onClick={() => void onOpenAndroidSettings("battery")} />
         </div>
+        {androidSettingsError && <p className="mobile-settings-error" role="alert">{androidSettingsError}</p>}
       </section>
 
       <section className="mobile-privacy-note">

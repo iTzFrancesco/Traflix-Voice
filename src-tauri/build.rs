@@ -20,5 +20,32 @@ fn main() {
         println!("cargo:rerun-if-changed={}", dll_src.display());
     }
 
-    tauri_build::build()
+    // The Android runtime plugins are implemented in the generated Tauri
+    // project, so their commands must still be declared in the application
+    // ACL. Without this manifest Tauri rejects every `plugin:voice-runtime`
+    // invocation before the native plugin can handle it.
+    const VOICE_RUNTIME_COMMANDS: &[&str] = &[
+        "openAndroidSettings",
+        "setRecordingMode",
+        "getRecordingMode",
+        "setGroqApiKey",
+        "setTranscriptionLanguage",
+    ];
+    const MOBILE_UPDATE_COMMANDS: &[&str] = &["checkMobileUpdate", "installMobileUpdate"];
+
+    let attributes = tauri_build::Attributes::new()
+        .plugin(
+            "voice-runtime",
+            tauri_build::InlinedPlugin::new()
+                .commands(VOICE_RUNTIME_COMMANDS)
+                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+        )
+        .plugin(
+            "mobile-update",
+            tauri_build::InlinedPlugin::new()
+                .commands(MOBILE_UPDATE_COMMANDS)
+                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+        );
+
+    tauri_build::try_build(attributes).expect("failed to run Tauri build script")
 }

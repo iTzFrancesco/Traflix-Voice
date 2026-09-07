@@ -7,6 +7,18 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
     #[cfg(target_os = "android")]
     let builder = builder.setup(|_, api| {
         api.register_android_plugin("it.traflix.voice", "VoiceRuntimePlugin")?;
+        Ok(())
+    });
+
+    builder.build()
+}
+
+/// Native Android entry point for the in-app update flow.
+pub fn updater_init<R: Runtime>() -> TauriPlugin<R> {
+    let builder = tauri::plugin::Builder::<R, ()>::new("mobile-update");
+
+    #[cfg(target_os = "android")]
+    let builder = builder.setup(|_, api| {
         api.register_android_plugin("it.traflix.voice", "MobileUpdatePlugin")?;
         Ok(())
     });

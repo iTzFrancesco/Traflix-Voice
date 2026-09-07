@@ -1,10 +1,14 @@
 package it.traflix.voice
 
+import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -35,21 +39,37 @@ class LanguageArgs {
 class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun openAndroidSettings(invoke: Invoke) {
-    val args = invoke.parseArgs(AndroidSettingsArgs::class.java)
-    val intent = settingsIntent(args.screen)
-
     try {
-      activity.startActivity(intent)
-      invoke.resolve()
-    } catch (_: ActivityNotFoundException) {
-      try {
-        activity.startActivity(appDetailsIntent())
-        invoke.resolve()
-      } catch (error: Exception) {
-        invoke.reject(error.message)
+      val screen = invoke.parseArgs(AndroidSettingsArgs::class.java).screen
+        ?.trim()
+        .orEmpty()
+
+      activity.runOnUiThread {
+        try {
+          when (screen) {
+            "microphone" -> openPermissionOrSettings(
+              Manifest.permission.RECORD_AUDIO,
+              MICROPHONE_PERMISSION_REQUEST_CODE,
+            )
+            "notifications" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+              openPermissionOrSettings(
+                Manifest.permission.POST_NOTIFICATIONS,
+                NOTIFICATION_PERMISSION_REQUEST_CODE,
+              )
+            } else {
+              openSettings(screen)
+            }
+            else -> openSettings(screen)
+          }
+          invoke.resolve()
+        } catch (error: Exception) {
+          Log.e(TAG, "openAndroidSettings failed on the UI thread", error)
+          invoke.reject(error.message ?: error.javaClass.simpleName ?: "Impossibile aprire le impostazioni Android")
+        }
       }
     } catch (error: Exception) {
-      invoke.reject(error.message)
+      Log.e(TAG, "openAndroidSettings failed before dispatch", error)
+      invoke.reject(error.message ?: error.javaClass.simpleName ?: "Impossibile aprire le impostazioni Android")
     }
   }
 
@@ -87,12 +107,38 @@ class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve()
   }
 
+  private fun openPermissionOrSettings(permission: String, requestCode: Int) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+      activity.checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED
+    ) {
+      activity.requestPermissions(arrayOf(permission), requestCode)
+      return
+    }
+
+    openSettings("app")
+  }
+
+  private fun openSettings(screen: String?) {
+    val intent = settingsIntent(screen).addFlags(SETTINGS_INTENT_FLAGS)
+
+    try {
+      if (intent.resolveActivity(activity.packageManager) != null) {
+        activity.startActivity(intent)
+      } else {
+        activity.startActivity(appDetailsIntent().addFlags(SETTINGS_INTENT_FLAGS))
+      }
+    } catch (_: ActivityNotFoundException) {
+      activity.startActivity(appDetailsIntent().addFlags(SETTINGS_INTENT_FLAGS))
+    }
+  }
+
   private fun settingsIntent(screen: String?): Intent = when (screen) {
     "input_method" -> Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
     "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
       putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
     }
-    "microphone", "battery", "app" -> appDetailsIntent()
+    "battery" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+    "microphone", "app" -> appDetailsIntent()
     else -> appDetailsIntent()
   }
 
@@ -100,4 +146,12 @@ class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
     Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
     Uri.parse("package:${activity.packageName}"),
   )
+
+  private companion object {
+    const val TAG = "VoiceRuntimePlugin"
+    const val MICROPHONE_PERMISSION_REQUEST_CODE = 4101
+    const val NOTIFICATION_PERMISSION_REQUEST_CODE = 4102
+    val SETTINGS_INTENT_FLAGS =
+      Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+  }
 }
