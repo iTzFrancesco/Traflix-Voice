@@ -15,6 +15,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.SoundPool
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -528,8 +529,13 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     }
     runCatching {
       feedbackFallbackPlayer?.release()
-      val player = MediaPlayer.create(this, resourceId, feedbackAudioAttributes())
-        ?: error("MediaPlayer.create returned null")
+      val player = MediaPlayer().apply {
+        setAudioAttributes(feedbackAudioAttributes())
+        setDataSource(this@VoiceAccessibilityService, Uri.parse(
+          "android.resource://$packageName/$resourceId",
+        ))
+        prepare()
+      }
       feedbackFallbackPlayer = player
       player.setVolume(FEEDBACK_VOLUME, FEEDBACK_VOLUME)
       player.setOnCompletionListener {
