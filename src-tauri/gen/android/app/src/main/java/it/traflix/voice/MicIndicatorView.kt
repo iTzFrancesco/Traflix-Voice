@@ -61,7 +61,7 @@ class MicIndicatorView @JvmOverloads constructor(
     contentDescription = when (state) {
       MicIndicatorState.IDLE -> "Avvia dettatura"
       MicIndicatorState.STARTING -> "Avvio dettatura"
-      MicIndicatorState.RECORDING -> "Ferma dettatura"
+      MicIndicatorState.RECORDING -> "Registrazione in corso, indicatore voce in tempo reale"
       MicIndicatorState.PROCESSING -> "Trascrizione in corso"
       MicIndicatorState.SUCCESS -> "Trascrizione completata"
       MicIndicatorState.ERROR -> "Errore trascrizione"

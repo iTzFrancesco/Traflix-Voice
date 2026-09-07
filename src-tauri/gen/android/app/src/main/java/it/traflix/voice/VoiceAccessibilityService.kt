@@ -77,6 +77,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     historyStore = VoiceHistoryStore(this)
     metricsStore = VoiceMetricsStore(this)
     windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+    removeRecordingNotification()
     initializeFeedbackSounds()
 
     serviceInfo = serviceInfo.apply {
@@ -123,6 +124,14 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     playStopSoundIfNeeded()
     hideOverlay()
     cancelRecording()
+  }
+
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    Log.i(TAG, "Traflix task removed; cancelling accessibility recording")
+    playStopSoundIfNeeded()
+    hideOverlay()
+    cancelRecording()
+    super.onTaskRemoved(rootIntent)
   }
 
   override fun onDestroy() {
@@ -272,7 +281,11 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       return
     }
 
-    if (!isTraflixTaskOpen() && recordingEditorKey == null) {
+    if (!isTraflixTaskOpen()) {
+      if (recordingEditorKey != null || recordingForegroundActive) {
+        Log.i(TAG, "Traflix task is closed; cancelling recording and foreground notification")
+        cancelRecording()
+      }
       hideOverlay()
       return
     }
@@ -313,7 +326,10 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       else windowManager.updateViewLayout(view, params)
     } catch (_: Exception) {
       hideOverlay()
+      return
     }
+    mainHandler.removeCallbacks(::refreshOverlay)
+    mainHandler.postDelayed(::refreshOverlay, OVERLAY_REFRESH_INTERVAL_MS)
   }
 
   private fun hideOverlay() {
@@ -577,15 +593,19 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   }
 
   private fun cancelRecording() {
-    if (!::recorder.isInitialized) return
-    recorder.cancel()
+    if (::recorder.isInitialized) recorder.cancel()
     stopRecordingForeground()
     recordingEditorKey = null
+    recordingEditorPackage = null
+    recordingEditorViewId = null
+    recordingEditorClassName = null
+    recordingEditorBounds = null
   }
 
   @Suppress("DEPRECATION")
   private fun startRecordingForeground(): Boolean = runCatching {
     if (recordingForegroundActive) return true
+    removeRecordingNotification()
     createRecordingNotificationChannel()
     val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
     val contentIntent = launchIntent?.let {
@@ -620,13 +640,33 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     }
     recordingForegroundActive = true
     true
-  }.getOrElse { false }
+  }.getOrElse {
+    recordingForegroundActive = false
+    removeRecordingNotification()
+    false
+  }
 
   @Suppress("DEPRECATION")
   private fun stopRecordingForeground() {
-    if (!recordingForegroundActive) return
-    runCatching { stopForeground(true) }
+    runCatching {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
+      } else {
+        stopForeground(true)
+      }
+    }.onFailure {
+      Log.w(TAG, "unable to stop recording foreground service", it)
+    }
     recordingForegroundActive = false
+    removeRecordingNotification()
+  }
+
+  private fun removeRecordingNotification() {
+    runCatching {
+      getSystemService(NotificationManager::class.java).cancel(RECORDING_NOTIFICATION_ID)
+    }.onFailure {
+      Log.w(TAG, "unable to clear recording notification", it)
+    }
   }
 
   private fun createRecordingNotificationChannel() {
@@ -655,6 +695,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     const val RECORDING_CHANNEL_ID = "traflix_voice_recording"
     const val RECORDING_NOTIFICATION_ID = 7102
     const val OVERLAY_REFRESH_DELAY_MS = 180L
+    const val OVERLAY_REFRESH_INTERVAL_MS = 750L
     const val CLIPBOARD_RESTORE_DELAY_MS = 800L
     const val FEEDBACK_VOLUME = 0.52f
   }

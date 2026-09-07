@@ -41,10 +41,16 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     cloudTranscriber = GroqCloudTranscriber(this)
     historyStore = VoiceHistoryStore(this)
     metricsStore = VoiceMetricsStore(this)
+    removeRecordingNotification()
   }
 
   override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
     super.onStartInput(attribute, restarting)
+    if (recordingGeneration != null) {
+      recorder.cancel()
+      stopRecordingForeground()
+      keyboardView?.setState(MicIndicatorState.IDLE)
+    }
     currentEditorInfo = attribute
     editorGeneration += 1
     recordingGeneration = null
@@ -162,6 +168,14 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     super.onDestroy()
   }
 
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    recorder.cancel()
+    stopRecordingForeground()
+    recordingGeneration = null
+    keyboardView?.setState(MicIndicatorState.IDLE)
+    super.onTaskRemoved(rootIntent)
+  }
+
   private fun commitIfEditorStillCurrent(text: String) {
     val targetGeneration = recordingGeneration
     if (targetGeneration == null || targetGeneration != editorGeneration) {
@@ -225,6 +239,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     if (recordingForegroundActive) return true
 
     return runCatching {
+      removeRecordingNotification()
       createRecordingNotificationChannel()
       val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
       val contentIntent = launchIntent?.let {
@@ -262,15 +277,28 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
       true
     }.getOrElse {
       recordingForegroundActive = false
+      removeRecordingNotification()
       false
     }
   }
 
   @Suppress("DEPRECATION")
   private fun stopRecordingForeground() {
-    if (!recordingForegroundActive) return
-    runCatching { stopForeground(true) }
+    runCatching {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
+      } else {
+        stopForeground(true)
+      }
+    }
     recordingForegroundActive = false
+    removeRecordingNotification()
+  }
+
+  private fun removeRecordingNotification() {
+    runCatching {
+      getSystemService(NotificationManager::class.java).cancel(RECORDING_NOTIFICATION_ID)
+    }
   }
 
   private fun createRecordingNotificationChannel() {
