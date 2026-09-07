@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import MobileDashboard, {
   type MobileUpdateInfo,
   type MobileUpdateState,
@@ -33,6 +33,9 @@ export default function MobileApp() {
   const [mobileUpdate, setMobileUpdate] = useState<MobileUpdateInfo | null>(null);
   const [mobileUpdateState, setMobileUpdateState] = useState<MobileUpdateState>("idle");
   const [mobileUpdateError, setMobileUpdateError] = useState("");
+  const mobileUpdateRef = useRef<MobileUpdateInfo | null>(null);
+  const autoUpdateAttemptedTagRef = useRef<string | null>(null);
+  const autoUpdatePermissionPendingRef = useRef(false);
 
   const invoke = useCallback(
     (command: string, args?: Record<string, unknown>) =>
@@ -123,56 +126,87 @@ export default function MobileApp() {
     [invoke],
   );
 
-  const checkMobileUpdate = useCallback(async () => {
-    if (!window.__TAURI__?.core?.invoke) return;
+  const installMobileUpdate = useCallback(
+    async (update: MobileUpdateInfo | null = mobileUpdateRef.current, automatic = false) => {
+      if (!update || !window.__TAURI__?.core?.invoke) return;
+      if (automatic && autoUpdateAttemptedTagRef.current === update.tag) return;
 
-    setMobileUpdateState("checking");
-    setMobileUpdateError("");
-    try {
-      const result = (await invoke("plugin:voice-runtime|checkMobileUpdate")) as Partial<MobileUpdateInfo> | null;
-      if (
-        result?.available === true &&
-        typeof result.tag === "string" &&
-        typeof result.version === "string" &&
-        typeof result.currentVersion === "string" &&
-        typeof result.name === "string" &&
-        typeof result.notes === "string" &&
-        typeof result.publishedAt === "string" &&
-        typeof result.assetName === "string" &&
-        typeof result.size === "number"
-      ) {
-        setMobileUpdate(result as MobileUpdateInfo);
-        setMobileUpdateState("available");
-      } else {
-        setMobileUpdate(null);
+      if (automatic) autoUpdateAttemptedTagRef.current = update.tag;
+      setMobileUpdateState("installing");
+      setMobileUpdateError("");
+      try {
+        const result = (await invoke("plugin:voice-runtime|installMobileUpdate", {
+          tag: update.tag,
+        })) as { status?: string } | null;
+        if (result?.status === "permission_required") {
+          autoUpdateAttemptedTagRef.current = null;
+          autoUpdatePermissionPendingRef.current = automatic;
+          setMobileUpdateState("permission_required");
+          return;
+        }
+        autoUpdatePermissionPendingRef.current = false;
+        setMobileUpdateState("installer_opened");
+      } catch (error) {
+        autoUpdatePermissionPendingRef.current = false;
+        const message = error instanceof Error ? error.message : String(error);
+        setMobileUpdateError(message || "Aggiornamento non riuscito");
+        setMobileUpdateState("error");
+      }
+    },
+    [invoke],
+  );
+
+  const checkMobileUpdate = useCallback(
+    async (automatic = false) => {
+      if (!window.__TAURI__?.core?.invoke) return;
+
+      setMobileUpdateState("checking");
+      setMobileUpdateError("");
+      try {
+        const result = (await invoke("plugin:voice-runtime|checkMobileUpdate")) as Partial<MobileUpdateInfo> | null;
+        if (
+          result?.available === true &&
+          typeof result.tag === "string" &&
+          typeof result.version === "string" &&
+          typeof result.currentVersion === "string" &&
+          typeof result.name === "string" &&
+          typeof result.notes === "string" &&
+          typeof result.publishedAt === "string" &&
+          typeof result.assetName === "string" &&
+          typeof result.size === "number"
+        ) {
+          const update = result as MobileUpdateInfo;
+          mobileUpdateRef.current = update;
+          setMobileUpdate(update);
+          setMobileUpdateState("available");
+          if (automatic) void installMobileUpdate(update, true);
+        } else {
+          mobileUpdateRef.current = null;
+          setMobileUpdate(null);
+          setMobileUpdateState("idle");
+        }
+      } catch (error) {
+        console.warn("[android-update] check failed:", error);
         setMobileUpdateState("idle");
       }
-    } catch (error) {
-      console.warn("[android-update] check failed:", error);
-      setMobileUpdateState("idle");
-    }
-  }, [invoke]);
+    },
+    [installMobileUpdate, invoke],
+  );
 
-  const installMobileUpdate = useCallback(async () => {
-    if (!mobileUpdate || !window.__TAURI__?.core?.invoke) return;
+  useEffect(() => {
+    const retryPendingAutomaticUpdate = () => {
+      if (document.visibilityState !== "visible" || !autoUpdatePermissionPendingRef.current) return;
+      autoUpdatePermissionPendingRef.current = false;
+      void checkMobileUpdate(true);
+    };
 
-    setMobileUpdateState("installing");
-    setMobileUpdateError("");
-    try {
-      const result = (await invoke("plugin:voice-runtime|installMobileUpdate", {
-        tag: mobileUpdate.tag,
-      })) as { status?: string } | null;
-      if (result?.status === "permission_required") {
-        setMobileUpdateState("permission_required");
-        return;
-      }
-      setMobileUpdateState("installer_opened");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setMobileUpdateError(message || "Aggiornamento non riuscito");
-      setMobileUpdateState("error");
-    }
-  }, [invoke, mobileUpdate]);
+    document.addEventListener("visibilitychange", retryPendingAutomaticUpdate);
+    window.addEventListener("focus", retryPendingAutomaticUpdate);
+    return () => {
+      document.removeEventListener("visibilitychange", retryPendingAutomaticUpdate);
+      window.removeEventListener("focus", retryPendingAutomaticUpdate);
+    };
+  }, [checkMobileUpdate]);
 
   useEffect(() => {
     if (IS_DEV) document.title = "Traflix Voice [DEV]";
@@ -200,7 +234,7 @@ export default function MobileApp() {
 
     void init();
     const updateTimer = window.setTimeout(() => {
-      if (!cancelled) void checkMobileUpdate();
+      if (!cancelled) void checkMobileUpdate(true);
     }, 1500);
     return () => {
       cancelled = true;

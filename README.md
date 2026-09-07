@@ -47,12 +47,14 @@ branch. It provides a native Traflix Voice keyboard with hold-to-speak or
 toggle recording, Groq Cloud transcription, encrypted API-key persistence, and
 a small overview/settings/history Hub. The Hub checks GitHub for newer Android
 releases after startup and only considers the `android-vX.Y.Z` tag family and
-the signed `app-universal-release.apk` asset; Windows releases are ignored.
+the signed `app-universal-release.apk` asset; Windows releases are ignored. A
+newer mobile release is downloaded, verified, and sent to the Android installer
+automatically.
 
 The Android branch is currently a private preview. Read the
 [Android architecture plan](docs/android-architecture-plan.md) and the
 [merge-readiness checklist](docs/android-merge-readiness.md) before merging it
-into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.4)
+into `main`. The corrected [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.5)
 contains the installable signed APK. Never distribute an `*-unsigned.apk`;
 Android requires a signed APK for direct installation.
 
@@ -118,12 +120,14 @@ branch. Build and signing instructions are in
 [Android merge readiness](docs/android-merge-readiness.md). A release APK must
 be signed; files ending in `-unsigned.apk` are build intermediates and are not
 valid direct-install packages. The current preview can be downloaded from the
-[Android v0.1.4 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.4).
+[Android v0.1.5 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.5).
 
-The mobile updater checks for a newer Android tag in the background after the
-Hub opens. It downloads only the expected APK asset and opens Android’s package
-installer; Android still requires the user to confirm the update and, on some
-devices, allow installs from this app. Desktop updater behavior is unchanged.
+The mobile updater checks for a newer Android tag after the Hub opens and on
+return from the installer permission screen. It downloads only the expected APK
+asset, verifies its SHA-256 and device ABI, and opens Android’s package installer
+automatically. Android still requires the user to confirm the update and, on
+some devices, allow installs from this app. Desktop updater behavior is
+unchanged.
 
 ## Development and testing
 

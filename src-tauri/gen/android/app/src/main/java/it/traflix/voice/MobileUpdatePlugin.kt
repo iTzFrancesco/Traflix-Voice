@@ -16,7 +16,10 @@ import app.tauri.plugin.Plugin
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
+import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.zip.ZipFile
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -165,6 +168,7 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
     if (release == null || release.optBoolean("draft", true)) return null
 
     val tag = release.optString("tag_name").trim()
+    if (!TAG_PATTERN.matches(tag)) return null
     val version = parseVersion(tag) ?: return null
     val assets = release.optJSONArray("assets") ?: return null
     val apk = (0 until assets.length())
@@ -174,6 +178,8 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
       ?: return null
     val downloadUrl = apk.optString("browser_download_url").trim()
     if (!isAllowedDownloadUrl(downloadUrl)) return null
+    val rawDigest = apk.optString("digest").trim().removePrefix("sha256:").lowercase(Locale.US)
+    if (rawDigest.isNotEmpty() && !SHA256_PATTERN.matches(rawDigest)) return null
 
     return MobileRelease(
       tag = tag,
@@ -184,6 +190,7 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
       assetName = APK_ASSET_NAME,
       size = apk.optLong("size", 0L),
       downloadUrl = downloadUrl,
+      sha256 = rawDigest.ifEmpty { null },
     )
   }
 
@@ -212,6 +219,7 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
       }
 
       var totalBytes = 0L
+      val digest = MessageDigest.getInstance("SHA-256")
       connection.inputStream.use { input ->
         temporaryFile.outputStream().use { output ->
           val buffer = ByteArray(BUFFER_SIZE)
@@ -220,6 +228,7 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
             if (read < 0) break
             totalBytes += read
             if (totalBytes > MAX_APK_BYTES) throw IOException("APK troppo grande")
+            digest.update(buffer, 0, read)
             output.write(buffer, 0, read)
           }
         }
@@ -227,6 +236,13 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
       if (totalBytes == 0L || (update.size > 0L && totalBytes != update.size)) {
         throw IOException("APK incompleto")
       }
+      val actualSha256 = digest.digest().joinToString("") { byte ->
+        "%02x".format(Locale.US, byte.toInt() and 0xff)
+      }
+      if (update.sha256 != null && !update.sha256.equals(actualSha256, ignoreCase = true)) {
+        throw IOException("Hash SHA-256 dell'APK non corrispondente")
+      }
+      validateCompatibleApk(temporaryFile)
       if (!temporaryFile.renameTo(apkFile)) {
         throw IOException("Impossibile preparare l'APK")
       }
@@ -237,6 +253,24 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
       throw error
     } finally {
       connection.disconnect()
+    }
+  }
+
+  private fun validateCompatibleApk(apkFile: java.io.File) {
+    val deviceAbis = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+      Build.SUPPORTED_ABIS.toList()
+    } else {
+      listOf(Build.CPU_ABI, Build.CPU_ABI2).filter(String::isNotEmpty)
+    }
+    val packagedAbis = ZipFile(apkFile).use { zip ->
+      zip.entries().asSequence()
+        .mapNotNull { entry -> NATIVE_LIB_PATTERN.matchEntire(entry.name)?.groupValues?.get(1) }
+        .toSet()
+    }
+    if (packagedAbis.isNotEmpty() && deviceAbis.none { it in packagedAbis }) {
+      throw IOException(
+        "APK non compatibile con l'ABI del dispositivo (${deviceAbis.joinToString()})",
+      )
     }
   }
 
@@ -264,6 +298,7 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
     val assetName: String,
     val size: Long,
     val downloadUrl: String,
+    val sha256: String?,
   ) {
     fun toMap(currentVersion: MobileVersion): Map<String, Any?> = mapOf(
       "available" to true,
@@ -312,5 +347,7 @@ class MobileUpdatePlugin(private val activity: Activity) : Plugin(activity) {
     private const val MAX_NOTES_LENGTH = 2_000
     private val TAG_PATTERN = Regex("android-v\\d+\\.\\d+\\.\\d+(?:[-+].*)?")
     private val VERSION_PATTERN = Regex("(?:android-v)?(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+].*)?")
+    private val SHA256_PATTERN = Regex("[0-9a-f]{64}")
+    private val NATIVE_LIB_PATTERN = Regex("^lib/([^/]+)/.+\\.so$")
   }
 }

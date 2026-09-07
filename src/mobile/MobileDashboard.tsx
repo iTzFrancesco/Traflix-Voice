@@ -309,21 +309,23 @@ export default function MobileDashboard({
           <button
             type="button"
             className="mobile-primary-button"
-            disabled={mobileUpdateState === "installing"}
+            disabled={mobileUpdateState === "installing" || mobileUpdateState === "installer_opened"}
             onClick={() => void onInstallMobileUpdate()}
           >
             {mobileUpdateState === "installing"
-              ? "Download aggiornamento…"
+              ? "Aggiornamento automatico…"
               : mobileUpdateState === "permission_required"
                 ? "Riprova installazione"
+                : mobileUpdateState === "installer_opened"
+                  ? "Installer aperto"
                 : "Installa aggiornamento"}
             <MobileIcon name="arrow" size={18} />
           </button>
           {mobileUpdateState === "permission_required" && (
-            <p className="mobile-helper-text">Abilita l’installazione da questa app nelle impostazioni Android, poi riprova.</p>
+            <p className="mobile-helper-text">Abilita l’installazione da questa app nelle impostazioni Android: al ritorno l’app riproverà automaticamente.</p>
           )}
           {mobileUpdateState === "installer_opened" && (
-            <p className="mobile-helper-text">Il programma di installazione Android è stato aperto.</p>
+            <p className="mobile-helper-text">Download verificato. Conferma l’installazione nella schermata di sistema Android.</p>
           )}
           {mobileUpdateError && <p className="mobile-update-error">{mobileUpdateError}</p>}
         </section>

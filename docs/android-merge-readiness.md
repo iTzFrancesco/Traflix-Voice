@@ -76,7 +76,7 @@ against both desktop and Android builds.
 - The unsigned-artifact failure was reproduced with `apksigner`.
 - The signed preview APK verifies with APK Signature Scheme v2, contains
   `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64`, and reports package
-  `it.traflix.voice` version `1.6.0`.
+  `it.traflix.voice` version `0.1.5`.
 - The merged Android configuration contains only `main` with
   `transparent=false` and `alwaysOnTop=false`; the desktop `overlay` is not
   packaged as an Android startup window.
@@ -85,28 +85,32 @@ against both desktop and Android builds.
   startup linker crash.
 - The Android startup smoke passes on the API 30 x86 emulator across three
   consecutive install-and-launch cycles.
+- The Android ABI smoke requires `arm64-v8a`, `armeabi-v7a`, `x86`, and
+  `x86_64` in the universal APK so ARM phones such as the OPPO A53s are not
+  rejected as incompatible.
 - `cargo check --target aarch64-linux-android` passes with the desktop plugin
   registrations excluded from the Android builder.
 - The Android release build passes Kotlin compilation, R8, and lint with the
   mobile updater bridge retained in the R8 seeds. It reports versionName
-  `0.1.4` and versionCode `1006002`.
+  `0.1.5` and versionCode `1006003`.
 - The mobile updater accepts only non-draft `android-vX.Y.Z` releases with the
-  exact `app-universal-release.apk` asset. It downloads into the app cache and
-  delegates installation to Android's package installer after the user grants
-  the unknown-sources permission when required.
+  exact `app-universal-release.apk` asset. It downloads into the app cache,
+  verifies the published SHA-256 and device ABI, and automatically delegates
+  installation to Android's package installer after the user grants the
+  unknown-sources permission when required.
 
 ## Installable preview artifact
 
 The corrected private test preview is published as
-[`android-v0.1.4`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.4).
+[`android-v0.1.5`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.5).
 Download `app-universal-release.apk` from that release. Its SHA-256 is:
 
 ```text
-bd512bc4c63d37efc1d94c552eec74ac5a823afd98715e811c24d47f11051561
+d6009687c2991ed7a2681ea106190f0dbad0d941e3e97b3b15d34f8eeeb74c44
 ```
 
-The APK is package `it.traflix.voice`, versionName `0.1.4`, and versionCode
-`1006002`. It is signed with the local Android debug keystore for private
+The APK is package `it.traflix.voice`, versionName `0.1.5`, and versionCode
+`1006003`. It is signed with the local Android debug keystore for private
 download and emulator testing, not with the private-preview or production
 certificate. Uninstall an existing preview signed with another key before
 installing it.
@@ -156,6 +160,7 @@ cargo fmt --all -- --check
 cargo test --all
 cd ..
 
+pwsh -NoProfile -File scripts/android-abi-smoke.ps1 -ApkPath path/to/app-universal-release.apk
 pwsh -NoProfile -File scripts/android-startup-smoke.ps1 -ApkPath path/to/app-universal-debug.apk
 ```
 
@@ -173,6 +178,10 @@ export TRAFLIX_ANDROID_KEY_PASSWORD=<key-password>
 
 npm exec tauri -- android build --apk --ci
 ```
+
+Do not pass a single `--target` for the downloadable universal APK. A target
+such as `i686` is reserved for emulator-only smoke builds and produces an APK
+that is not installable on ARM phones.
 
 Validate the generated artifact before sharing it:
 
