@@ -165,16 +165,19 @@ class MicIndicatorView @JvmOverloads constructor(
   }
 
   private fun drawProgress(canvas: Canvas, centerX: Float, centerY: Float) {
-    foregroundPaint.color = Color.WHITE
     foregroundPaint.style = Paint.Style.STROKE
-    foregroundPaint.strokeWidth = dp(2.5f)
+    foregroundPaint.strokeWidth = dp(2f)
     arcRect.set(
       centerX - dp(9f),
       centerY - dp(9f),
       centerX + dp(9f),
       centerY + dp(9f),
     )
-    canvas.drawArc(arcRect, animationPhase * 70f, 250f, false, foregroundPaint)
+    foregroundPaint.color = Color.argb(90, 255, 255, 255)
+    canvas.drawArc(arcRect, 0f, 360f, false, foregroundPaint)
+    foregroundPaint.color = Color.WHITE
+    foregroundPaint.strokeWidth = dp(3f)
+    canvas.drawArc(arcRect, animationPhase * 70f, 105f, false, foregroundPaint)
     foregroundPaint.style = Paint.Style.FILL
   }
 

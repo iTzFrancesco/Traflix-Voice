@@ -11,8 +11,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Rect
-import android.media.AudioManager
-import android.media.ToneGenerator
+import android.media.AudioAttributes
+import android.media.SoundPool
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -52,8 +52,12 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   private var recordingEditorBounds: Rect? = null
   private var recordingForegroundActive = false
   private var lastKeyboardBounds: Rect? = null
-  private var toneGenerator: ToneGenerator? = null
-  private var stopTonePlayed = false
+  private var feedbackSoundPool: SoundPool? = null
+  private val feedbackSoundLock = Any()
+  private val loadedFeedbackSounds = mutableSetOf<Int>()
+  private var startSoundId = 0
+  private var stopSoundId = 0
+  private var stopSoundPlayed = false
 
   override fun onServiceConnected() {
     super.onServiceConnected()
@@ -64,9 +68,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     historyStore = VoiceHistoryStore(this)
     metricsStore = VoiceMetricsStore(this)
     windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-    toneGenerator = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 75) }
-      .onFailure { Log.w(TAG, "unable to initialize feedback tones", it) }
-      .getOrNull()
+    initializeFeedbackSounds()
 
     serviceInfo = serviceInfo.apply {
       eventTypes = AccessibilityEvent.TYPE_VIEW_FOCUSED or
@@ -104,20 +106,19 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
   override fun onInterrupt() {
     Log.w(TAG, "accessibility service interrupted recording=${recordingEditorKey != null}")
-    playStopToneIfNeeded()
+    playStopSoundIfNeeded()
     hideOverlay()
     cancelRecording()
   }
 
   override fun onDestroy() {
     Log.w(TAG, "accessibility service destroyed recording=${recordingEditorKey != null}")
-    playStopToneIfNeeded()
+    playStopSoundIfNeeded()
     hideOverlay()
     cancelRecording()
     if (::recorder.isInitialized) recorder.shutdown()
     if (::cloudTranscriber.isInitialized) cloudTranscriber.shutdown()
-    toneGenerator?.release()
-    toneGenerator = null
+    releaseFeedbackSounds()
     mainHandler.removeCallbacksAndMessages(null)
     clearFocusedEditor()
     super.onDestroy()
@@ -159,9 +160,9 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       stopRecordingForeground()
       recordingEditorKey = null
     } else {
-      stopTonePlayed = false
+      stopSoundPlayed = false
       setOverlayState(MicIndicatorState.RECORDING)
-      playTone(ToneGenerator.TONE_PROP_BEEP2)
+      playStartSound()
       Log.i(TAG, "recording started for focused editor")
     }
   }
@@ -169,7 +170,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
   override fun onRecordingStopRequested() {
     if (recordingEditorKey == null) return
     Log.d(TAG, "recording stop requested")
-    playStopToneIfNeeded()
+    playStopSoundIfNeeded()
     setOverlayState(MicIndicatorState.PROCESSING)
     recorder.stop()
   }
@@ -180,7 +181,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
   override fun onRecordingFinished(file: File, durationMs: Long) {
     Log.i(TAG, "recording finished durationMs=$durationMs")
-    playStopToneIfNeeded()
+    playStopSoundIfNeeded()
     stopRecordingForeground()
     setOverlayState(MicIndicatorState.PROCESSING, "Trascrizione Groq Cloud")
     cloudTranscriber.transcribe(
@@ -216,7 +217,7 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
 
   override fun onRecordingError(message: String) {
     Log.e(TAG, "recording error: $message")
-    playStopToneIfNeeded()
+    playStopSoundIfNeeded()
     stopRecordingForeground()
     recordingEditorKey = null
     setOverlayState(MicIndicatorState.ERROR, message)
@@ -388,20 +389,57 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
       viewId.contains("password", ignoreCase = true)
   }
 
-  private fun playStopToneIfNeeded() {
-    if (recordingEditorKey == null || stopTonePlayed) return
-    stopTonePlayed = true
-    playTone(ToneGenerator.TONE_PROP_BEEP)
+  private fun playStopSoundIfNeeded() {
+    if (recordingEditorKey == null || stopSoundPlayed) return
+    stopSoundPlayed = true
+    playFeedbackSound(stopSoundId)
   }
 
-  private fun playTone(toneType: Int) {
-    val started = runCatching {
-      toneGenerator?.startTone(toneType, TONE_DURATION_MS) == true
-    }.getOrElse {
-      Log.w(TAG, "feedback tone failed", it)
-      false
+  private fun initializeFeedbackSounds() {
+    releaseFeedbackSounds()
+    runCatching {
+      val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+      val pool = SoundPool.Builder()
+        .setMaxStreams(1)
+        .setAudioAttributes(attributes)
+        .build()
+      pool.setOnLoadCompleteListener { _, sampleId, status ->
+        if (status == 0) {
+          synchronized(feedbackSoundLock) { loadedFeedbackSounds.add(sampleId) }
+        } else {
+          Log.w(TAG, "feedback sound load failed status=$status")
+        }
+      }
+      feedbackSoundPool = pool
+      startSoundId = pool.load(this, R.raw.start, 1)
+      stopSoundId = pool.load(this, R.raw.stop, 1)
+    }.onFailure {
+      Log.w(TAG, "unable to initialize feedback sounds", it)
+      releaseFeedbackSounds()
     }
-    if (!started) Log.d(TAG, "feedback tone unavailable type=$toneType")
+  }
+
+  private fun releaseFeedbackSounds() {
+    feedbackSoundPool?.release()
+    feedbackSoundPool = null
+    startSoundId = 0
+    stopSoundId = 0
+    synchronized(feedbackSoundLock) { loadedFeedbackSounds.clear() }
+  }
+
+  private fun playStartSound() {
+    playFeedbackSound(startSoundId)
+  }
+
+  private fun playFeedbackSound(soundId: Int) {
+    if (soundId == 0) return
+    val pool = feedbackSoundPool ?: return
+    val isLoaded = synchronized(feedbackSoundLock) { loadedFeedbackSounds.contains(soundId) }
+    if (!isLoaded) return
+    pool.play(soundId, FEEDBACK_VOLUME, FEEDBACK_VOLUME, 1, 0, 1f)
   }
 
   private fun hasMicrophonePermission(): Boolean =
@@ -501,6 +539,6 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     const val RECORDING_NOTIFICATION_ID = 7102
     const val OVERLAY_REFRESH_DELAY_MS = 180L
     const val CLIPBOARD_RESTORE_DELAY_MS = 800L
-    const val TONE_DURATION_MS = 120
+    const val FEEDBACK_VOLUME = 0.28f
   }
 }
