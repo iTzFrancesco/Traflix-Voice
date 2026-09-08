@@ -33,7 +33,8 @@ function UsageMeter({ label, used, limit, color, footer }: { label: string; used
 
 export default function HomeTab({ stats, settings, selectedProvider, selectedModel, transcriptionStatus, groqUsage }: HomeTabProps) {
   const status = statusMeta[transcriptionStatus] ?? { label: "In preparazione", tone: "#ff9d24" };
-  const modelName = selectedProvider === "cloud" ? "Whisper Large V3 Turbo (Cloud)" : `Whisper ${WHISPER_MODELS.find((m) => m.id === selectedModel)?.name ?? selectedModel}`;
+  const found = WHISPER_MODELS.find((m) => m.id === selectedModel);
+  const modelName = selectedProvider === "cloud" ? "Whisper Large V3 Turbo (Cloud)" : (selectedModel.startsWith("parakeet") ? (found?.name ?? selectedModel) : `Whisper ${found?.name ?? selectedModel}`);
   return <div className="tab-slide-in max-w-[700px] mx-auto w-full">
     <header className="mb-6"><h1 className="page-title m-0">Panoramica</h1></header>
 

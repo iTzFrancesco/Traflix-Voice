@@ -21,7 +21,7 @@ import type {
   Provider,
   Toast,
 } from "../types";
-import { WHISPER_MODELS } from "../types";
+import { DEFAULT_LOCAL_MODEL, WHISPER_MODELS } from "../types";
 
 const TRANSCRIPTION_COOLDOWN_MS = 80;
 
@@ -48,7 +48,7 @@ export default function App() {
 
   // ── STATE ──
   const [activeTab, setActiveTab] = useState("home");
-  const [selectedModel, setSelectedModel] = useState("small");
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_LOCAL_MODEL);
   const [selectedProvider, setSelectedProvider] = useState<Provider>("local");
   const [selectedLanguage, setSelectedLanguage] = useState("it");
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -117,7 +117,7 @@ export default function App() {
     const loaded = await loadStoredSettings();
     if (!loaded) return null;
 
-    setSelectedModel(loaded.model || "small");
+    setSelectedModel(loaded.model || DEFAULT_LOCAL_MODEL);
     setSelectedProvider((loaded.provider as Provider) || "local");
     setSelectedLanguage(loaded.selectedLanguage || "it");
     setHoldToSpeak(loaded.holdToSpeak ?? false);
