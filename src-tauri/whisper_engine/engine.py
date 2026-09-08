@@ -12,6 +12,7 @@ from whisper_engine.constants import (
     BLOCK_SIZE,
     CLOUD_PRE_ROLL_SECONDS,
     CLOUD_TAIL_DRAIN_SECONDS,
+    DEFAULT_LOCAL_MODEL,
 )
 from whisper_engine import model as model_module
 from whisper_engine import audio as audio_module
@@ -111,6 +112,17 @@ class WhisperEngine:
 
             self._loading_in_progress = True
             try:
+                # Free a previously loaded backend before allocating the new
+                # one so peak RSS never holds two ~1 GB recognizers at once.
+                if self.model is not None:
+                    model_module.release_model(self.model)
+                    self.model = None
+                    self.current_model_size = None
+                    try:
+                        import gc
+                        gc.collect()
+                    except Exception:
+                        pass
                 self.model = model_module.load_model(self.models_dir, size, self.log)
                 self.current_model_size = size
                 self._loading_in_progress = False
@@ -119,16 +131,46 @@ class WhisperEngine:
                 raise
 
     def unload_model(self):
+        """Drop the native recognizer and force a collection so RAM is freed now.
+
+        Returns True when a model was actually resident. Emits `unloaded` so
+        the UI can update; emits nothing when there was nothing to free.
+        """
+        with self._model_lock:
+            if self.model is None:
+                return False
+            model, self.model = self.model, None
+            self.current_model_size = None
+        model_module.release_model(model)
+        try:
+            del model
+        except Exception:
+            pass
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
+        self.log({"status": "unloaded", "message": "Modello locale rimosso dalla memoria."})
+        return True
+
+    def _preload_default_model(self, model_size=DEFAULT_LOCAL_MODEL):
         with self._model_lock:
             if self.model is not None:
-                self.model = None
-                self.current_model_size = None
-                self.log({"status": "info", "message": "Modello locale rimosso dalla memoria."})
-
-    def _preload_default_model(self, model_size="small"):
+                return
         loaded_model, size = model_module.preload_default_model(self.models_dir, model_size, self.log)
         if loaded_model is not None:
             with self._model_lock:
+                if self.model is not None:
+                    # A transcribe beat the preload thread; drop the duplicate
+                    # instead of leaking a second ~1 GB recognizer.
+                    model_module.release_model(loaded_model)
+                    try:
+                        import gc
+                        gc.collect()
+                    except Exception:
+                        pass
+                    return
                 self.model = loaded_model
                 self.current_model_size = size
 
@@ -233,20 +275,22 @@ class WhisperEngine:
             indata, frames, time, status, capture_queue, is_recording, self.log
         )
 
-    def _transcribe_cloud(self, recording, language, recording_duration):
+    def _transcribe_cloud(self, recording, language, recording_duration, log_func=None):
+        log = log_func or self.log
         transcriber.transcribe_cloud(recording, language, recording_duration, self.groq_api_key,
-                                     lambda: self._shutting_down, self.log, self.models_dir)
+                                     lambda: self._shutting_down, log, self.models_dir)
 
-    def _transcribe_local(self, recording, model_size, language, recording_duration):
+    def _transcribe_local(self, recording, model_size, language, recording_duration, log_func=None):
+        log = log_func or self.log
         with self._model_lock:
             model = self.model
             if model is None:
-                self.log({"status": "error", "message": "Modello scaricato durante la trascrizione."})
+                log({"status": "error", "message": "Modello scaricato durante la trascrizione."})
                 if not self._shutting_down:
-                    self.log({"status": "ready", "message": "Motore Whisper pronto."})
+                    log({"status": "ready", "message": "Motore Whisper pronto."})
                 return
         transcriber.transcribe_local(model, recording, language, recording_duration,
-                                     self._shutting_down, self.log)
+                                     self._shutting_down, log)
 
     def _process_recording(
         self,
@@ -256,11 +300,19 @@ class WhisperEngine:
         recording_duration,
         provider,
     ):
+        def tagged_log(data):
+            # Tag every result with the backend that produced it so a dictation
+            # is always attributable (local vs cloud) from the UI console and
+            # any future history consumers. Other statuses stay untouched.
+            if data.get("status") == "result" and "provider" not in data:
+                data = {**data, "provider": provider}
+            self.log(data)
+
         try:
             if provider == "cloud":
-                self._transcribe_cloud(recording, language, recording_duration)
+                self._transcribe_cloud(recording, language, recording_duration, tagged_log)
             else:
-                self._transcribe_local(recording, model_size, language, recording_duration)
+                self._transcribe_local(recording, model_size, language, recording_duration, tagged_log)
         except Exception as e:
             self.log({"status": "error", "message": str(e)})
             if not self._shutting_down:

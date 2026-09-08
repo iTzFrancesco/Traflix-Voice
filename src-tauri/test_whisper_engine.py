@@ -26,8 +26,6 @@ import numpy as np
 sys.modules["faster_whisper"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
 sys.modules["huggingface_hub"] = MagicMock()
-sys.modules["pywhispercpp"] = MagicMock()
-sys.modules["pywhispercpp.model"] = MagicMock()
 
 from whisper_engine.engine import WhisperEngine, _RecordingSession
 from whisper_engine.constants import SAMPLE_RATE, BLOCK_SIZE
@@ -222,7 +220,7 @@ class TestRunCommandParsing(unittest.TestCase):
         start_transcription.assert_called_once_with(1, "base", "it")
 
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_cmd_transcribe_defaults_model_to_small(self, _):
+    def test_cmd_transcribe_defaults_model_to_parakeet(self, _):
         engine = self._make_engine()
 
         lines = [
@@ -235,7 +233,7 @@ class TestRunCommandParsing(unittest.TestCase):
         ):
             engine.run()
 
-        start_transcription.assert_called_once_with(0, "small", "it")
+        start_transcription.assert_called_once_with(0, "parakeet-tdt-0.6b-v3-int8", "it")
 
     # -- stop ---------------------------------------------------------------
     @patch("sys.stdout", new_callable=io.StringIO)
@@ -825,63 +823,83 @@ class TestGroqClientLifecycle(unittest.TestCase):
 # Model path construction
 # ---------------------------------------------------------------------------
 class TestModelPath(unittest.TestCase):
+    """Parakeet-only dispatcher: every id resolves to the Parakeet backend."""
 
     def test_download_model_path(self):
-        """download_model should call hf_hub_download with models_dir as local_dir."""
+        """download_model should fetch the Parakeet files into its subdir."""
         engine = WhisperEngine()
-        engine.models_dir = "/home/user/.traflix/models"
 
-        with patch("whisper_engine.model.hf_hub_download") as mock_dl, \
-             patch("whisper_engine.model.verify_model", return_value=(True, "ok")), \
-             patch("sys.stdout", new_callable=io.StringIO):
-            engine.download_model("small")
+        # makedirs() must succeed for the download to start: a hardcoded root
+        # path is not writable on CI runners, so use a temp dir instead.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
 
-        mock_dl.assert_called_once_with(
-            repo_id="ggerganov/whisper.cpp",
-            filename="ggml-small.bin",
-            local_dir="/home/user/.traflix/models",
-            local_dir_use_symlinks=False,
-        )
+            with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
+                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                engine.download_model("parakeet-tdt-0.6b-v3-int8")
 
-    def test_load_model_path(self):
-        """load_model should pass models_dir/ggml-{size}.bin to Model."""
-        import os
+            self.assertEqual(mock_dl.call_count, 4)
+            _, kwargs = mock_dl.call_args_list[0]
+            self.assertEqual(kwargs["repo_id"], "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8")
+            self.assertTrue(kwargs["local_dir"].endswith("parakeet-tdt-0.6b-v3-int8"))
+
+    def test_legacy_model_id_falls_back_to_parakeet(self):
+        """Ids from older settings must not fail; they resolve to Parakeet."""
+        engine = WhisperEngine()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
+
+            with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
+                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                engine.download_model("small")
+
+            self.assertEqual(mock_dl.call_count, 4)
+            statuses = [
+                json.loads(line).get("status")
+                for line in mock_stdout.getvalue().splitlines()
+                if line
+            ]
+            self.assertIn("download_complete", statuses)
+
+    def test_load_model_returns_parakeet_adapter(self):
+        """load_model should build the backend through parakeet.load."""
         engine = WhisperEngine()
         engine.models_dir = "/models"
+        adapter = MagicMock()
 
-        with patch("whisper_engine.model.Model") as MockModel, \
-             patch("whisper_engine.model.verify_model", return_value=(True, "ok")), \
+        with patch("whisper_engine.model.parakeet_backend.load", return_value=adapter) as mock_load, \
              patch("sys.stdout", new_callable=io.StringIO):
-            engine.load_model("large-v2")
+            engine.load_model("parakeet-tdt-0.6b-v3-int8")
 
-        expected_path = os.path.join("/models", "ggml-large-v2.bin")
-        MockModel.assert_called_once_with(expected_path, print_realtime=False, print_progress=False)
+        mock_load.assert_called_once()
+        self.assertIs(engine.model, adapter)
 
     def test_load_model_caches(self):
         """Calling load_model twice with the same size must NOT reload."""
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.model.Model") as MockModel, \
-             patch("whisper_engine.model.verify_model", return_value=(True, "ok")), \
+        with patch("whisper_engine.model.parakeet_backend.load", return_value=MagicMock()) as mock_load, \
              patch("sys.stdout", new_callable=io.StringIO):
-            engine.load_model("small")
-            engine.load_model("small")
+            engine.load_model("parakeet-tdt-0.6b-v3-int8")
+            engine.load_model("parakeet-tdt-0.6b-v3-int8")
 
-        MockModel.assert_called_once()
+        mock_load.assert_called_once()
 
     def test_load_model_reloads_on_size_change(self):
-        """Switching model size should trigger a new Model load."""
+        """Switching model size should trigger a new backend load."""
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
-        with patch("whisper_engine.model.Model") as MockModel, \
-             patch("whisper_engine.model.verify_model", return_value=(True, "ok")), \
+        with patch("whisper_engine.model.parakeet_backend.load", return_value=MagicMock()) as mock_load, \
              patch("sys.stdout", new_callable=io.StringIO):
-            engine.load_model("small")
-            engine.load_model("medium")
+            engine.load_model("parakeet-tdt-0.6b-v3-int8")
+            engine.load_model("other")
 
-        self.assertEqual(MockModel.call_count, 2)
+        self.assertEqual(mock_load.call_count, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -981,7 +999,8 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine = self._setup_engine()
         engine.model.transcribe.side_effect = RuntimeError("model exploded")
 
-        fake_audio = np.zeros((BLOCK_SIZE, 1), dtype=np.float32)
+        # Non-silent audio so the silence gate lets the clip reach inference.
+        fake_audio = np.full((BLOCK_SIZE, 1), 0.5, dtype=np.float32)
         self._mock_input_stream(engine, [fake_audio])
 
         with patch.object(engine, "load_model"):
@@ -1183,10 +1202,12 @@ class TestDownloadModel(unittest.TestCase):
     def test_download_error_logged(self, mock_stdout):
         """If hf_hub_download raises, the error is logged as JSON."""
         engine = WhisperEngine()
-        engine.models_dir = "/models"
 
-        with patch("whisper_engine.model.hf_hub_download", side_effect=OSError("disk full")):
-            engine.download_model("tiny")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
+
+            with patch("whisper_engine.parakeet.hf_hub_download", side_effect=OSError("disk full")):
+                engine.download_model("tiny")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed = [json.loads(l) for l in output_lines if l]
@@ -1197,11 +1218,13 @@ class TestDownloadModel(unittest.TestCase):
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_download_success_logs_complete(self, mock_stdout):
         engine = WhisperEngine()
-        engine.models_dir = "/models"
 
-        with patch("whisper_engine.model.hf_hub_download"), \
-             patch("whisper_engine.model.verify_model", return_value=(True, "ok")):
-            engine.download_model("small")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
+
+            with patch("whisper_engine.parakeet.hf_hub_download"), \
+                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")):
+                engine.download_model("small")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed = [json.loads(l) for l in output_lines if l]
@@ -1361,6 +1384,412 @@ class TestConstants(unittest.TestCase):
 
     def test_block_size(self):
         self.assertEqual(BLOCK_SIZE, 512)
+
+
+# ---------------------------------------------------------------------------
+# Parakeet local backend (sherpa-onnx) -- whisper/cloud paths untouched
+# ---------------------------------------------------------------------------
+class TestParakeetBackend(unittest.TestCase):
+    def setUp(self):
+        from whisper_engine import parakeet as parakeet_module
+        from whisper_engine.constants import DEFAULT_LOCAL_MODEL, PARAKEET_MODEL_ID
+        self.parakeet = parakeet_module
+        self.PARAKEET_MODEL_ID = PARAKEET_MODEL_ID
+        self.assertEqual(DEFAULT_LOCAL_MODEL, "parakeet-tdt-0.6b-v3-int8")
+
+    def test_model_routing(self):
+        self.assertTrue(self.parakeet.is_parakeet_model(self.PARAKEET_MODEL_ID))
+        self.assertFalse(self.parakeet.is_parakeet_model("large-v3-turbo-q5_0"))
+        self.assertFalse(self.parakeet.is_parakeet_model("small"))
+
+    def test_verify_reports_missing_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            is_valid, msg = self.parakeet.verify(temp_dir)
+            self.assertFalse(is_valid)
+            self.assertIn("File non trovato", msg)
+
+    def test_verify_accepts_complete_model_dir(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = self.parakeet.model_dir(temp_dir)
+            os.makedirs(directory)
+            for filename in self.parakeet.FILES:
+                with open(os.path.join(directory, filename), "wb") as f:
+                    f.write(b"x")
+            self.assertEqual(self.parakeet.verify(temp_dir), (True, "OK"))
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_legacy_id_load_logs_fallback_and_uses_parakeet(self, _mock_stdout):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        adapter = MagicMock()
+        events = []
+        with patch("whisper_engine.model.parakeet_backend.load", return_value=adapter) as mock_load:
+            engine.log = events.append
+            engine.load_model("small")
+        mock_load.assert_called_once()
+        self.assertIs(engine.model, adapter)
+        self.assertTrue(any("non supportato" in e.get("message", "") for e in events))
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_parakeet_download_fetches_four_onnx_files(self, mock_stdout):
+        engine = WhisperEngine()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
+            with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
+                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")):
+                engine.download_model(self.PARAKEET_MODEL_ID)
+            self.assertEqual(mock_dl.call_count, 4)
+            filenames = [c.kwargs["filename"] for c in mock_dl.call_args_list]
+            self.assertEqual(list(self.parakeet.FILES), filenames)
+            self.assertEqual(
+                mock_dl.call_args_list[0].kwargs["repo_id"],
+                self.parakeet.REPO_ID,
+            )
+        statuses = [
+            json.loads(line).get("status")
+            for line in mock_stdout.getvalue().splitlines()
+            if line
+        ]
+        self.assertIn("downloading", statuses)
+        self.assertIn("download_complete", statuses)
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_parakeet_load_without_dependency_logs_error(self, mock_stdout):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = self.parakeet.model_dir(temp_dir)
+            os.makedirs(directory)
+            for filename in self.parakeet.FILES:
+                with open(os.path.join(directory, filename), "wb") as f:
+                    f.write(b"x")
+            with patch.dict(sys.modules, {"sherpa_onnx": None}):
+                with self.assertRaises(ImportError):
+                    self.parakeet.load(temp_dir, ipc_module.log)
+        errors = [
+            json.loads(line)
+            for line in mock_stdout.getvalue().splitlines()
+            if line
+        ]
+        self.assertTrue(
+            any(
+                e.get("status") == "error" and "sherpa-onnx" in e.get("message", "")
+                for e in errors
+            )
+        )
+
+    def test_parakeet_adapter_matches_whisper_transcribe_shape(self):
+        stream = MagicMock()
+        stream.result.text = "  ciao mondo  "
+        recognizer = MagicMock()
+        recognizer.create_stream.return_value = stream
+        adapter = self.parakeet.ParakeetRecognizer(recognizer)
+
+        recording = np.linspace(-0.5, 0.5, SAMPLE_RATE, dtype=np.float32)
+        segments = adapter.transcribe(recording, language="it")
+
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].text, "ciao mondo")
+        stream.accept_waveform.assert_called_once()
+        waveform = stream.accept_waveform.call_args.kwargs["waveform"]
+        self.assertEqual(waveform.dtype, np.float32)
+        self.assertEqual(waveform.ndim, 1)
+        recognizer.decode_stream.assert_called_once_with(stream)
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_local_transcription_accepts_parakeet_adapter(self, mock_stdout):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        adapter = MagicMock()
+        segment = MagicMock()
+        segment.text = "prova parakeet"
+        adapter.transcribe.return_value = [segment]
+        with patch.object(engine, "load_model"):
+            engine.model = adapter
+            engine._transcribe_local(
+                np.full(SAMPLE_RATE, 0.05, dtype=np.float32),
+                self.PARAKEET_MODEL_ID,
+                "it",
+                1.0,
+            )
+        results = [
+            json.loads(line)
+            for line in mock_stdout.getvalue().splitlines()
+            if line
+        ]
+        result_logs = [p for p in results if p.get("status") == "result"]
+        self.assertEqual(len(result_logs), 1)
+        self.assertEqual(result_logs[0]["text"], "prova parakeet")
+
+
+# ---------------------------------------------------------------------------
+# Local speed rounds: trim, silence gate, inference threads (cloud untouched)
+# ---------------------------------------------------------------------------
+class TestLocalSpeedRounds(unittest.TestCase):
+    def _engine(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        return engine
+
+    def test_inference_threads_within_bounds(self):
+        from whisper_engine.parakeet import _worker_threads
+        threads = _worker_threads()
+        self.assertGreaterEqual(threads, 1)
+        self.assertLessEqual(threads, 4)
+
+    def test_parakeet_load_forwards_num_threads(self):
+        from whisper_engine import parakeet as parakeet_module
+        fake_sherpa = MagicMock()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = parakeet_module.model_dir(temp_dir)
+            os.makedirs(directory)
+            for filename in parakeet_module.FILES:
+                with open(os.path.join(directory, filename), "wb") as f:
+                    f.write(b"x")
+            with patch.dict(sys.modules, {"sherpa_onnx": fake_sherpa}):
+                parakeet_module.load(temp_dir, lambda data: None, num_threads=2)
+        _, kwargs = fake_sherpa.OfflineRecognizer.from_transducer.call_args
+        self.assertEqual(kwargs["num_threads"], 2)
+        self.assertEqual(kwargs["model_type"], "nemo_transducer")
+
+    def test_prepare_local_recording_is_zero_copy_for_engine_input(self):
+        recording = np.ones(SAMPLE_RATE, dtype=np.float32)
+        prepared = transcriber_module._prepare_local_recording(recording)
+        self.assertTrue(np.shares_memory(prepared, recording))
+
+    def test_prepare_local_recording_normalizes_foreign_input(self):
+        prepared = transcriber_module._prepare_local_recording(
+            np.ones((16, 1), dtype=np.float64)
+        )
+        self.assertEqual(prepared.dtype, np.float32)
+        self.assertEqual(prepared.ndim, 1)
+
+    def test_local_transcribe_trims_edge_silence_before_inference(self):
+        engine = self._engine()
+        adapter = MagicMock()
+        segment = MagicMock()
+        segment.text = "ok"
+        adapter.transcribe.return_value = [segment]
+        engine.model = adapter
+        events = []
+        engine.log = events.append
+
+        speech = np.full(SAMPLE_RATE, 0.05, dtype=np.float32)
+        padded = np.concatenate([np.zeros(SAMPLE_RATE), speech, np.zeros(SAMPLE_RATE)])
+        with patch.object(engine, "load_model"):
+            engine._transcribe_local(padded, "parakeet-tdt-0.6b-v3-int8", "it", 3.0)
+
+        heard = adapter.transcribe.call_args.args[0]
+        self.assertLess(heard.size, padded.size)
+        self.assertGreaterEqual(heard.size, speech.size)
+        self.assertEqual(events[-1]["status"], "result")
+        self.assertEqual(events[-1]["text"], "ok")
+
+    def test_local_transcribe_skips_inference_on_pure_silence(self):
+        engine = self._engine()
+        adapter = MagicMock()
+        engine.model = adapter
+        events = []
+        engine.log = events.append
+
+        with patch.object(engine, "load_model"):
+            engine._transcribe_local(
+                np.zeros(SAMPLE_RATE, dtype=np.float32),
+                "parakeet-tdt-0.6b-v3-int8",
+                "it",
+                1.0,
+            )
+
+        adapter.transcribe.assert_not_called()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["status"], "result")
+        self.assertEqual(events[0]["text"], "")
+        self.assertEqual(events[0]["duration"], 1.0)
+
+
+# ---------------------------------------------------------------------------
+# RAM release + backend probe (unload_model / check_backend IPC)
+# ---------------------------------------------------------------------------
+class TestRamReleaseAndBackendProbe(unittest.TestCase):
+    def test_recognizer_close_drops_native_handle(self):
+        from whisper_engine.parakeet import ParakeetRecognizer
+        adapter = ParakeetRecognizer(MagicMock())
+        self.assertIsNotNone(adapter._recognizer)
+        adapter.close()
+        self.assertIsNone(adapter._recognizer)
+
+    def test_backend_status_reports_missing_dep_actionably(self):
+        from whisper_engine import parakeet as parakeet_module
+        with patch.dict(sys.modules, {"sherpa_onnx": None}):
+            self.assertFalse(parakeet_module.is_backend_available())
+            status = parakeet_module.backend_status()
+        self.assertFalse(status["available"])
+        self.assertIn("sherpa-onnx", status["message"])
+        self.assertIn("py -m pip install", status["message"])
+
+    def test_unload_model_frees_and_emits_unloaded(self):
+        engine = WhisperEngine()
+        adapter = MagicMock()
+        engine.model = adapter
+        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        events = []
+        engine.log = events.append
+        with patch("whisper_engine.model.release_model") as mock_release, \
+             patch("gc.collect") as mock_gc:
+            freed = engine.unload_model()
+        self.assertTrue(freed)
+        mock_release.assert_called_once_with(adapter)
+        mock_gc.assert_called_once()
+        self.assertIsNone(engine.model)
+        self.assertIsNone(engine.current_model_size)
+        self.assertEqual(events[-1]["status"], "unloaded")
+
+    def test_unload_model_without_resident_model_is_noop(self):
+        engine = WhisperEngine()
+        events = []
+        engine.log = events.append
+        self.assertFalse(engine.unload_model())
+        self.assertEqual(events, [])
+
+    def test_load_model_releases_previous_before_reload(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        old_adapter = MagicMock()
+        new_adapter = MagicMock()
+        engine.model = old_adapter
+        engine.current_model_size = "old-id"
+        with patch("whisper_engine.model.parakeet_backend.load", return_value=new_adapter), \
+             patch("whisper_engine.model.release_model") as mock_release, \
+             patch("sys.stdout", new_callable=io.StringIO):
+            engine.load_model("parakeet-tdt-0.6b-v3-int8")
+        mock_release.assert_called_once_with(old_adapter)
+        self.assertIs(engine.model, new_adapter)
+
+    def test_ipc_unload_model_emits_info_when_nothing_loaded(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        events = []
+        engine.log = events.append
+        ipc_module.handle_command("unload_model", {}, engine)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["status"], "info")
+
+    def test_ipc_unload_model_releases_resident_model(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        engine.model = MagicMock()
+        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        events = []
+        engine.log = events.append
+        ipc_module.handle_command("unload_model", {}, engine)
+        self.assertIsNone(engine.model)
+        self.assertEqual(events[-1]["status"], "unloaded")
+
+    def test_ipc_check_backend_reports_availability(self):
+        engine = WhisperEngine()
+        events = []
+        engine.log = events.append
+        with patch(
+            "whisper_engine.model.backend_status",
+            return_value={"available": False, "message": "manca sherpa-onnx"},
+        ):
+            ipc_module.handle_command("check_backend", {}, engine)
+        self.assertEqual(events[-1]["status"], "backend_status")
+        self.assertFalse(events[-1]["available"])
+
+    def test_ipc_get_status_reports_model_loaded_flag(self):
+        engine = WhisperEngine()
+        engine.provider = "local"
+        engine.model = MagicMock()
+        events = []
+        engine.log = events.append
+        ipc_module.handle_command("get_status", {}, engine)
+        self.assertEqual(events[-1]["status"], "ready")
+        self.assertTrue(events[-1].get("model_loaded"))
+
+    def test_set_provider_to_cloud_unloads_ram(self):
+        engine = WhisperEngine()
+        engine.provider = "local"
+        engine.model = MagicMock()
+        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        events = []
+        engine.log = events.append
+        with patch.object(engine, "prepare_groq_client"):
+            ipc_module.handle_command("set_provider", {"provider": "cloud"}, engine)
+        self.assertEqual(engine.provider, "cloud")
+        self.assertIsNone(engine.model)
+        self.assertTrue(any(e.get("status") == "unloaded" for e in events))
+
+    def test_preload_skips_when_model_already_resident(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        engine.model = MagicMock()
+        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        with patch("whisper_engine.model.preload_default_model") as mock_preload:
+            engine._preload_default_model("parakeet-tdt-0.6b-v3-int8")
+        mock_preload.assert_not_called()
+
+    def test_preload_releases_duplicate_when_transcribe_wins_race(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        raced_adapter = MagicMock()
+        preloaded_adapter = MagicMock()
+
+        def _win_race(*_args, **_kwargs):
+            # Simulate a transcribe completing while preload was loading.
+            engine.model = raced_adapter
+            engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+            return preloaded_adapter, "parakeet-tdt-0.6b-v3-int8"
+
+        with patch(
+            "whisper_engine.model.preload_default_model", side_effect=_win_race
+        ), patch("whisper_engine.model.release_model") as mock_release:
+            engine._preload_default_model("parakeet-tdt-0.6b-v3-int8")
+        mock_release.assert_called_once_with(preloaded_adapter)
+        self.assertIs(engine.model, raced_adapter)
+
+    def test_process_recording_tags_local_result_with_provider(self):
+        engine = WhisperEngine()
+        adapter = MagicMock()
+        segment = MagicMock()
+        segment.text = "ciao locale"
+        adapter.transcribe.return_value = [segment]
+        engine.model = adapter
+        events = []
+        engine.log = events.append
+        engine._process_recording(
+            np.full(SAMPLE_RATE, 0.05, dtype=np.float32),
+            "parakeet-tdt-0.6b-v3-int8",
+            "it",
+            2.0,
+            "local",
+        )
+        results = [e for e in events if e.get("status") == "result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["provider"], "local")
+        self.assertEqual(results[0]["text"], "ciao locale")
+
+    def test_process_recording_tags_cloud_result_with_provider(self):
+        engine = WhisperEngine()
+        engine.groq_api_key = "test-key"
+        events = []
+        engine.log = events.append
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.content = "ciao cloud".encode("utf-8")
+        fake_client = MagicMock()
+        fake_client.send.return_value = fake_response
+        with patch.object(
+            transcriber_module, "acquire_groq_client", return_value=fake_client
+        ), patch.object(transcriber_module, "release_groq_client"):
+            engine._process_recording(
+                np.full(SAMPLE_RATE * 2, 0.05, dtype=np.float32),
+                "parakeet-tdt-0.6b-v3-int8",
+                "it",
+                2.0,
+                "cloud",
+            )
+        results = [e for e in events if e.get("status") == "result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["provider"], "cloud")
 
 
 if __name__ == "__main__":

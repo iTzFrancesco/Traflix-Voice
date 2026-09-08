@@ -2,7 +2,7 @@ import sys
 import json
 import threading
 
-from whisper_engine.constants import GROQ_MODEL
+from whisper_engine.constants import DEFAULT_LOCAL_MODEL, GROQ_MODEL
 
 
 _FAST_STATUS_LINES = {
@@ -41,7 +41,7 @@ def handle_command(cmd, data, engine):
         engine.models_dir = data.get("models_dir")
         engine.groq_api_key = data.get("groq_api_key")
         engine.provider = data.get("provider", "local")
-        preload_model = data.get("model", "small")
+        preload_model = data.get("model", DEFAULT_LOCAL_MODEL)
         engine.log({"status": "info", "message": f"Cartella modelli: {engine.models_dir}, provider: {engine.provider}"})
         if engine.provider == "local":
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
@@ -60,9 +60,29 @@ def handle_command(cmd, data, engine):
         elif engine._loading_in_progress:
             engine.log({"status": "loading_model", "message": "Caricamento modello in corso..."})
         elif engine.model is not None:
-            engine.log({"status": "ready", "message": "Modello già caricato."})
+            engine.log({"status": "ready", "message": "Modello già caricato.", "model_loaded": True})
         else:
-            engine.log({"status": "starting", "message": "Motore in fase di avvio..."})
+            engine.log({"status": "starting", "message": "Motore in fase di avvio...", "model_loaded": False})
+    elif cmd == "unload_model":
+        # Manual RAM release requested from the IA tab. load_model() reloads
+        # on the next local transcribe, so freeing here never breaks later
+        # dictations; it only pays a reload on next use.
+        was_loaded = engine.unload_model()
+        if not was_loaded:
+            engine.log({"status": "info", "message": "Nessun modello locale da rimuovere dalla memoria."})
+    elif cmd == "check_backend":
+        # Probe sherpa-onnx without allocating the ~1 GB recognizer. The UI
+        # uses this to explain a local failure before the user retries.
+        try:
+            from whisper_engine import model as _model_module
+            status = _model_module.backend_status()
+        except Exception as e:
+            status = {"available": False, "message": str(e)}
+        engine.log({
+            "status": "backend_status",
+            "available": bool(status.get("available", False)),
+            "message": status.get("message", ""),
+        })
     elif cmd == "set_provider":
         new_provider = data.get("provider", "local")
         old_provider = engine.provider
@@ -75,13 +95,13 @@ def handle_command(cmd, data, engine):
                 daemon=True,
             ).start()
         elif new_provider == "local":
-            preload_model = data.get("model", "small")
+            preload_model = data.get("model", DEFAULT_LOCAL_MODEL)
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
     elif cmd == "transcribe":
         engine.provider = data.get("provider", "local")
         engine.start_transcription(
             data.get("device"),
-            data.get("model", "small"),
+            data.get("model", DEFAULT_LOCAL_MODEL),
             data.get("language", "it"),
         )
     elif cmd == "stop":

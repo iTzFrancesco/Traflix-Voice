@@ -21,7 +21,7 @@ import type {
   Provider,
   Toast,
 } from "../types";
-import { WHISPER_MODELS } from "../types";
+import { DEFAULT_LOCAL_MODEL, WHISPER_MODELS } from "../types";
 
 const TRANSCRIPTION_COOLDOWN_MS = 80;
 
@@ -48,7 +48,7 @@ export default function App() {
 
   // ── STATE ──
   const [activeTab, setActiveTab] = useState("home");
-  const [selectedModel, setSelectedModel] = useState("small");
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_LOCAL_MODEL);
   const [selectedProvider, setSelectedProvider] = useState<Provider>("local");
   const [selectedLanguage, setSelectedLanguage] = useState("it");
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -93,6 +93,7 @@ export default function App() {
     showLoading,
     transcriptionStatus,
     transcriptionText,
+    lastResultProvider,
     downloadInfo,
     gpuStatus,
     activeTranscriptionRef,
@@ -117,7 +118,7 @@ export default function App() {
     const loaded = await loadStoredSettings();
     if (!loaded) return null;
 
-    setSelectedModel(loaded.model || "small");
+    setSelectedModel(WHISPER_MODELS.some((m) => m.id === loaded.model) ? loaded.model : DEFAULT_LOCAL_MODEL);
     setSelectedProvider((loaded.provider as Provider) || "local");
     setSelectedLanguage(loaded.selectedLanguage || "it");
     setHoldToSpeak(loaded.holdToSpeak ?? false);
@@ -438,6 +439,18 @@ export default function App() {
     [settings, persistSettings, selectedModel, showToast, refreshAllModelStatus]
   );
 
+  // ── UNLOAD LOCAL MODEL (free RAM, keep files on disk) ──
+  const handleUnloadModel = useCallback(async () => {
+    try {
+      await window.__TAURI__.core.invoke("send_to_python", {
+        message: JSON.stringify({ command: "unload_model" }),
+      });
+    } catch (err) {
+      console.warn("[unload] Error:", err);
+      showToast("Impossibile liberare la RAM: motore non avviato.", "error");
+    }
+  }, [showToast]);
+
   // ── HOLD TO SPEAK CHANGE (auto‑salvataggio immediato) ──
   const handleHoldToSpeakChange = useCallback(
     async (value: boolean) => {
@@ -610,6 +623,7 @@ export default function App() {
             selectedProvider={selectedProvider}
             selectedModel={selectedModel}
             transcriptionStatus={transcriptionStatus}
+            lastResultProvider={lastResultProvider}
             groqUsage={groqUsage}
 
           />
@@ -624,6 +638,7 @@ export default function App() {
             groqUsage={groqUsage}
             onProviderToggle={handleProviderToggle}
             onModelAction={handleModelAction}
+            onUnloadModel={handleUnloadModel}
           />
         )}
 

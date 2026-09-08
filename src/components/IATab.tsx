@@ -9,6 +9,7 @@ interface IATabProps {
   groqUsage: GroqUsage | null;
   onProviderToggle: (provider: Provider) => void;
   onModelAction: (modelId: string) => void;
+  onUnloadModel?: () => void;
 }
 
 export default function IATab({
@@ -19,6 +20,7 @@ export default function IATab({
   groqUsage,
   onProviderToggle,
   onModelAction,
+  onUnloadModel,
 }: IATabProps) {
   const dailySecs = Number.isFinite(groqUsage?.audio_seconds) && (groqUsage?.audio_seconds ?? 0) >= 0
     ? groqUsage?.audio_seconds ?? 0
@@ -148,6 +150,21 @@ export default function IATab({
               />
             );
           })}
+        </div>
+      )}
+
+      {/* Manual RAM release: frees the ~1.5 GB recognizer without deleting files */}
+      {selectedProvider !== "cloud" && onUnloadModel && (
+        <div className="panel-subtle p-3 mt-3 flex flex-col gap-2">
+          <p className="m-0 text-[.76rem] leading-5 text-[var(--muted)]">
+            Il modello resta caricato in RAM (~1.5 GB) per dettati istantanei. Se la RAM resta alta, scaricalo dalla memoria: i file restano su disco e verrà ricaricato al prossimo dettato.
+          </p>
+          <button
+            className="w-full text-center py-2 px-4 rounded-xl border font-bold text-[0.78rem] bg-transparent text-[var(--muted)] border-[rgba(255,255,255,0.12)] cursor-pointer hover:text-[var(--ink)] hover:border-[rgba(255,255,255,0.25)] transition-colors"
+            onClick={onUnloadModel}
+          >
+            Libera RAM (scarica modello dalla memoria)
+          </button>
         </div>
       )}
     </div>

@@ -61,7 +61,7 @@ impl Default for AppSettings {
         AppSettings {
             hotkey: "XBUTTON2".to_string(),
             secondary_hotkey: String::new(),
-            model: "small".to_string(),
+            model: "parakeet-tdt-0.6b-v3-int8".to_string(),
             auto_paste: None,
             minimize_tray: true,
             selected_device: "default".to_string(),

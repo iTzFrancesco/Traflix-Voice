@@ -64,6 +64,9 @@ export interface PythonEvent {
   current_device?: string;
   device_name?: string;
   cuda_available?: boolean;
+  available?: boolean;
+  model_loaded?: boolean;
+  provider?: string;
 }
 
 export type Provider = "local" | "cloud";
@@ -76,25 +79,17 @@ export interface Toast {
   type: ToastType;
 }
 
+export const DEFAULT_LOCAL_MODEL = "parakeet-tdt-0.6b-v3-int8";
+
 export const WHISPER_MODELS: WhisperModel[] = [
   {
-    id: "base",
-    name: "Base",
-    size: "145 MB",
-    ram: "~1 GB",
-    speed: 4,
-    quality: 2,
-    tag: "Veloce",
-    description: "Leggero e reattivo. Buona scelta per dettatura rapida con hardware limitato.",
-  },
-  {
-    id: "small",
-    name: "Small",
-    size: "466 MB",
-    ram: "~2 GB",
-    speed: 3,
-    quality: 3,
+    id: "parakeet-tdt-0.6b-v3-int8",
+    name: "Parakeet TDT 0.6B V3",
+    size: "~670 MB",
+    ram: "~1.5 GB",
+    speed: 5,
+    quality: 4,
     tag: "Consigliato",
-    description: "Miglior equilibrio velocità/precisione. Ottimo per dettatura quotidiana in italiano.",
+    description: "Modello NVIDIA rapidissimo su CPU con ottimo italiano. Richiede il pacchetto extra sherpa-onnx (py -m pip install sherpa-onnx, poi riavvia).",
   },
 ];
