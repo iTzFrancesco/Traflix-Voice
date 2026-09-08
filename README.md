@@ -63,7 +63,7 @@ Android requires a signed APK for direct installation.
 
 ## Features
 
-- Local Whisper transcription through `whisper.cpp` and `pywhispercpp`.
+- Local Parakeet TDT 0.6B v3 transcription through `sherpa-onnx` (int8 ONNX, CPU).
 - Optional Groq transcription using `whisper-large-v3-turbo`.
 - Configurable global hotkeys, click-to-toggle, and hold-to-speak recording.
 - Automatic paste into the focused application.
@@ -186,7 +186,7 @@ silently alter the other runtime.
 
 ## Third-party components
 
-Traflix Voice uses Whisper/whisper.cpp, `pywhispercpp`, Hugging Face model
+Traflix Voice uses Parakeet (NVIDIA, CC-BY-4.0) via `sherpa-onnx`, Hugging Face model
 hosting, and the optional Groq API. These components remain subject to their
 own licenses and terms. Traflix Voice is independent and is not affiliated
 with OpenAI, Groq, or Hugging Face.

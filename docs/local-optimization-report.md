@@ -4,6 +4,10 @@ Data: 2026-09-08. Perimetro: solo `transcribe_local` e caricamento modelli local
 **Il percorso cloud/Groq non è stato toccato** (stesso endpoint, stesso modello,
 stessi test invariati e verdi).
 
+> Esito: i round sul Turbo hanno dimostrato che è intrinsecamente lento su CPU
+> (~40+ s per qualsiasi clip). Turbo e il backend whisper.cpp sono stati rimossi:
+> il locale ora è solo Parakeet. I round Turbo restano agli atti come evidenza.
+
 ## Metodo (sandbox)
 
 - Harness: `scripts/benchmark_local.py` (warmup + rep, mediana, RTF, WER, `--json-out`),

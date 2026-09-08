@@ -26,14 +26,28 @@ cloud = Groq `whisper-large-v3-turbo`.
 | HuggingFace Inference Providers | Free limitato, turbo disponibile, possibili cold start | Basso: API OpenAI-compatible — riserva |
 | ❌ OpenAI / Deepgram / AssemblyAI / ElevenLabs / Voxtral API | Pagamento o solo crediti trial | Scartati |
 
-## Cosa fare
+## Cosa fare (decisione finale: solo Parakeet)
 
-1. **Subito (locale)**: `large-v3-turbo` (o `large-v3-turbo-q8_0` se RAM contesa) come
-   nuovo default al posto di small/large-v3. È già scaricabile dal repo whisper.cpp
-   usato da `download_model` — basta aggiungere gli ID a `WHISPER_MODELS`.
-2. **Subito (cloud)**: nessuna urgenza — Groq turbo resta gratis, generoso e attuale.
-3. **Medio termine**: Parakeet v3 via `sherpa-onnx` come modalità "veloce" locale;
-   Gemini free come secondo provider cloud.
+I round di `docs/local-optimization-report.md` hanno mostrato Turbo Q5
+intrinsecamente lento su CPU (~40+ s per qualsiasi clip). Decisione: **Turbo
+rimosso del tutto, locale = solo Parakeet TDT 0.6B v3**.
+
+Per il cloud nessuna urgenza: Groq turbo resta gratis, generoso e attuale;
+Gemini free resta l'opzione come eventuale secondo provider.
+
+## Verifica reale (8 sett 2026, implementato)
+
+Entrambi i modelli locali sono stati scaricati e provati sullo stesso spezzone
+francese da 5 s. Trascrizione identica e corretta in tutti i casi.
+
+| Modello | Peso disco | RAM misurata | Tempo (stessa CPU debole) |
+|---|---|---|---|
+| `large-v3-turbo-q5_0` (whisper.cpp) | 574 MB | ~800 MB (573 modello + buffer) | ~48 s (encoder large intero, lento su CPU) |
+| `parakeet-tdt-0.6b-v3-int8` (sherpa-onnx) | 670 MB | ~1 GB | **~1,5 s (~30× più veloce)** |
+
+Nota tecnica: gli export int8 esistenti richiedono `model_type="nemo_transducer"`
+con sherpa-onnx moderno, altrimenti il caricamento fallisce (metadata `vocab_size`
+assente nel decoder). Già gestito in `whisper_engine/parakeet.py`.
 
 Fonti: API Hugging Face (repo `ggerganov/whisper.cpp`, `nvidia/parakeet-tdt-0.6b-v3`,
 `csukuangfj/sherpa-onnx-*`, `Systran/faster-whisper-large-v3`), docs Groq
