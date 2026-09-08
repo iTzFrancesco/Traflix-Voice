@@ -2,7 +2,7 @@ import sys
 import json
 import threading
 
-from whisper_engine.constants import GROQ_MODEL
+from whisper_engine.constants import DEFAULT_LOCAL_MODEL, GROQ_MODEL
 
 
 _FAST_STATUS_LINES = {
@@ -41,7 +41,7 @@ def handle_command(cmd, data, engine):
         engine.models_dir = data.get("models_dir")
         engine.groq_api_key = data.get("groq_api_key")
         engine.provider = data.get("provider", "local")
-        preload_model = data.get("model", "small")
+        preload_model = data.get("model", DEFAULT_LOCAL_MODEL)
         engine.log({"status": "info", "message": f"Cartella modelli: {engine.models_dir}, provider: {engine.provider}"})
         if engine.provider == "local":
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
@@ -75,13 +75,13 @@ def handle_command(cmd, data, engine):
                 daemon=True,
             ).start()
         elif new_provider == "local":
-            preload_model = data.get("model", "small")
+            preload_model = data.get("model", DEFAULT_LOCAL_MODEL)
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
     elif cmd == "transcribe":
         engine.provider = data.get("provider", "local")
         engine.start_transcription(
             data.get("device"),
-            data.get("model", "small"),
+            data.get("model", DEFAULT_LOCAL_MODEL),
             data.get("language", "it"),
         )
     elif cmd == "stop":

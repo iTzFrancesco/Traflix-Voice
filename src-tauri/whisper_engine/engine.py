@@ -12,6 +12,7 @@ from whisper_engine.constants import (
     BLOCK_SIZE,
     CLOUD_PRE_ROLL_SECONDS,
     CLOUD_TAIL_DRAIN_SECONDS,
+    DEFAULT_LOCAL_MODEL,
 )
 from whisper_engine import model as model_module
 from whisper_engine import audio as audio_module
@@ -125,7 +126,7 @@ class WhisperEngine:
                 self.current_model_size = None
                 self.log({"status": "info", "message": "Modello locale rimosso dalla memoria."})
 
-    def _preload_default_model(self, model_size="small"):
+    def _preload_default_model(self, model_size=DEFAULT_LOCAL_MODEL):
         loaded_model, size = model_module.preload_default_model(self.models_dir, model_size, self.log)
         if loaded_model is not None:
             with self._model_lock:
