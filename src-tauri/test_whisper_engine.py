@@ -855,7 +855,9 @@ class TestModelPath(unittest.TestCase):
             engine.load_model("large-v2")
 
         expected_path = os.path.join("/models", "ggml-large-v2.bin")
-        MockModel.assert_called_once_with(expected_path, print_realtime=False, print_progress=False)
+        from whisper_engine.model import inference_threads
+        MockModel.assert_called_once_with(expected_path, print_realtime=False, print_progress=False,
+                                           n_threads=inference_threads())
 
     def test_load_model_caches(self):
         """Calling load_model twice with the same size must NOT reload."""
@@ -981,7 +983,8 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine = self._setup_engine()
         engine.model.transcribe.side_effect = RuntimeError("model exploded")
 
-        fake_audio = np.zeros((BLOCK_SIZE, 1), dtype=np.float32)
+        # Non-silent audio so the silence gate lets the clip reach inference.
+        fake_audio = np.full((BLOCK_SIZE, 1), 0.5, dtype=np.float32)
         self._mock_input_stream(engine, [fake_audio])
 
         with patch.object(engine, "load_model"):
@@ -1364,6 +1367,8 @@ class TestConstants(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Local speed rounds: trim, silence gate, inference threads (cloud untouched)
+# ---------------------------------------------------------------------------
 # Parakeet local backend (sherpa-onnx) -- whisper/cloud paths untouched
 # ---------------------------------------------------------------------------
 class TestParakeetBackend(unittest.TestCase):
@@ -1496,6 +1501,89 @@ class TestParakeetBackend(unittest.TestCase):
         result_logs = [p for p in results if p.get("status") == "result"]
         self.assertEqual(len(result_logs), 1)
         self.assertEqual(result_logs[0]["text"], "prova parakeet")
+
+
+# ---------------------------------------------------------------------------
+class TestLocalSpeedRounds(unittest.TestCase):
+    def _engine(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        return engine
+
+    def test_inference_threads_within_bounds(self):
+        from whisper_engine.model import inference_threads
+        threads = inference_threads()
+        self.assertGreaterEqual(threads, 1)
+        self.assertLessEqual(threads, 8)
+
+    def test_parakeet_load_forwards_num_threads(self):
+        from whisper_engine import parakeet as parakeet_module
+        fake_sherpa = MagicMock()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = parakeet_module.model_dir(temp_dir)
+            os.makedirs(directory)
+            for filename in parakeet_module.FILES:
+                with open(os.path.join(directory, filename), "wb") as f:
+                    f.write(b"x")
+            with patch.dict(sys.modules, {"sherpa_onnx": fake_sherpa}):
+                parakeet_module.load(temp_dir, lambda data: None, num_threads=2)
+        _, kwargs = fake_sherpa.OfflineRecognizer.from_transducer.call_args
+        self.assertEqual(kwargs["num_threads"], 2)
+        self.assertEqual(kwargs["model_type"], "nemo_transducer")
+
+    def test_prepare_local_recording_is_zero_copy_for_engine_input(self):
+        recording = np.ones(SAMPLE_RATE, dtype=np.float32)
+        prepared = transcriber_module._prepare_local_recording(recording)
+        self.assertTrue(np.shares_memory(prepared, recording))
+
+    def test_prepare_local_recording_normalizes_foreign_input(self):
+        prepared = transcriber_module._prepare_local_recording(
+            np.ones((16, 1), dtype=np.float64)
+        )
+        self.assertEqual(prepared.dtype, np.float32)
+        self.assertEqual(prepared.ndim, 1)
+
+    def test_local_transcribe_trims_edge_silence_before_inference(self):
+        engine = self._engine()
+        adapter = MagicMock()
+        segment = MagicMock()
+        segment.text = "ok"
+        adapter.transcribe.return_value = [segment]
+        engine.model = adapter
+        events = []
+        engine.log = events.append
+
+        speech = np.full(SAMPLE_RATE, 0.05, dtype=np.float32)
+        padded = np.concatenate([np.zeros(SAMPLE_RATE), speech, np.zeros(SAMPLE_RATE)])
+        with patch.object(engine, "load_model"):
+            engine._transcribe_local(padded, "parakeet-tdt-0.6b-v3-int8", "it", 3.0)
+
+        heard = adapter.transcribe.call_args.args[0]
+        self.assertLess(heard.size, padded.size)
+        self.assertGreaterEqual(heard.size, speech.size)
+        self.assertEqual(events[-1]["status"], "result")
+        self.assertEqual(events[-1]["text"], "ok")
+
+    def test_local_transcribe_skips_inference_on_pure_silence(self):
+        engine = self._engine()
+        adapter = MagicMock()
+        engine.model = adapter
+        events = []
+        engine.log = events.append
+
+        with patch.object(engine, "load_model"):
+            engine._transcribe_local(
+                np.zeros(SAMPLE_RATE, dtype=np.float32),
+                "parakeet-tdt-0.6b-v3-int8",
+                "it",
+                1.0,
+            )
+
+        adapter.transcribe.assert_not_called()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["status"], "result")
+        self.assertEqual(events[0]["text"], "")
+        self.assertEqual(events[0]["duration"], 1.0)
 
 
 if __name__ == "__main__":
