@@ -1595,5 +1595,192 @@ class TestLocalSpeedRounds(unittest.TestCase):
         self.assertEqual(events[0]["duration"], 1.0)
 
 
+# ---------------------------------------------------------------------------
+# RAM release + backend probe (unload_model / check_backend IPC)
+# ---------------------------------------------------------------------------
+class TestRamReleaseAndBackendProbe(unittest.TestCase):
+    def test_recognizer_close_drops_native_handle(self):
+        from whisper_engine.parakeet import ParakeetRecognizer
+        adapter = ParakeetRecognizer(MagicMock())
+        self.assertIsNotNone(adapter._recognizer)
+        adapter.close()
+        self.assertIsNone(adapter._recognizer)
+
+    def test_backend_status_reports_missing_dep_actionably(self):
+        from whisper_engine import parakeet as parakeet_module
+        with patch.dict(sys.modules, {"sherpa_onnx": None}):
+            self.assertFalse(parakeet_module.is_backend_available())
+            status = parakeet_module.backend_status()
+        self.assertFalse(status["available"])
+        self.assertIn("sherpa-onnx", status["message"])
+        self.assertIn("py -m pip install", status["message"])
+
+    def test_unload_model_frees_and_emits_unloaded(self):
+        engine = WhisperEngine()
+        adapter = MagicMock()
+        engine.model = adapter
+        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        events = []
+        engine.log = events.append
+        with patch("whisper_engine.model.release_model") as mock_release, \
+             patch("gc.collect") as mock_gc:
+            freed = engine.unload_model()
+        self.assertTrue(freed)
+        mock_release.assert_called_once_with(adapter)
+        mock_gc.assert_called_once()
+        self.assertIsNone(engine.model)
+        self.assertIsNone(engine.current_model_size)
+        self.assertEqual(events[-1]["status"], "unloaded")
+
+    def test_unload_model_without_resident_model_is_noop(self):
+        engine = WhisperEngine()
+        events = []
+        engine.log = events.append
+        self.assertFalse(engine.unload_model())
+        self.assertEqual(events, [])
+
+    def test_load_model_releases_previous_before_reload(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        old_adapter = MagicMock()
+        new_adapter = MagicMock()
+        engine.model = old_adapter
+        engine.current_model_size = "old-id"
+        with patch("whisper_engine.model.parakeet_backend.load", return_value=new_adapter), \
+             patch("whisper_engine.model.release_model") as mock_release, \
+             patch("sys.stdout", new_callable=io.StringIO):
+            engine.load_model("parakeet-tdt-0.6b-v3-int8")
+        mock_release.assert_called_once_with(old_adapter)
+        self.assertIs(engine.model, new_adapter)
+
+    def test_ipc_unload_model_emits_info_when_nothing_loaded(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        events = []
+        engine.log = events.append
+        ipc_module.handle_command("unload_model", {}, engine)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["status"], "info")
+
+    def test_ipc_unload_model_releases_resident_model(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        engine.model = MagicMock()
+        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        events = []
+        engine.log = events.append
+        ipc_module.handle_command("unload_model", {}, engine)
+        self.assertIsNone(engine.model)
+        self.assertEqual(events[-1]["status"], "unloaded")
+
+    def test_ipc_check_backend_reports_availability(self):
+        engine = WhisperEngine()
+        events = []
+        engine.log = events.append
+        with patch(
+            "whisper_engine.model.backend_status",
+            return_value={"available": False, "message": "manca sherpa-onnx"},
+        ):
+            ipc_module.handle_command("check_backend", {}, engine)
+        self.assertEqual(events[-1]["status"], "backend_status")
+        self.assertFalse(events[-1]["available"])
+
+    def test_ipc_get_status_reports_model_loaded_flag(self):
+        engine = WhisperEngine()
+        engine.provider = "local"
+        engine.model = MagicMock()
+        events = []
+        engine.log = events.append
+        ipc_module.handle_command("get_status", {}, engine)
+        self.assertEqual(events[-1]["status"], "ready")
+        self.assertTrue(events[-1].get("model_loaded"))
+
+    def test_set_provider_to_cloud_unloads_ram(self):
+        engine = WhisperEngine()
+        engine.provider = "local"
+        engine.model = MagicMock()
+        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        events = []
+        engine.log = events.append
+        with patch.object(engine, "prepare_groq_client"):
+            ipc_module.handle_command("set_provider", {"provider": "cloud"}, engine)
+        self.assertEqual(engine.provider, "cloud")
+        self.assertIsNone(engine.model)
+        self.assertTrue(any(e.get("status") == "unloaded" for e in events))
+
+    def test_preload_skips_when_model_already_resident(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        engine.model = MagicMock()
+        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        with patch("whisper_engine.model.preload_default_model") as mock_preload:
+            engine._preload_default_model("parakeet-tdt-0.6b-v3-int8")
+        mock_preload.assert_not_called()
+
+    def test_preload_releases_duplicate_when_transcribe_wins_race(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        raced_adapter = MagicMock()
+        preloaded_adapter = MagicMock()
+
+        def _win_race(*_args, **_kwargs):
+            # Simulate a transcribe completing while preload was loading.
+            engine.model = raced_adapter
+            engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+            return preloaded_adapter, "parakeet-tdt-0.6b-v3-int8"
+
+        with patch(
+            "whisper_engine.model.preload_default_model", side_effect=_win_race
+        ), patch("whisper_engine.model.release_model") as mock_release:
+            engine._preload_default_model("parakeet-tdt-0.6b-v3-int8")
+        mock_release.assert_called_once_with(preloaded_adapter)
+        self.assertIs(engine.model, raced_adapter)
+
+    def test_process_recording_tags_local_result_with_provider(self):
+        engine = WhisperEngine()
+        adapter = MagicMock()
+        segment = MagicMock()
+        segment.text = "ciao locale"
+        adapter.transcribe.return_value = [segment]
+        engine.model = adapter
+        events = []
+        engine.log = events.append
+        engine._process_recording(
+            np.full(SAMPLE_RATE, 0.05, dtype=np.float32),
+            "parakeet-tdt-0.6b-v3-int8",
+            "it",
+            2.0,
+            "local",
+        )
+        results = [e for e in events if e.get("status") == "result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["provider"], "local")
+        self.assertEqual(results[0]["text"], "ciao locale")
+
+    def test_process_recording_tags_cloud_result_with_provider(self):
+        engine = WhisperEngine()
+        engine.groq_api_key = "test-key"
+        events = []
+        engine.log = events.append
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.content = "ciao cloud".encode("utf-8")
+        fake_client = MagicMock()
+        fake_client.send.return_value = fake_response
+        with patch.object(
+            transcriber_module, "acquire_groq_client", return_value=fake_client
+        ), patch.object(transcriber_module, "release_groq_client"):
+            engine._process_recording(
+                np.full(SAMPLE_RATE * 2, 0.05, dtype=np.float32),
+                "parakeet-tdt-0.6b-v3-int8",
+                "it",
+                2.0,
+                "cloud",
+            )
+        results = [e for e in events if e.get("status") == "result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["provider"], "cloud")
+
+
 if __name__ == "__main__":
     unittest.main()

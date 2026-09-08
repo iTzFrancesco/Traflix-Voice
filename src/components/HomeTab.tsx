@@ -7,6 +7,7 @@ interface HomeTabProps {
   selectedProvider: Provider;
   selectedModel: string;
   transcriptionStatus: string;
+  lastResultProvider?: string | null;
   groqUsage: GroqUsage | null;
 }
 
@@ -31,8 +32,9 @@ function UsageMeter({ label, used, limit, color, footer }: { label: string; used
   </div>;
 }
 
-export default function HomeTab({ stats, settings, selectedProvider, selectedModel, transcriptionStatus, groqUsage }: HomeTabProps) {
+export default function HomeTab({ stats, settings, selectedProvider, selectedModel, transcriptionStatus, lastResultProvider, groqUsage }: HomeTabProps) {
   const status = statusMeta[transcriptionStatus] ?? { label: "In preparazione", tone: "#ff9d24" };
+  const lastEngineLabel = lastResultProvider === "cloud" ? "Cloud" : lastResultProvider === "local" ? "Locale" : "—";
   const found = WHISPER_MODELS.find((m) => m.id === selectedModel);
   const modelName = selectedProvider === "cloud" ? "Whisper Large V3 Turbo (Cloud)" : (selectedModel.startsWith("parakeet") ? (found?.name ?? selectedModel) : `Whisper ${found?.name ?? selectedModel}`);
   return <div className="tab-slide-in max-w-[700px] mx-auto w-full">
@@ -57,7 +59,7 @@ export default function HomeTab({ stats, settings, selectedProvider, selectedMod
           </div>
         </div>
       </div>
-      <dl className="m-0 grid gap-3"><div className="flex items-baseline justify-between gap-4 border-b border-white/[.07] pb-3"><dt className="text-[.76rem] text-[var(--muted)]">Scorciatoia attiva</dt><dd className="m-0 font-mono text-[.78rem] font-bold text-[var(--accent)]">{settings?.hotkey ?? "Caricamento…"}</dd></div><div className="flex items-baseline justify-between gap-4"><dt className="text-[.76rem] text-[var(--muted)]">Modello in uso</dt><dd className="m-0 text-right text-[.78rem] font-semibold text-[var(--ink)]">{modelName}</dd></div></dl>
+      <dl className="m-0 grid gap-3"><div className="flex items-baseline justify-between gap-4 border-b border-white/[.07] pb-3"><dt className="text-[.76rem] text-[var(--muted)]">Scorciatoia attiva</dt><dd className="m-0 font-mono text-[.78rem] font-bold text-[var(--accent)]">{settings?.hotkey ?? "Caricamento…"}</dd></div><div className="flex items-baseline justify-between gap-4 border-b border-white/[.07] pb-3"><dt className="text-[.76rem] text-[var(--muted)]">Modello in uso</dt><dd className="m-0 text-right text-[.78rem] font-semibold text-[var(--ink)]">{modelName}</dd></div><div className="flex items-baseline justify-between gap-4"><dt className="text-[.76rem] text-[var(--muted)]">Ultimo motore usato</dt><dd className="m-0 text-right text-[.78rem] font-semibold text-[var(--ink)]">{lastEngineLabel}</dd></div></dl>
     </section>
 
     {selectedProvider === "cloud" && <section className="panel p-5" aria-label="Utilizzo Cloud">

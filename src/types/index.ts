@@ -64,6 +64,9 @@ export interface PythonEvent {
   current_device?: string;
   device_name?: string;
   cuda_available?: boolean;
+  available?: boolean;
+  model_loaded?: boolean;
+  provider?: string;
 }
 
 export type Provider = "local" | "cloud";
@@ -87,6 +90,6 @@ export const WHISPER_MODELS: WhisperModel[] = [
     speed: 5,
     quality: 4,
     tag: "Consigliato",
-    description: "Modello NVIDIA rapidissimo su CPU con ottimo italiano. Richiede il pacchetto extra sherpa-onnx.",
+    description: "Modello NVIDIA rapidissimo su CPU con ottimo italiano. Richiede il pacchetto extra sherpa-onnx (py -m pip install sherpa-onnx, poi riavvia).",
   },
 ];

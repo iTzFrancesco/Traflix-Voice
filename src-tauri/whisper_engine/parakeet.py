@@ -14,8 +14,28 @@ REPO_ID = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
 _MISSING_DEP_MESSAGE = (
     "Backend Parakeet non disponibile: pacchetto 'sherpa-onnx' non installato. "
-    "Esegui: pip install sherpa-onnx"
+    "Installalo con: py -m pip install sherpa-onnx (Windows) oppure "
+    "python3 -m pip install sherpa-onnx, poi riavvia l'app. "
+    "In alternativa passa al provider Cloud nella tab IA."
 )
+
+
+def is_backend_available():
+    """True when the sherpa-onnx wheel can be imported in this interpreter."""
+    try:
+        import sherpa_onnx  # noqa: F401
+        return True
+    except ImportError:
+        return False
+    except Exception:
+        return False
+
+
+def backend_status():
+    """Machine-readable backend probe used by the `check_backend` IPC command."""
+    if is_backend_available():
+        return {"available": True, "message": "Backend sherpa-onnx disponibile."}
+    return {"available": False, "message": _MISSING_DEP_MESSAGE}
 
 
 def is_parakeet_model(size):
@@ -70,6 +90,19 @@ class ParakeetRecognizer:
 
     def __init__(self, recognizer):
         self._recognizer = recognizer
+
+    def close(self):
+        """Drop the native recognizer so RSS is released on unload.
+
+        sherpa-onnx holds ONNX sessions (~1 GB) behind this handle. Clearing
+        the reference plus gc.collect() in the engine is what actually frees
+        the RAM; without it `model = None` alone can leave the memory mapped
+        until the next collection cycle.
+        """
+        try:
+            self._recognizer = None
+        except Exception:
+            pass
 
     def transcribe(self, recording, language=""):
         audio = np.ascontiguousarray(recording, dtype=np.float32).reshape(-1)

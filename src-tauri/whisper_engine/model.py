@@ -8,6 +8,26 @@ failing, so existing installs keep working after the switch.
 from whisper_engine import parakeet as parakeet_backend
 
 
+def is_backend_available():
+    return parakeet_backend.is_backend_available()
+
+
+def backend_status():
+    return parakeet_backend.backend_status()
+
+
+def release_model(model):
+    """Best-effort native release for a loaded adapter (see ParakeetRecognizer.close)."""
+    if model is None:
+        return
+    try:
+        close = getattr(model, "close", None) or getattr(model, "release", None)
+        if callable(close):
+            close()
+    except Exception:
+        pass
+
+
 def verify_model(models_dir, size):
     return parakeet_backend.verify(models_dir)
 

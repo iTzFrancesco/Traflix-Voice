@@ -63,11 +63,11 @@ Android requires a signed APK for direct installation.
 
 ## Features
 
-- Local Parakeet TDT 0.6B v3 transcription through `sherpa-onnx` (int8 ONNX, CPU).
+- Local Parakeet TDT 0.6B v3 transcription through `sherpa-onnx` (int8 ONNX, CPU) — the only local model, ~30x faster than the retired Whisper backend.
 - Optional Groq transcription using `whisper-large-v3-turbo`.
 - Configurable global hotkeys, click-to-toggle, and hold-to-speak recording.
 - Automatic paste into the focused application.
-- Downloadable Base and Small local models from Hugging Face.
+- One-click Parakeet download from Hugging Face, manual RAM release ("Libera RAM"), and a Home indicator showing which engine produced the last dictation.
 - CPU and optional CUDA device selection.
 - Live waveform, always-on-top status overlay, and system-tray access.
 - Local history and usage statistics.
@@ -112,8 +112,7 @@ python -m pip install -r src-tauri/requirements.txt
 npm run tauri dev
 ```
 
-On first use, open **AI** and download a local model. The Small model is a
-reasonable starting point for general dictation.
+On first use, open **AI** and download the Parakeet TDT 0.6B v3 model (~670 MB download, ~1.5 GB RAM while loaded). Local transcription also needs the Python requirements installed (they include `sherpa-onnx`). The model stays loaded for instant dictation; use **Libera RAM** in the AI tab to unload it without deleting files.
 
 ### Android preview
 
@@ -155,7 +154,7 @@ Focused benchmark scripts and technical reports are under `scripts/` and
 
 ## Privacy and data handling
 
-Desktop local mode processes audio on the device after the selected Whisper
+Desktop local mode processes audio on the device after the Parakeet
 model has been downloaded. Desktop cloud mode and the Android preview send
 recorded audio to Groq only after the user configures cloud access. The Android
 preview stores its BYOK key in Android Keystore-backed storage and does not put
@@ -172,7 +171,7 @@ only as documentation.
 - **Rust/Tauri** owns the desktop shell, hotkeys, clipboard, tray, settings,
   and Python process supervision.
 - **React/TypeScript/Vite** provides the main interface and overlay.
-- **Python** captures audio, manages Whisper models, performs local inference,
+- **Python** captures audio, manages the local Parakeet model, performs local inference,
   and optionally calls Groq.
 - **Android/Kotlin** owns the IME, microphone capture, native indicator,
   Android Keystore secret storage, `InputConnection` text insertion, and the

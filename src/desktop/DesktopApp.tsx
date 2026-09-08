@@ -93,6 +93,7 @@ export default function App() {
     showLoading,
     transcriptionStatus,
     transcriptionText,
+    lastResultProvider,
     downloadInfo,
     gpuStatus,
     activeTranscriptionRef,
@@ -438,6 +439,18 @@ export default function App() {
     [settings, persistSettings, selectedModel, showToast, refreshAllModelStatus]
   );
 
+  // ── UNLOAD LOCAL MODEL (free RAM, keep files on disk) ──
+  const handleUnloadModel = useCallback(async () => {
+    try {
+      await window.__TAURI__.core.invoke("send_to_python", {
+        message: JSON.stringify({ command: "unload_model" }),
+      });
+    } catch (err) {
+      console.warn("[unload] Error:", err);
+      showToast("Impossibile liberare la RAM: motore non avviato.", "error");
+    }
+  }, [showToast]);
+
   // ── HOLD TO SPEAK CHANGE (auto‑salvataggio immediato) ──
   const handleHoldToSpeakChange = useCallback(
     async (value: boolean) => {
@@ -610,6 +623,7 @@ export default function App() {
             selectedProvider={selectedProvider}
             selectedModel={selectedModel}
             transcriptionStatus={transcriptionStatus}
+            lastResultProvider={lastResultProvider}
             groqUsage={groqUsage}
 
           />
@@ -624,6 +638,7 @@ export default function App() {
             groqUsage={groqUsage}
             onProviderToggle={handleProviderToggle}
             onModelAction={handleModelAction}
+            onUnloadModel={handleUnloadModel}
           />
         )}
 

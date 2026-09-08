@@ -41,6 +41,7 @@ const TRANSCRIPTION_STATUSES = new Set([
   "result",
   "error",
   "rate_limit",
+  "unloaded",
 ]);
 
 const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat("it-IT", {
@@ -89,6 +90,7 @@ export function usePythonOutput({
   const [transcriptionStatus, setTranscriptionStatus] = useState("idle");
   const [downloadInfo, setDownloadInfo] = useState<DownloadInfo | null>(null);
   const [transcriptionText, setTranscriptionText] = useState("");
+  const [lastResultProvider, setLastResultProvider] = useState<string | null>(null);
   const [gpuStatus, setGpuStatus] = useState("Dispositivo in uso: CPU");
 
   const selectedProviderRef = useRef(selectedProvider);
@@ -186,8 +188,12 @@ export function usePythonOutput({
           } else if (
             data.status === "ready" ||
             data.status === "result" ||
-            data.status === "error"
+            data.status === "error" ||
+            data.status === "unloaded" ||
+            data.status === "backend_status"
           ) {
+            // `unloaded` means the engine is idle with no model resident:
+            // keep it ready so the next local dictate reloads on demand.
             setModelReady(true);
             setShowLoading(false);
           }
@@ -207,6 +213,7 @@ export function usePythonOutput({
             data.status === "result" ||
             data.status === "ready" ||
             data.status === "error" ||
+            data.status === "unloaded" ||
             data.status === "rate_limit"
           ) {
             activeTranscriptionRef.current = false;
@@ -259,6 +266,20 @@ export function usePythonOutput({
             showToast(data.message || "Errore del motore Python", "error");
           }
 
+          if (data.status === "unloaded") {
+            setModelStatus(clearLoading);
+            showToast(data.message || "Modello rimosso dalla memoria.", "info");
+          }
+
+          if (data.status === "backend_status") {
+            const available = (data as PythonEvent & { available?: boolean }).available;
+            if (available === false) {
+              showToast(data.message || "Backend locale non disponibile.", "error");
+            } else {
+              console.log("[Python] backend:", data.message);
+            }
+          }
+
           if (data.status === "rate_limit") {
             showToast(data.message || "Rate limit raggiunto", "error");
           }
@@ -283,6 +304,11 @@ export function usePythonOutput({
           }
 
           if (data.status === "result" && data.text) {
+            // The sidecar tags every result with the backend that produced it.
+            // Keep the last one so the Home tab can show which engine really ran.
+            if (typeof data.provider === "string" && data.provider) {
+              setLastResultProvider(data.provider);
+            }
             const resultText = data.text;
             const trimmedResultText = resultText.trim();
             const duration = positiveFiniteNumber(data.duration);
@@ -346,6 +372,7 @@ export function usePythonOutput({
     showLoading,
     transcriptionStatus,
     transcriptionText,
+    lastResultProvider,
     downloadInfo,
     gpuStatus,
     activeTranscriptionRef,

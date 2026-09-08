@@ -60,9 +60,29 @@ def handle_command(cmd, data, engine):
         elif engine._loading_in_progress:
             engine.log({"status": "loading_model", "message": "Caricamento modello in corso..."})
         elif engine.model is not None:
-            engine.log({"status": "ready", "message": "Modello già caricato."})
+            engine.log({"status": "ready", "message": "Modello già caricato.", "model_loaded": True})
         else:
-            engine.log({"status": "starting", "message": "Motore in fase di avvio..."})
+            engine.log({"status": "starting", "message": "Motore in fase di avvio...", "model_loaded": False})
+    elif cmd == "unload_model":
+        # Manual RAM release requested from the IA tab. load_model() reloads
+        # on the next local transcribe, so freeing here never breaks later
+        # dictations; it only pays a reload on next use.
+        was_loaded = engine.unload_model()
+        if not was_loaded:
+            engine.log({"status": "info", "message": "Nessun modello locale da rimuovere dalla memoria."})
+    elif cmd == "check_backend":
+        # Probe sherpa-onnx without allocating the ~1 GB recognizer. The UI
+        # uses this to explain a local failure before the user retries.
+        try:
+            from whisper_engine import model as _model_module
+            status = _model_module.backend_status()
+        except Exception as e:
+            status = {"available": False, "message": str(e)}
+        engine.log({
+            "status": "backend_status",
+            "available": bool(status.get("available", False)),
+            "message": status.get("message", ""),
+        })
     elif cmd == "set_provider":
         new_provider = data.get("provider", "local")
         old_provider = engine.provider
