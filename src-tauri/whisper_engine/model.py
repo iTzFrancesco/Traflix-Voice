@@ -2,8 +2,12 @@ import os
 from pywhispercpp.model import Model
 from huggingface_hub import hf_hub_download
 
+from whisper_engine import parakeet as parakeet_backend
+
 
 def verify_model(models_dir, size):
+    if parakeet_backend.is_parakeet_model(size):
+        return parakeet_backend.verify(models_dir)
     model_path = os.path.join(models_dir, f"ggml-{size}.bin")
     if not os.path.exists(model_path):
         return False, f"File non trovato: {model_path}"
@@ -16,6 +20,8 @@ def verify_model(models_dir, size):
 
 
 def load_model(models_dir, size, log_func):
+    if parakeet_backend.is_parakeet_model(size):
+        return parakeet_backend.load(models_dir, log_func)
     is_valid, msg = verify_model(models_dir, size)
     if not is_valid:
         log_func({"status": "error", "message": f"Modello {size} non valido: {msg}"})
@@ -49,6 +55,10 @@ def preload_default_model(models_dir, model_size, log_func):
 
 
 def download_model(models_dir, size, log_func):
+    if parakeet_backend.is_parakeet_model(size):
+        parakeet_backend.download(models_dir, log_func)
+        return
+
     local_path = os.path.join(models_dir, f"ggml-{size}.bin")
 
     try:
