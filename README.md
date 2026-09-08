@@ -39,6 +39,24 @@ The desktop application uses Tauri 2, Rust, React, TypeScript, and a Python
 sidecar. It captures speech globally and pastes the result into the focused
 Windows application.
 
+- **Global hotkey**: XBUTTON2 (forward mouse button) by default,
+  click-to-toggle or hold-to-speak; a secondary shortcut, model, language,
+  and microphone are configurable in the app.
+- **Two transcription providers**: local Parakeet TDT 0.6B v3 (private,
+  on-device, via `sherpa-onnx` int8 on CPU) or Groq Cloud
+  (`whisper-large-v3-turbo`, needs an API key in System settings).
+  The Home tab always shows which engine produced the last dictation.
+- **Local model management** (AI tab): one-click Parakeet download
+  (~670 MB), instant dictation while loaded (~1.5 GB RAM), and
+  **Libera RAM** to unload it from memory without deleting files.
+  Switching to Cloud unloads the model automatically.
+- **Delivery**: automatic paste (Ctrl+V) into the focused application with
+  clipboard restore, plus an always-on-top status overlay, system-tray
+  access with minimize-to-tray, live waveform, local history (last 50),
+  word statistics, and Groq quota meters.
+- **Storage**: settings, history, statistics, usage, and downloaded models
+  live in the OS application-data directory (`%APPDATA%\it.traflix.voice`).
+
 ### Android preview
 
 The Android port is maintained on the
@@ -78,10 +96,13 @@ Android requires a signed APK for direct installation.
 ### Windows desktop
 
 1. Start the application and select a microphone in **System**.
-2. Choose a local model in **AI**, or explicitly enable Groq Cloud mode.
-3. Press the configured hotkey and speak.
-4. Press it again to stop. The transcription is shown in the app and can be
-   pasted into the focused application.
+2. In **AI**, download the Parakeet TDT 0.6B v3 model for local dictation,
+   or enable Groq Cloud mode (paste your API key in **System** first).
+3. Press the configured hotkey and speak; the overlay shows live status.
+4. Press it again to stop. The transcription is pasted into the focused
+   application and saved to history with word count and timing.
+5. Check **Home** to confirm which engine (Locale/Cloud) ran last; use
+   **Libera RAM** in **AI** whenever you want the ~1.5 GB back.
 
 ### Android
 
