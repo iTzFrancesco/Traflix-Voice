@@ -60,7 +60,7 @@ class _Segment:
 
 
 class ParakeetRecognizer:
-    """Adapter exposing the pywhispercpp Model transcribe() shape.
+    """Adapter exposing the transcribe() shape used by transcribe_local.
 
     transcribe_local() calls model.transcribe(recording, language=...), so
     matching that signature keeps the shared local path unchanged. The
@@ -79,7 +79,7 @@ class ParakeetRecognizer:
         return [_Segment(stream.result.text.strip())]
 
 
-def load(models_dir, log_func):
+def load(models_dir, log_func, num_threads=None):
     is_valid, msg = verify(models_dir)
     if not is_valid:
         log_func({"status": "error", "message": f"Modello Parakeet non valido: {msg}"})
@@ -99,8 +99,9 @@ def load(models_dir, log_func):
             decoder=os.path.join(directory, "decoder.int8.onnx"),
             joiner=os.path.join(directory, "joiner.int8.onnx"),
             tokens=os.path.join(directory, "tokens.txt"),
-            num_threads=_worker_threads(),
+            num_threads=_worker_threads() if num_threads is None else num_threads,
             sample_rate=SAMPLE_RATE,
+            model_type="nemo_transducer",
         )
     except Exception as e:
         log_func({"status": "error", "message": f"Errore caricamento modello Parakeet: {str(e)}"})
