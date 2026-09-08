@@ -5,6 +5,17 @@ from huggingface_hub import hf_hub_download
 from whisper_engine import parakeet as parakeet_backend
 
 
+def inference_threads():
+    try:
+        count = os.cpu_count() or 1
+    except Exception:
+        count = 1
+    # The large-v3 encoder scales up to ~8 threads on a desktop CPU (R10-R11:
+    # -31% vs the default 4). Transcription is bursty, so using more cores
+    # briefly is preferable to a slower response on every dictation.
+    return max(1, min(8, count))
+
+
 def verify_model(models_dir, size):
     if parakeet_backend.is_parakeet_model(size):
         return parakeet_backend.verify(models_dir)
@@ -30,7 +41,8 @@ def load_model(models_dir, size, log_func):
     log_func({"status": "loading_model", "message": f"Caricamento modello {size}..."})
     model_path = os.path.join(models_dir, f"ggml-{size}.bin")
     try:
-        m = Model(model_path, print_realtime=False, print_progress=False)
+        m = Model(model_path, print_realtime=False, print_progress=False,
+                  n_threads=inference_threads())
         log_func({"status": "info", "message": f"Modello {size} caricato."})
         return m
     except Exception as e:

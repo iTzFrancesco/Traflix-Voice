@@ -350,6 +350,14 @@ def _active_sample_mask(recording, threshold, output=None):
     return active
 
 
+def _prepare_local_recording(recording):
+    """Contiguous float32 mono input for local inference.
+
+    Slice views from silence trimming are already contiguous, so this is
+    normally zero-copy; it only guards direct callers."""
+    return np.ascontiguousarray(recording, dtype=np.float32).reshape(-1)
+
+
 def trim_cloud_silence(recording):
     """Remove only leading/trailing near-silence before a cloud upload."""
     if recording.size == 0:
@@ -405,10 +413,22 @@ def transcribe_local(model, recording, language, recording_duration, shutting_do
     if shutting_down:
         return
 
+    # Leading/trailing silence carries no speech but costs full inference
+    # (R7: -16% on a realistic padded clip for Parakeet, neutral for turbo).
+    # The trim itself is sub-millisecond; the padding keeps word edges intact
+    # and WER stayed 0.0 on every fixture clip.
+    trimmed = trim_cloud_silence(_prepare_local_recording(recording))
+    if trimmed.size == 0:
+        # Pure silence: skip seconds of inference (R20) and keep the local
+        # contract of always ending with a result event. The frontend guards
+        # empty text (no paste, UI back to ready).
+        log_func({"status": "result", "text": "", "duration": recording_duration})
+        return
+
     lang_param = "" if language == "auto" else language
 
     def _run_inference():
-        segments = model.transcribe(recording, language=lang_param)
+        segments = model.transcribe(trimmed, language=lang_param)
         text = " ".join(s.text for s in segments).strip()
         return text
 
