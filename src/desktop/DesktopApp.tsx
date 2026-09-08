@@ -117,7 +117,7 @@ export default function App() {
     const loaded = await loadStoredSettings();
     if (!loaded) return null;
 
-    setSelectedModel(loaded.model || DEFAULT_LOCAL_MODEL);
+    setSelectedModel(WHISPER_MODELS.some((m) => m.id === loaded.model) ? loaded.model : DEFAULT_LOCAL_MODEL);
     setSelectedProvider((loaded.provider as Provider) || "local");
     setSelectedLanguage(loaded.selectedLanguage || "it");
     setHoldToSpeak(loaded.holdToSpeak ?? false);

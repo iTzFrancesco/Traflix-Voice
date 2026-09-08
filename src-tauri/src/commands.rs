@@ -150,15 +150,10 @@ pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
 #[tauri::command]
 pub fn check_model_exists(app: AppHandle, model_id: String) -> bool {
     let app_dir = app.path().app_data_dir().unwrap_or_default();
-    let models = app_dir.join("models");
-    if model_id.starts_with("parakeet") {
-        let dir = models.join(&model_id);
-        ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]
-            .iter()
-            .all(|f| dir.join(f).exists())
-    } else {
-        models.join(format!("ggml-{}.bin", model_id)).exists()
-    }
+    let dir = app_dir.join("models").join(&model_id);
+    ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]
+        .iter()
+        .all(|f| dir.join(f).exists())
 }
 
 /// Invia un comando al processo Python

@@ -76,19 +76,9 @@ export interface Toast {
   type: ToastType;
 }
 
-export const DEFAULT_LOCAL_MODEL = "large-v3-turbo-q5_0";
+export const DEFAULT_LOCAL_MODEL = "parakeet-tdt-0.6b-v3-int8";
 
 export const WHISPER_MODELS: WhisperModel[] = [
-  {
-    id: "large-v3-turbo-q5_0",
-    name: "Large V3 Turbo Q5",
-    size: "~600 MB",
-    ram: "~1.5 GB",
-    speed: 3,
-    quality: 5,
-    tag: "Consigliato",
-    description: "Qualità quasi da Large V3 ma molto più veloce e leggero. Ideale per la dettatura quotidiana in italiano.",
-  },
   {
     id: "parakeet-tdt-0.6b-v3-int8",
     name: "Parakeet TDT 0.6B V3",
@@ -96,7 +86,7 @@ export const WHISPER_MODELS: WhisperModel[] = [
     ram: "~1.5 GB",
     speed: 5,
     quality: 4,
-    tag: "Velocissimo",
+    tag: "Consigliato",
     description: "Modello NVIDIA rapidissimo su CPU con ottimo italiano. Richiede il pacchetto extra sherpa-onnx.",
   },
 ];
