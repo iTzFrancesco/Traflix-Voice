@@ -828,35 +828,41 @@ class TestModelPath(unittest.TestCase):
     def test_download_model_path(self):
         """download_model should fetch the Parakeet files into its subdir."""
         engine = WhisperEngine()
-        engine.models_dir = "/home/user/.traflix/models"
 
-        with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
-             patch("whisper_engine.parakeet.verify", return_value=(True, "OK")), \
-             patch("sys.stdout", new_callable=io.StringIO):
-            engine.download_model("parakeet-tdt-0.6b-v3-int8")
+        # makedirs() must succeed for the download to start: a hardcoded root
+        # path is not writable on CI runners, so use a temp dir instead.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
 
-        self.assertEqual(mock_dl.call_count, 4)
-        _, kwargs = mock_dl.call_args_list[0]
-        self.assertEqual(kwargs["repo_id"], "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8")
-        self.assertTrue(kwargs["local_dir"].endswith("parakeet-tdt-0.6b-v3-int8"))
+            with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
+                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                engine.download_model("parakeet-tdt-0.6b-v3-int8")
+
+            self.assertEqual(mock_dl.call_count, 4)
+            _, kwargs = mock_dl.call_args_list[0]
+            self.assertEqual(kwargs["repo_id"], "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8")
+            self.assertTrue(kwargs["local_dir"].endswith("parakeet-tdt-0.6b-v3-int8"))
 
     def test_legacy_model_id_falls_back_to_parakeet(self):
         """Ids from older settings must not fail; they resolve to Parakeet."""
         engine = WhisperEngine()
-        engine.models_dir = "/models"
 
-        with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
-             patch("whisper_engine.parakeet.verify", return_value=(True, "OK")), \
-             patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            engine.download_model("small")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
 
-        self.assertEqual(mock_dl.call_count, 4)
-        statuses = [
-            json.loads(line).get("status")
-            for line in mock_stdout.getvalue().splitlines()
-            if line
-        ]
-        self.assertIn("download_complete", statuses)
+            with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
+                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                engine.download_model("small")
+
+            self.assertEqual(mock_dl.call_count, 4)
+            statuses = [
+                json.loads(line).get("status")
+                for line in mock_stdout.getvalue().splitlines()
+                if line
+            ]
+            self.assertIn("download_complete", statuses)
 
     def test_load_model_returns_parakeet_adapter(self):
         """load_model should build the backend through parakeet.load."""
@@ -1196,10 +1202,12 @@ class TestDownloadModel(unittest.TestCase):
     def test_download_error_logged(self, mock_stdout):
         """If hf_hub_download raises, the error is logged as JSON."""
         engine = WhisperEngine()
-        engine.models_dir = "/models"
 
-        with patch("whisper_engine.parakeet.hf_hub_download", side_effect=OSError("disk full")):
-            engine.download_model("tiny")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
+
+            with patch("whisper_engine.parakeet.hf_hub_download", side_effect=OSError("disk full")):
+                engine.download_model("tiny")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed = [json.loads(l) for l in output_lines if l]
@@ -1210,11 +1218,13 @@ class TestDownloadModel(unittest.TestCase):
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_download_success_logs_complete(self, mock_stdout):
         engine = WhisperEngine()
-        engine.models_dir = "/models"
 
-        with patch("whisper_engine.parakeet.hf_hub_download"), \
-             patch("whisper_engine.parakeet.verify", return_value=(True, "OK")):
-            engine.download_model("small")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
+
+            with patch("whisper_engine.parakeet.hf_hub_download"), \
+                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")):
+                engine.download_model("small")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed = [json.loads(l) for l in output_lines if l]

@@ -151,9 +151,14 @@ pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
 pub fn check_model_exists(app: AppHandle, model_id: String) -> bool {
     let app_dir = app.path().app_data_dir().unwrap_or_default();
     let dir = app_dir.join("models").join(&model_id);
-    ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]
-        .iter()
-        .all(|f| dir.join(f).exists())
+    [
+        "encoder.int8.onnx",
+        "decoder.int8.onnx",
+        "joiner.int8.onnx",
+        "tokens.txt",
+    ]
+    .iter()
+    .all(|f| dir.join(f).exists())
 }
 
 /// Invia un comando al processo Python
