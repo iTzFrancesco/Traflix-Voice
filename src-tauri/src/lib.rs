@@ -184,7 +184,7 @@ mod tests {
         let s = AppSettings::default();
         assert_eq!(s.hotkey, "XBUTTON2");
         assert!(!s.hold_to_speak);
-        assert_eq!(s.model, "small");
+        assert_eq!(s.model, "large-v3-turbo-q5_0");
         assert_eq!(s.selected_language, "it");
     }
 
@@ -198,7 +198,7 @@ mod tests {
         let original = AppSettings {
             hotkey: "XBUTTON2".to_string(),
             secondary_hotkey: String::new(),
-            model: "small".to_string(),
+            model: "large-v3-turbo-q5_0".to_string(),
             auto_paste: None,
             minimize_tray: true,
             selected_device: "default".to_string(),
@@ -238,7 +238,7 @@ mod tests {
 
         let reloaded = load_settings_from_file(&path);
         assert_eq!(reloaded.hotkey, "Control+Shift+A");
-        assert_eq!(reloaded.model, "small"); // unchanged
+        assert_eq!(reloaded.model, "large-v3-turbo-q5_0"); // unchanged
 
         // Cleanup
         let _ = std::fs::remove_file(&path);
@@ -282,7 +282,7 @@ mod tests {
         // Should return defaults
         let settings = load_settings_from_file(&path);
         assert_eq!(settings.hotkey, "XBUTTON2");
-        assert_eq!(settings.model, "small");
+        assert_eq!(settings.model, "large-v3-turbo-q5_0");
         assert!(!settings.hold_to_speak);
 
         let _ = std::fs::remove_dir(&dir);
