@@ -16,6 +16,8 @@ pub fn parse_hotkey(hotkey: &str) -> HotkeyConfig {
 pub fn str_to_vk(s: &str) -> Option<i32> {
     match s {
         "CommandOrControl" | "Control" | "Ctrl" => Some(0x11), // VK_CONTROL
+        "ControlLeft" => Some(0xA2),                           // VK_LCONTROL
+        "ControlRight" => Some(0xA3),                          // VK_RCONTROL
         "Alt" => Some(0x12),                                   // VK_MENU
         "AltGraph" => Some(0xA5),                              // VK_RMENU (right Alt / AltGr)
         "Shift" => Some(0x10),                                 // VK_SHIFT

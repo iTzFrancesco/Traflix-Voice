@@ -133,7 +133,7 @@ export default function TastiTab({
           </div>
           <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">
             Premi il pulsante per registrare una nuova combinazione. Supporta anche i tasti laterali
-            del mouse (Mouse4/Mouse5).
+            del mouse (Mouse4/Mouse5). I modificatori (Ctrl, Alt e Shift) possono essere usati anche da soli.
           </p>
         </div>
 

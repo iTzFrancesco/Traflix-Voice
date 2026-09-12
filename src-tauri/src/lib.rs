@@ -157,6 +157,8 @@ mod tests {
     #[test]
     fn test_str_to_vk() {
         assert_eq!(str_to_vk("Control"), Some(0x11));
+        assert_eq!(str_to_vk("ControlLeft"), Some(0xA2));
+        assert_eq!(str_to_vk("ControlRight"), Some(0xA3));
         assert_eq!(str_to_vk("Alt"), Some(0x12));
         assert_eq!(str_to_vk("AltGraph"), Some(0xA5));
         assert_eq!(str_to_vk("Space"), Some(0x20));
@@ -174,6 +176,9 @@ mod tests {
 
         let cfg = parse_hotkey("Control+Shift+A");
         assert_eq!(cfg.vk_codes, vec![0x11, 0x10, 0x41]);
+
+        let cfg = parse_hotkey("ControlRight");
+        assert_eq!(cfg.vk_codes, vec![0xA3]);
 
         let cfg = parse_hotkey("XBUTTON2");
         assert_eq!(cfg.vk_codes, vec![0x06]);
