@@ -448,7 +448,15 @@ def transcribe_local(model, recording, language, recording_duration, shutting_do
     log_func({"status": "result", "text": text, "duration": recording_duration})
 
 
-def transcribe_cloud(recording, language, recording_duration, groq_api_key, shutting_down, log_func, models_dir):
+def transcribe_cloud(
+    recording,
+    language,
+    recording_duration,
+    groq_api_key,
+    shutting_down,
+    log_func,
+    models_dir,
+):
     recording_duration = _normalize_recording_duration(recording_duration)
     if _shutdown_requested(shutting_down):
         return

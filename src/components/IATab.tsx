@@ -43,7 +43,7 @@ export default function IATab({
               Provider Cloud
             </label>
             <p className="text-[0.95rem] text-[#666] m-0">
-              Usa Groq Cloud (whisper-large-v3-turbo, 216x real-time) per la trascrizione.
+              Usa Groq Cloud per trascrivere senza scaricare modelli sul PC.
             </p>
           </div>
           <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -113,7 +113,7 @@ export default function IATab({
                 <span className="text-[0.65rem] text-[#444] whitespace-nowrap">0 GB RAM locale</span>
               </div>
             </div>
-            <p className="m-0 mb-2.5 text-[0.78rem] text-[var(--muted)] leading-[1.5]">Massima precisione su Groq LPU. 216x real-time — trascrive 1 minuto di audio in ~0.3 secondi. Supporto multilingua incluso italiano. Nessun download richiesto.</p>
+            <p className="m-0 mb-2.5 text-[0.78rem] text-[var(--muted)] leading-[1.5]">Modello multilingue ottimizzato per trascrizioni rapide: circa 216x tempo reale. Nessun download richiesto.</p>
             <div className="flex gap-5">
               <div className="flex items-center gap-1.5">
                 <span className="text-[0.65rem] text-[#555] font-bold uppercase tracking-[0.04em] whitespace-nowrap">Velocità</span>

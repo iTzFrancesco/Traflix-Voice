@@ -25,6 +25,12 @@ class TestCloudPayload(unittest.TestCase):
         self.assertNotIn(b'name="language"', payload)
         self.assertIn(b'filename="audio.wav"', payload)
 
+    def test_cloud_payload_uses_turbo_as_its_only_model(self):
+        payload = encode_cloud_multipart(encode_wav(np.zeros(160, dtype=np.float32)), "it")
+
+        self.assertIn(b"whisper-large-v3-turbo\r\n", payload)
+        self.assertNotIn(b"whisper-large-v3\r\n", payload)
+
     def test_trim_cloud_silence_keeps_quiet_speech_and_padding(self):
         quiet_speech = np.full(8000, 0.005, dtype=np.float32)
         recording = np.concatenate(
