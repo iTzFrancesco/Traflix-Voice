@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Traflix Voice",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "identifier": "it.traflix.voice",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run build && py -3 scripts/build_python_backend.py"
   },
   "app": {
     "withGlobalTauri": true,
@@ -49,11 +49,13 @@
   },
   "plugins": {
     "updater": {
-      "active": false,
       "endpoints": [
         "https://github.com/iTzFrancesco/traflix-voice/releases/latest/download/latest.json"
       ],
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFNjFBRTNFQTI3RUQyQjUKUldTMTBuNmlQcTVoWHExUXU3UlJJY3NuZlhCb3JKOWpFQkZWRG5KNXZta1dlRXoycHhiUTBCalMK",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
@@ -64,6 +66,7 @@
     "resources": [
       "whisper_engine.py",
       "whisper_engine/*",
+      "python-backend/",
       "WebView2Loader.dll"
     ],
     "icon": [

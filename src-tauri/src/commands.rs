@@ -175,6 +175,17 @@ pub fn stop_python(state: State<'_, AppState>) -> Result<(), String> {
     write_to_python(state, b"{\"command\":\"stop\"}\n")
 }
 
+#[tauri::command]
+pub fn shutdown_python<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(desktop)]
+    crate::sidecar::shutdown(&app)?;
+
+    #[cfg(not(desktop))]
+    let _ = app;
+
+    Ok(())
+}
+
 fn write_to_python(state: State<'_, AppState>, payload: &[u8]) -> Result<(), String> {
     let mut process_lock = state.python_process.lock().unwrap();
     if let Some(child) = process_lock.as_mut() {

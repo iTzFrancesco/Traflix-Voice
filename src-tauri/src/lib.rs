@@ -77,6 +77,7 @@ pub fn run() {
             groq_usage_path: groq_usage_path.clone(),
             hotkey_config: hotkey_config.clone(),
             is_shutting_down: AtomicBool::new(false),
+            python_process_exited: AtomicBool::new(true),
         });
 
         #[cfg(desktop)]
@@ -85,14 +86,25 @@ pub fn run() {
             hotkey_runtime::spawn(app_handle.clone(), hotkey_config);
 
             #[cfg(debug_assertions)]
-            let script_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let sidecar_path =
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("whisper_engine.py");
             #[cfg(not(debug_assertions))]
-            let script_dir = app
-                .path()
-                .resource_dir()
-                .expect("Impossibile trovare resource dir");
-            let script_path = script_dir.join("whisper_engine.py");
-            sidecar::spawn(app_handle.clone(), script_path, models_dir.clone());
+            let sidecar_path = {
+                let resource_dir = app
+                    .path()
+                    .resource_dir()
+                    .expect("Impossibile trovare resource dir");
+                let packaged_backend = resource_dir
+                    .join("python-backend")
+                    .join("whisper_engine")
+                    .join("whisper_engine.exe");
+                if packaged_backend.is_file() {
+                    packaged_backend
+                } else {
+                    resource_dir.join("whisper_engine.py")
+                }
+            };
+            sidecar::spawn(app_handle.clone(), sidecar_path, models_dir.clone());
 
             let settings = load_settings_from_file(&settings_path);
             let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());
@@ -143,6 +155,7 @@ pub fn run() {
             get_history,
             clear_history,
             get_groq_usage,
+            shutdown_python,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

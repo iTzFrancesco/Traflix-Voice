@@ -1,22 +1,24 @@
 {
   "name": "traflix-voice",
   "private": true,
-  "version": "1.6.2",
+  "version": "1.6.3",
   "type": "module",
   "description": "Privacy-focused desktop voice dictation for Windows, built with Tauri, Rust, React, and Whisper.",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:e2e": "py -3 -m pytest src-tauri tests/e2e -q",
     "preview": "vite preview",
     "tauri": "tauri",
     "bump": "node scripts/bump-version.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/api": "~2.12.0",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-log": "^2.8.0",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-updater": "~2.13.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

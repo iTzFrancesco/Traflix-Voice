@@ -149,8 +149,16 @@ The mobile updater checks for a newer Android tag after the Hub opens and on
 return from the installer permission screen. It downloads only the expected APK
 asset, verifies its SHA-256 and device ABI, and opens Android’s package installer
 automatically. Android still requires the user to confirm the update and, on
-some devices, allow installs from this app. Desktop updater behavior is
-unchanged.
+some devices, allow installs from this app.
+
+The desktop app checks GitHub’s latest stable PC release (`v*`) on startup and
+when it returns to the foreground. It announces a newer version, downloads the
+signed MSI update when no dictation is active, and installs it automatically
+with a progress window before restarting Traflix Voice. Android prereleases
+(`android-v*`) are kept out of the desktop update channel. The desktop release
+workflow publishes the signed MSI installer and its `latest.json` manifest.
+The stable `latest.json` release asset is also available to other integrations;
+it includes the Tauri `windows-x86_64` target and the `windows-x86_64-msi` alias.
 
 ## Development and testing
 

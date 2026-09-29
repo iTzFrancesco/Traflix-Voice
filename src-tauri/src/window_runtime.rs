@@ -1,4 +1,4 @@
-use log::info;
+use log::{info, warn};
 use serde::Deserialize;
 use std::error::Error;
 use std::sync::{Mutex, OnceLock};
@@ -90,7 +90,9 @@ pub fn setup_tray<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
         .on_menu_event(|handle, event| match event.id.as_ref() {
             "show" => show_main_window(handle),
             "quit" => {
-                sidecar::shutdown(handle);
+                if let Err(error) = sidecar::shutdown(handle) {
+                    warn!("[Python sidecar] Shutdown failed: {}", error);
+                }
                 handle.exit(0);
             }
             _ => {}

@@ -30,31 +30,48 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
         let mut restart_count: u32 = 0;
 
         loop {
+            {
+                let state = app_handle.state::<AppState>();
+                let _process_lock = state.python_process.lock().unwrap();
+                if state.is_shutting_down.load(Ordering::SeqCst) {
+                    break;
+                }
+                state.python_process_exited.store(false, Ordering::SeqCst);
+            }
+
             info!(
                 "[Python sidecar] Spawning python process (attempt #{})",
                 restart_count + 1
             );
 
             let shell = app_handle.shell();
-            // Windows: use the Python launcher first, then fall back to the
-            // regular executable. On other platforms prefer python3.
-            let python_cmd = if cfg!(windows) { "py" } else { "python3" };
-            let spawn_result = shell.command(python_cmd).args([&script_path_str]).spawn();
-            #[allow(unused_assignments)]
-            let spawn_result = if spawn_result.is_err() {
-                warn!(
-                    "[Python sidecar] {:?} not found, trying 'python'",
-                    python_cmd
-                );
-                shell.command("python").args([&script_path_str]).spawn()
-            } else {
-                spawn_result
-            };
+            let spawn_result =
+                if script_path.extension().and_then(|ext| ext.to_str()) == Some("exe") {
+                    shell.command(&script_path_str).spawn()
+                } else {
+                    // Development and non-Windows builds continue to run the
+                    // Python entry point directly.
+                    let python_cmd = if cfg!(windows) { "py" } else { "python3" };
+                    let first_attempt = shell.command(python_cmd).args([&script_path_str]).spawn();
+                    if first_attempt.is_err() {
+                        warn!(
+                            "[Python sidecar] {:?} not found, trying 'python'",
+                            python_cmd
+                        );
+                        shell.command("python").args([&script_path_str]).spawn()
+                    } else {
+                        first_attempt
+                    }
+                };
 
             let (mut rx, mut child) = match spawn_result {
                 Ok(pair) => pair,
                 Err(e) => {
                     error!("[Python sidecar] Failed to spawn: {:?}", e);
+                    app_handle
+                        .state::<AppState>()
+                        .python_process_exited
+                        .store(true, Ordering::SeqCst);
                     sleep_before_restart(restart_count);
                     restart_count += 1;
                     continue;
@@ -88,6 +105,28 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
                 .lock()
                 .unwrap() = Some(child);
 
+            if app_handle
+                .state::<AppState>()
+                .is_shutting_down
+                .load(Ordering::SeqCst)
+            {
+                if let Some(child) = app_handle
+                    .state::<AppState>()
+                    .python_process
+                    .lock()
+                    .unwrap()
+                    .take()
+                {
+                    let _ = child.kill();
+                }
+                while rx.blocking_recv().is_some() {}
+                app_handle
+                    .state::<AppState>()
+                    .python_process_exited
+                    .store(true, Ordering::SeqCst);
+                break;
+            }
+
             if restart_count > 0 {
                 warn!(
                     "[Python sidecar] Process restarted (restart #{})",
@@ -119,6 +158,16 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
                 }
             }
 
+            *app_handle
+                .state::<AppState>()
+                .python_process
+                .lock()
+                .unwrap() = None;
+            app_handle
+                .state::<AppState>()
+                .python_process_exited
+                .store(true, Ordering::SeqCst);
+
             if app_handle
                 .state::<AppState>()
                 .is_shutting_down
@@ -129,12 +178,6 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
             }
             error!("[Python sidecar] Process exited unexpectedly, will restart");
 
-            *app_handle
-                .state::<AppState>()
-                .python_process
-                .lock()
-                .unwrap() = None;
-
             restart_count += 1;
             sleep_before_restart(restart_count);
         }
@@ -143,33 +186,55 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
 
 /// Stop recording and then ask the sidecar to quit, preserving the existing
 /// delays that give each command time to reach the child process.
-pub fn shutdown<R: Runtime>(app_handle: &AppHandle<R>) {
-    app_handle
-        .state::<AppState>()
-        .is_shutting_down
-        .store(true, Ordering::SeqCst);
-
-    if let Some(child) = app_handle
-        .state::<AppState>()
-        .python_process
-        .lock()
-        .unwrap()
-        .as_mut()
+pub fn shutdown<R: Runtime>(app_handle: &AppHandle<R>) -> Result<(), String> {
+    let state = app_handle.state::<AppState>();
     {
-        let _ = child.write(b"{\"command\": \"stop\"}\n");
+        let _process_lock = state.python_process.lock().unwrap();
+        state.is_shutting_down.store(true, Ordering::SeqCst);
+    }
+
+    {
+        let mut process = state.python_process.lock().unwrap();
+        if let Some(child) = process.as_mut() {
+            let _ = child.write(b"{\"command\": \"stop\"}\n");
+        }
     }
     thread::sleep(Duration::from_millis(300));
 
-    if let Some(child) = app_handle
-        .state::<AppState>()
-        .python_process
-        .lock()
-        .unwrap()
-        .as_mut()
     {
-        let _ = child.write(b"{\"command\": \"quit\"}\n");
+        let mut process = state.python_process.lock().unwrap();
+        if let Some(child) = process.as_mut() {
+            let _ = child.write(b"{\"command\": \"quit\"}\n");
+        }
     }
-    thread::sleep(Duration::from_millis(500));
+
+    if wait_for_process_exit(&state.python_process_exited, Duration::from_millis(1200)) {
+        return Ok(());
+    }
+
+    let child = state.python_process.lock().unwrap().take();
+    if let Some(child) = child {
+        child.kill().map_err(|error| {
+            format!("Impossibile terminare il motore Python prima dell'aggiornamento: {error}")
+        })?;
+    }
+
+    if wait_for_process_exit(&state.python_process_exited, Duration::from_millis(1500)) {
+        Ok(())
+    } else {
+        Err("Il motore Python non si è arrestato: aggiornamento annullato".to_string())
+    }
+}
+
+fn wait_for_process_exit(exited: &std::sync::atomic::AtomicBool, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    while !exited.load(Ordering::SeqCst) {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    true
 }
 
 fn sleep_before_restart(restart_count: u32) {

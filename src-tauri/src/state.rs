@@ -131,6 +131,7 @@ pub struct AppState {
     pub groq_usage_path: PathBuf,
     pub hotkey_config: Arc<RwLock<Vec<HotkeyConfig>>>,
     pub is_shutting_down: AtomicBool,
+    pub python_process_exited: AtomicBool,
 }
 
 #[derive(Debug, Clone)]

@@ -111,5 +111,6 @@ jobs:
             persistence. The attached universal APK is signed for direct
             installation.
           prerelease: true
+          make_latest: false
           files: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
           fail_on_unmatched_files: true

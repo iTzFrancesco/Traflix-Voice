@@ -87,10 +87,25 @@ jobs:
           cache-dependency-path: src-tauri/requirements.txt
       - run: |
           python -m pip install --upgrade pip
-          pip install -r src-tauri/requirements.txt
-      - run: npm run tauri build
+          pip install -r src-tauri/requirements.txt -r src-tauri/requirements-build.txt
+      - name: Build signed updater artifacts
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw "GitHub Actions secret TAURI_SIGNING_PRIVATE_KEY is required to sign desktop updates."
+          }
+          npm run tauri -- build --config src-tauri/tauri.updater.conf.json
+      - name: Generate Windows update manifest
+        run: node scripts/generate-updater-manifest.mjs
       - uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/target/release/bundle/msi/*.msi
+          files: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.sig
+            src-tauri/target/release/bundle/msi/latest.json
+          make_latest: true
           generate_release_notes: true
           fail_on_unmatched_files: true

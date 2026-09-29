@@ -8,6 +8,8 @@ import SistemaTab from "../components/SistemaTab";
 import ToastContainer from "../components/Toast";
 import LoadingOverlay from "../components/LoadingOverlay";
 import DownloadPopup from "../components/DownloadPopup";
+import DesktopUpdateNotice from "./DesktopUpdateNotice";
+import { useDesktopUpdater } from "./useDesktopUpdater";
 import { convertToSRT } from "../lib/export";
 import { useHotkey } from "../hooks/useHotkey";
 import { useAudioDevices } from "../hooks/useAudioDevices";
@@ -111,6 +113,16 @@ export default function App() {
     updateStats,
     saveTranscription,
     recordGroqUsage,
+  });
+
+  const isTranscriptionBusy =
+    activeTranscriptionRef.current ||
+    transcriptionStatus === "listening" ||
+    transcriptionStatus === "processing";
+  const { update: desktopUpdate, retryUpdate } = useDesktopUpdater({
+    enabled: !IS_DEV,
+    isBusy: isTranscriptionBusy,
+    showToast,
   });
 
   // ── SETTINGS ──
@@ -616,6 +628,12 @@ export default function App() {
       <Sidebar activeTab={activeTab} onTabChange={handleTabChange} appVersion={appVersion} />
 
       <main className="flex-1 px-5 py-6 overflow-y-auto flex flex-col relative">
+        <DesktopUpdateNotice
+          update={desktopUpdate}
+          isBusy={isTranscriptionBusy}
+          onRetry={() => void retryUpdate()}
+        />
+
         {activeTab === "home" && (
           <HomeTab
             stats={stats}
