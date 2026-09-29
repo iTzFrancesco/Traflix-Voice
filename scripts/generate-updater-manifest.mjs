@@ -27,9 +27,10 @@ const signature = (
 ).trim();
 if (!signature) throw new Error(`The updater signature for ${bundleName} is empty.`);
 
+const releaseAssetName = bundleName.replaceAll(" ", ".");
 const windowsMsi = {
   signature,
-  url: `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(bundleName)}`,
+  url: `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(releaseAssetName)}`,
 };
 const manifest = {
   version,
