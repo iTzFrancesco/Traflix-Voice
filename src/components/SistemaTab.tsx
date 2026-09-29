@@ -41,6 +41,15 @@ export default function SistemaTab({
           </select>
         </div>
 
+        <div className="mb-6 flex flex-col gap-2">
+          <label className="text-[0.9rem] font-bold text-[#ccc]">
+            Livello microfono automatico
+          </label>
+          <p className="m-0 text-[0.76rem] leading-5 text-[var(--muted)]">
+            Il livello dell'audio inviato al riconoscimento viene regolato automaticamente a ogni dettatura. Il widget continua a mostrare il livello originale del microfono.
+          </p>
+        </div>
+
         {/* Language */}
         <div className="mb-6 flex flex-col gap-2">
           <label className="text-[0.9rem] font-bold text-[#ccc]" htmlFor="transcription-language">

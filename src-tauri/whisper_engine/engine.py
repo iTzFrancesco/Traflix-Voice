@@ -22,7 +22,11 @@ from whisper_engine import transcriber, ipc
 class _RecordingSession:
     """Own the queue and stop signal for exactly one audio stream."""
 
-    def __init__(self, capture_queue=None, provider=None):
+    def __init__(
+        self,
+        capture_queue=None,
+        provider=None,
+    ):
         self.queue = capture_queue if capture_queue is not None else queue.SimpleQueue()
         self.provider = provider
         self.active = threading.Event()
@@ -224,7 +228,12 @@ class WhisperEngine:
         self._capture_executor.submit(lambda: None).result()
         self._transcription_executor.submit(lambda: None).result()
 
-    def start_transcription(self, device_id, model_size, language="it"):
+    def start_transcription(
+        self,
+        device_id,
+        model_size,
+        language="it",
+    ):
         """Dispatch recording without paying per-session thread startup."""
         audio_module.reset_volume_state()
         session = _RecordingSession(provider=self.provider)
@@ -275,7 +284,13 @@ class WhisperEngine:
             indata, frames, time, status, capture_queue, is_recording, self.log
         )
 
-    def _transcribe_cloud(self, recording, language, recording_duration, log_func=None):
+    def _transcribe_cloud(
+        self,
+        recording,
+        language,
+        recording_duration,
+        log_func=None,
+    ):
         log = log_func or self.log
         transcriber.transcribe_cloud(recording, language, recording_duration, self.groq_api_key,
                                      lambda: self._shutting_down, log, self.models_dir)
@@ -339,10 +354,8 @@ class WhisperEngine:
             if not session.active.is_set() or self._shutting_down:
                 return
 
-            # Keep the provider selected when the session started. This
-            # avoids repeated attribute reads and, more importantly, prevents
-            # a settings toggle during capture from changing the destination
-            # of an already-recorded clip.
+            # Keep provider and model choices from the session start so a
+            # settings change during capture cannot reroute this recording.
             provider = session.provider if session.provider is not None else self.provider
             if provider == "local":
                 self.load_model(model_size)
@@ -357,9 +370,11 @@ class WhisperEngine:
             pre_roll = audio_module.get_pre_roll()
             audio_data = []
             if pre_roll is not None and pre_roll.size > 0:
-                # Keep float32 contract
+                # Keep float32 contract and avoid modifying the idle ring buffer.
                 if pre_roll.dtype != np.float32:
                     pre_roll = pre_roll.astype(np.float32, copy=False)
+                else:
+                    pre_roll = pre_roll.copy()
                 audio_data.append(pre_roll)
 
             self.log({"status": "listening", "message": "In ascolto... parla ora."})
@@ -400,8 +415,8 @@ class WhisperEngine:
             recording_duration = max(0.0, pytime.monotonic() - start_time)
 
             # Early `processing` from stop_recording() already notified the UI;
-            # skip the duplicate so sounds/logs fire once. Audio path below
-            # is unchanged: same queue, same concatenation, same payload.
+            # skip the duplicate so sounds/logs fire once. The captured
+            # samples remain untouched until the transcription buffer below.
             if not getattr(session, "processing_notified", False):
                 self.log({"status": "processing", "message": "Trascrizione in corso..."})
                 session.processing_notified = True
@@ -421,6 +436,11 @@ class WhisperEngine:
             )
             if recording.dtype != np.float32:
                 recording = recording.astype(np.float32, copy=False)
+
+            # Meter events use raw capture samples. Adjust only this private
+            # transcription buffer so the widget continues to show the mic's
+            # unprocessed level.
+            audio_module.apply_automatic_gain(recording)
 
             if defer_processing:
                 self._transcription_executor.submit(

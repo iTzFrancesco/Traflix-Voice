@@ -6,6 +6,10 @@ PARAKEET_MODEL_ID = "parakeet-tdt-0.6b-v3-int8"
 BLOCK_SIZE = 512
 TRANSCRIPTION_TIMEOUT = 60
 GROQ_MODEL = "whisper-large-v3-turbo"
+AUTO_GAIN_TARGET_RMS = 0.08
+AUTO_GAIN_ACTIVITY_THRESHOLD = 0.0015
+AUTO_GAIN_MAX = 4.0
+AUTO_GAIN_PEAK_CEILING = 0.98
 GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_MULTIPART_BOUNDARY = "------------------------traflix-voice-8c4e9b"
 

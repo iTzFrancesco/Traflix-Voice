@@ -6,6 +6,10 @@ from whisper_engine.constants import (
     VOLUME_DB_SCALE,
     VOLUME_FLOOR_DB,
     CLOUD_PRE_ROLL_SECONDS,
+    AUTO_GAIN_TARGET_RMS,
+    AUTO_GAIN_ACTIVITY_THRESHOLD,
+    AUTO_GAIN_MAX,
+    AUTO_GAIN_PEAK_CEILING,
 )
 
 VOLUME_UPDATE_SAMPLES = max(1, SAMPLE_RATE // 20)
@@ -65,6 +69,40 @@ def calculate_volume(indata):
     level_db = 20.0 * np.log10(max(effective_level, 1e-6))
     normalized = (level_db - VOLUME_FLOOR_DB) * VOLUME_DB_SCALE
     return int(np.clip(normalized, 0.0, 100.0))
+
+
+def apply_automatic_gain(recording):
+    """Raise quiet recordings toward a speech target without clipping peaks."""
+    if recording.size == 0:
+        return recording
+
+    np.nan_to_num(recording, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    frame_size = max(1, SAMPLE_RATE // 50)
+    frame_count = recording.size // frame_size
+    if frame_count == 0:
+        return recording
+
+    frames = recording[: frame_count * frame_size].reshape(frame_count, frame_size)
+    frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
+    noise_floor = float(np.percentile(frame_rms, 20))
+    activity_threshold = max(AUTO_GAIN_ACTIVITY_THRESHOLD, noise_floor * 1.8)
+    active_rms = frame_rms[frame_rms >= activity_threshold]
+    if active_rms.size == 0:
+        active_rms = frame_rms[frame_rms >= AUTO_GAIN_ACTIVITY_THRESHOLD]
+        if active_rms.size == 0:
+            return recording
+
+    speech_rms = float(np.percentile(active_rms, 60))
+    if speech_rms <= 0.0 or speech_rms >= AUTO_GAIN_TARGET_RMS:
+        return recording
+
+    gain = min(AUTO_GAIN_MAX, AUTO_GAIN_TARGET_RMS / speech_rms)
+    peak = float(max(np.max(recording), -np.min(recording)))
+    if peak > 0.0:
+        gain = min(gain, AUTO_GAIN_PEAK_CEILING / peak)
+    if gain > 1.0:
+        np.multiply(recording, gain, out=recording)
+    return recording
 
 
 def audio_callback(indata, frames, time, status, audio_queue, is_recording, log_func):
