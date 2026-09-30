@@ -36,6 +36,10 @@ jobs:
           cache: npm
 
       - uses: android-actions/setup-android@v3
+        # The legacy SDK "tools" package was removed from current repositories;
+        # command-line tools are provisioned by setup-android itself.
+        with:
+          packages: platform-tools
 
       - name: Install Android SDK packages
         shell: bash
