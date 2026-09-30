@@ -50,8 +50,10 @@ Windows application.
   (~670 MB), instant dictation while loaded (~1.5 GB RAM), and
   **Libera RAM** to unload it from memory without deleting files.
   Switching to Cloud unloads the model automatically.
-- **Delivery**: automatic paste (Ctrl+V) into the focused application with
-  clipboard restore, plus an always-on-top status overlay, system-tray
+- **Delivery**: automatic paste (Ctrl+V) into the focused application, with
+  the transcript left on the clipboard so you can paste it again with Ctrl+V
+  if you miss it (disable this in **System** to restore the previous clipboard
+  content instead), plus an always-on-top status overlay, system-tray
   access with minimize-to-tray, live waveform, local history (last 50),
   word statistics, and Groq quota meters.
 - **Storage**: settings, history, statistics, usage, and downloaded models
@@ -84,7 +86,8 @@ Android requires a signed APK for direct installation.
 - Local Parakeet TDT 0.6B v3 transcription through `sherpa-onnx` (int8 ONNX, CPU) — the only local model, ~30x faster than the retired Whisper backend.
 - Optional Groq transcription using `whisper-large-v3-turbo`.
 - Configurable global hotkeys, click-to-toggle, and hold-to-speak recording.
-- Automatic paste into the focused application.
+- Automatic paste into the focused application, keeping the transcript on the
+  clipboard so it can be pasted again manually.
 - One-click Parakeet download from Hugging Face, manual RAM release ("Libera RAM"), and a Home indicator showing which engine produced the last dictation.
 - CPU and optional CUDA device selection.
 - Live waveform, always-on-top status overlay, and system-tray access.
@@ -100,7 +103,8 @@ Android requires a signed APK for direct installation.
    or enable Groq Cloud mode (paste your API key in **System** first).
 3. Press the configured hotkey and speak; the overlay shows live status.
 4. Press it again to stop. The transcription is pasted into the focused
-   application and saved to history with word count and timing.
+   application and saved to history with word count and timing. It also stays
+   on the clipboard, so if you miss it you can paste it again with Ctrl+V.
 5. Check **Home** to confirm which engine (Locale/Cloud) ran last; use
    **Libera RAM** in **AI** whenever you want the ~1.5 GB back.
 

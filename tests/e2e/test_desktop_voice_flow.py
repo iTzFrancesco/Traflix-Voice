@@ -40,6 +40,7 @@ TAURI_MOCK = r"""
     secondaryHotkey: "",
     model: "parakeet-tdt-0.6b-v3-int8",
     autoPaste: true,
+    keepClipboardResult: true,
     minimizeTray: true,
     selectedDevice: "default",
     selectedLanguage: "it",
@@ -330,6 +331,20 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
         expect(browser_page.get_by_text("Le prossime trascrizioni appariranno qui.", exact=True)).to_be_visible()
         delete_calls = browser_page.evaluate("window.__e2e.calls")
         assert any(call["command"] == "delete_history_entry" for call in delete_calls)
+
+        # The Sistema tab toggle must round-trip through save_settings so the
+        # Rust side knows whether to restore the previous clipboard content.
+        browser_page.get_by_role("tab", name="Sistema").click()
+        checkbox = browser_page.locator("#keep-clipboard-result")
+        expect(checkbox).to_be_checked()
+        # The checkbox is visually hidden behind the custom switch, so drive it
+        # the way a user does: clicking the label that wraps the control.
+        browser_page.locator("label[for='keep-clipboard-result']").click()
+        browser_page.wait_for_function(
+            "window.__e2e.settings.keepClipboardResult === false"
+        )
+        browser_page.locator("label[for='keep-clipboard-result']").click()
+        browser_page.wait_for_function("window.__e2e.settings.keepClipboardResult === true")
     finally:
         if not browser_page.is_closed():
             browser_page.evaluate("window.__e2e.stopEventPolling()")

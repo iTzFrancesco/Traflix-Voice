@@ -14,6 +14,11 @@ pub struct AppSettings {
     pub model: String,
     #[serde(rename = "autoPaste", default)]
     pub auto_paste: Option<bool>,
+    #[serde(
+        rename = "keepClipboardResult",
+        default = "default_keep_clipboard_result"
+    )]
+    pub keep_clipboard_result: bool,
     #[serde(rename = "minimizeTray")]
     pub minimize_tray: bool,
     #[serde(rename = "selectedDevice")]
@@ -56,6 +61,10 @@ fn default_widget_mode() -> String {
     "always".to_string()
 }
 
+fn default_keep_clipboard_result() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
@@ -63,6 +72,7 @@ impl Default for AppSettings {
             secondary_hotkey: String::new(),
             model: "parakeet-tdt-0.6b-v3-int8".to_string(),
             auto_paste: None,
+            keep_clipboard_result: true,
             minimize_tray: true,
             selected_device: "default".to_string(),
             selected_language: "it".to_string(),
@@ -130,6 +140,7 @@ pub struct AppState {
     pub history_lock: Mutex<()>,
     pub groq_usage_path: PathBuf,
     pub hotkey_config: Arc<RwLock<Vec<HotkeyConfig>>>,
+    pub keep_clipboard_result: AtomicBool,
     pub is_shutting_down: AtomicBool,
     pub python_process_exited: AtomicBool,
 }

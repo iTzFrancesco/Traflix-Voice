@@ -3,6 +3,7 @@ export interface AppSettings {
   secondaryHotkey?: string;
   model: string;
   autoPaste?: boolean | null;
+  keepClipboardResult?: boolean;
   minimizeTray: boolean;
   selectedDevice: string;
   selectedLanguage: string;

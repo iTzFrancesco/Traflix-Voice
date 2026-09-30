@@ -52,6 +52,11 @@ pub async fn save_settings<R: Runtime>(
     atomic_write(&state.settings_path, &data).map_err(|e| e.to_string())?;
     info!("[save-debug] save_settings WRITE OK");
 
+    state.keep_clipboard_result.store(
+        settings.keep_clipboard_result,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
     let new_configs = [settings.hotkey.as_str(), settings.secondary_hotkey.as_str()]
         .into_iter()
         .filter(|hotkey| !hotkey.trim().is_empty())
@@ -196,13 +201,28 @@ fn write_to_python(state: State<'_, AppState>, payload: &[u8]) -> Result<(), Str
     }
 }
 
-/// Copia il testo negli appunti, simula Ctrl+V, poi ripristina il contenuto precedente
+/// Copia il testo negli appunti e simula Ctrl+V.
+///
+/// Con `keepClipboardResult` disattivo il contenuto precedente degli appunti
+/// viene ripristinato dopo il paste; se è attivo la trascrizione resta negli
+/// appunti, così l'utente può recuperarla con Ctrl+V in un secondo momento.
 #[tauri::command]
-pub async fn execute_paste<R: Runtime>(app: AppHandle<R>, text: String) -> Result<(), String> {
+pub async fn execute_paste<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
     use std::{thread, time::Duration};
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
-    let previous = app.clipboard().read_text().ok();
+    let previous = if state
+        .keep_clipboard_result
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        None
+    } else {
+        app.clipboard().read_text().ok()
+    };
 
     app.clipboard()
         .write_text(text)
@@ -215,9 +235,8 @@ pub async fn execute_paste<R: Runtime>(app: AppHandle<R>, text: String) -> Resul
 
     simulate_ctrl_v();
 
-    thread::sleep(Duration::from_millis(100));
-
     if let Some(prev) = previous {
+        thread::sleep(Duration::from_millis(100));
         let _ = app.clipboard().write_text(prev);
     }
 

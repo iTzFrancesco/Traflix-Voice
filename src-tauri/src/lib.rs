@@ -53,9 +53,11 @@ pub fn run() {
 
         let hotkey_config = Arc::new(RwLock::new(Vec::new()));
 
+        let settings = load_settings_from_file(&settings_path);
+        let keep_clipboard_result = AtomicBool::new(settings.keep_clipboard_result);
+
         #[cfg(desktop)]
         {
-            let settings = load_settings_from_file(&settings_path);
             let initial_config = [settings.hotkey.as_str(), settings.secondary_hotkey.as_str()]
                 .into_iter()
                 .filter(|hotkey| !hotkey.trim().is_empty())
@@ -76,6 +78,7 @@ pub fn run() {
             history_lock: Mutex::new(()),
             groq_usage_path: groq_usage_path.clone(),
             hotkey_config: hotkey_config.clone(),
+            keep_clipboard_result,
             is_shutting_down: AtomicBool::new(false),
             python_process_exited: AtomicBool::new(true),
         });
@@ -205,6 +208,41 @@ mod tests {
         assert!(!s.hold_to_speak);
         assert_eq!(s.model, "parakeet-tdt-0.6b-v3-int8");
         assert_eq!(s.selected_language, "it");
+        assert!(s.keep_clipboard_result);
+    }
+
+    #[test]
+    fn test_keep_clipboard_result_defaults_to_true() {
+        // A settings.json written by an older build must keep the transcript in
+        // the clipboard, otherwise the user loses it with no recovery path.
+        let legacy = r#"{
+            "hotkey": "XBUTTON2",
+            "model": "parakeet-tdt-0.6b-v3-int8",
+            "minimizeTray": true,
+            "selectedDevice": "default",
+            "selectedLanguage": "it",
+            "computeDevice": "cpu",
+            "holdToSpeak": false,
+            "groqApiKey": "",
+            "provider": "local"
+        }"#;
+        let settings: AppSettings = serde_json::from_str(legacy).unwrap();
+        assert!(settings.keep_clipboard_result);
+
+        let explicit = r#"{
+            "hotkey": "XBUTTON2",
+            "model": "parakeet-tdt-0.6b-v3-int8",
+            "keepClipboardResult": false,
+            "minimizeTray": true,
+            "selectedDevice": "default",
+            "selectedLanguage": "it",
+            "computeDevice": "cpu",
+            "holdToSpeak": false,
+            "groqApiKey": "",
+            "provider": "local"
+        }"#;
+        let disabled: AppSettings = serde_json::from_str(explicit).unwrap();
+        assert!(!disabled.keep_clipboard_result);
     }
 
     #[test]
@@ -219,6 +257,7 @@ mod tests {
             secondary_hotkey: String::new(),
             model: "parakeet-tdt-0.6b-v3-int8".to_string(),
             auto_paste: None,
+            keep_clipboard_result: true,
             minimize_tray: true,
             selected_device: "default".to_string(),
             selected_language: "it".to_string(),
@@ -348,6 +387,7 @@ mod tests {
         assert_eq!(settings.compute_device, "cuda");
         assert!(settings.hold_to_speak);
         assert_eq!(settings.widget_mode, "always");
+        assert!(settings.keep_clipboard_result);
 
         // Round-trip back to JSON
         let serialized = serde_json::to_string(&settings).unwrap();
@@ -358,6 +398,7 @@ mod tests {
         assert!(serialized.contains("\"holdToSpeak\""));
         assert!(serialized.contains("\"autoPaste\""));
         assert!(serialized.contains("\"widgetMode\""));
+        assert!(serialized.contains("\"keepClipboardResult\""));
     }
 
     #[test]

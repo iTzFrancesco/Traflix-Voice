@@ -15,6 +15,8 @@ export default function SistemaTab({
   gpuStatus,
   onSettingChange,
 }: SistemaTabProps) {
+  const keepClipboardResult = settings?.keepClipboardResult ?? true;
+
   return (
     <div className="tab-slide-in max-w-[700px] mx-auto w-full">
       <header className="mb-6"><h1 className="page-title m-0">Sistema</h1><p className="m-0 mt-2 text-[.84rem] text-[var(--muted)]">Audio, lingua, prestazioni e credenziali Cloud.</p></header>
@@ -48,6 +50,41 @@ export default function SistemaTab({
           <p className="m-0 text-[0.76rem] leading-5 text-[var(--muted)]">
             Il livello dell'audio inviato al riconoscimento viene regolato automaticamente a ogni dettatura. Il widget continua a mostrare il livello originale del microfono.
           </p>
+        </div>
+
+        {/* Keep last transcription on the clipboard */}
+        <div className="mb-6 flex flex-row justify-between items-center">
+          <div className="flex-1 min-w-0">
+            <label
+              className="text-[0.9rem] font-bold text-[#ccc] block mb-1"
+              htmlFor="keep-clipboard-result"
+            >
+              Mantieni la trascrizione negli appunti
+            </label>
+            <p className="text-[0.84rem] leading-5 text-[var(--muted)] m-0">
+              L'ultima trascrizione resta negli appunti, così puoi recuperarla con Ctrl+V se la perdi. Se disattivato, il contenuto precedente viene ripristinato dopo l'incollamento automatico.
+            </p>
+          </div>
+          <label className="relative inline-block w-11 h-6 cursor-pointer ml-4 flex-shrink-0">
+            <input
+              type="checkbox"
+              id="keep-clipboard-result"
+              className="opacity-0 w-0 h-0"
+              checked={settings?.keepClipboardResult ?? true}
+              onChange={(e) => onSettingChange("keepClipboardResult", e.target.checked)}
+            />
+            <span
+              className="absolute inset-0 rounded-[30px] transition-colors duration-300"
+              style={{ backgroundColor: keepClipboardResult ? "var(--primary-orange)" : "#333" }}
+            >
+              <span
+                className="absolute h-[18px] w-[18px] left-[3px] bottom-[3px] bg-white rounded-full transition-transform duration-300"
+                style={{
+                  transform: keepClipboardResult ? "translateX(20px)" : "translateX(0)",
+                }}
+              />
+            </span>
+          </label>
         </div>
 
         {/* Language */}
