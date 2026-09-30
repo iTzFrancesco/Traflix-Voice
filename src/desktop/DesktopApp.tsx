@@ -43,6 +43,7 @@ export default function App() {
     entries: historyEntries,
     loadHistory,
     clearHistory: clearStoredHistory,
+    deleteHistoryEntry: deleteStoredHistoryEntry,
     saveTranscription,
   } = useHistory();
   const { devices: audioDevices, loadAudioDevices } = useAudioDevices();
@@ -681,6 +682,7 @@ export default function App() {
             entries={historyEntries}
             onClear={clearHistory}
             onEntryClick={handleHistoryClick}
+            onDeleteEntry={deleteStoredHistoryEntry}
           />
         )}
 
