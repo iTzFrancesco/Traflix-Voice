@@ -85,6 +85,7 @@ TAURI_MOCK = r"""
             timestamp: args.timestamp,
             word_count: args.wordCount,
           }); return null;
+          case "delete_history_entry": history.splice(args.index, 1); return true;
           case "clear_history": history.splice(0, history.length); return null;
           case "check_model_exists": return false;
           case "execute_paste": return null;
@@ -292,6 +293,17 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
         browser_calls = browser_page.evaluate("window.__e2e.calls")
         assert any(call["command"] == "execute_paste" for call in browser_calls)
         assert any(call["command"] == "save_transcription" for call in browser_calls)
+
+        browser_page.get_by_role("tab", name="Cronologia").click()
+        history_entry = browser_page.locator("#history-list [role='listitem']").first
+        delete_button = history_entry.get_by_role("button").nth(1)
+        delete_button.click()
+        expect(delete_button).to_have_text("Conferma eliminazione")
+        delete_button.click()
+        browser_page.wait_for_function("window.__e2e.history.length === 0")
+        expect(browser_page.get_by_text("Le prossime trascrizioni appariranno qui.", exact=True)).to_be_visible()
+        delete_calls = browser_page.evaluate("window.__e2e.calls")
+        assert any(call["command"] == "delete_history_entry" for call in delete_calls)
     finally:
         if not browser_page.is_closed():
             browser_page.evaluate("window.__e2e.stopEventPolling()")
