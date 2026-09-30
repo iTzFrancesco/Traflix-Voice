@@ -66,6 +66,8 @@ export default function App() {
   const holdToSpeakRef = useRef(false);
   const startFnRef = useRef<(isTest?: boolean) => Promise<void>>(async () => {});
   const stopFnRef = useRef<() => void>(() => {});
+  const startupPromiseRef = useRef<Promise<void> | null>(null);
+  const startupMountedRef = useRef(false);
   holdToSpeakRef.current = holdToSpeak;
 
   // ── HOTKEY RECORDING ──
@@ -173,59 +175,65 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = [];
+    startupMountedRef.current = true;
 
-    const init = async () => {
-      // Load settings
-      const initialSettings = await loadSettings();
-
-      // Load stats
-      loadStats();
-
-      // These startup tasks are independent. Cloud users do not need local
-      // model probes at all, so avoid touching the model catalog in that mode.
-      const versionTask = (async () => {
-        if (window.__TAURI__?.app?.getVersion) {
+    if (startupPromiseRef.current === null) {
+      startupPromiseRef.current = (async () => {
+        // Synchronize the sidecar independently from optional device/model
+        // probes. A slow audio backend must not delay the first ready state.
+        const statusTimer = window.setTimeout(async () => {
+          if (!startupMountedRef.current || !window.__TAURI__?.core?.invoke) return;
           try {
-            const ver = await window.__TAURI__.app.getVersion();
-            setAppVersion(ver);
-          } catch {}
+            await window.__TAURI__.core.invoke("send_to_python", {
+              message: JSON.stringify({ command: "get_status" }),
+            });
+          } catch (err) {
+            console.warn("[startup] get_status error:", err);
+          }
+        }, 100);
+
+        try {
+          // Load settings
+          const initialSettings = await loadSettings();
+          if (!startupMountedRef.current) return;
+
+          // Load stats
+          void loadStats();
+
+          // These startup tasks are independent. Cloud users do not need local
+          // model probes at all, so avoid touching the model catalog in that mode.
+          const versionTask = (async () => {
+            if (window.__TAURI__?.app?.getVersion) {
+              try {
+                const ver = await window.__TAURI__.app.getVersion();
+                if (startupMountedRef.current) setAppVersion(ver);
+              } catch {}
+            }
+          })();
+          const modelTask =
+            initialSettings?.provider === "cloud"
+              ? Promise.resolve()
+              : refreshAllModelStatus();
+          const audioTask = loadAudioDevices();
+          await Promise.all([versionTask, audioTask, modelTask]);
+          if (!startupMountedRef.current) return;
+
+          // Load groq usage
+          void reloadGroqUsage();
+
+          // Initialize sounds
+          startSoundRef.current = new Audio("/assets/sounds/start.wav");
+          stopSoundRef.current = new Audio("/assets/sounds/stop.wav");
+          if (startSoundRef.current) startSoundRef.current.volume = 1.0;
+          if (stopSoundRef.current) stopSoundRef.current.volume = 1.0;
+        } finally {
+          window.clearTimeout(statusTimer);
         }
       })();
-      const modelTask =
-        initialSettings?.provider === "cloud"
-          ? Promise.resolve()
-          : refreshAllModelStatus();
-      const audioTask = loadAudioDevices();
-      await Promise.all([versionTask, audioTask, modelTask]);
-
-      // Load groq usage
-      reloadGroqUsage();
-
-      // Initialize sounds
-      startSoundRef.current = new Audio("/assets/sounds/start.wav");
-      stopSoundRef.current = new Audio("/assets/sounds/stop.wav");
-      if (startSoundRef.current) startSoundRef.current.volume = 1.0;
-      if (stopSoundRef.current) stopSoundRef.current.volume = 1.0;
-
-      // Request Python status sync
-      const statusTimer = setTimeout(async () => {
-        if (!window.__TAURI__?.core?.invoke) return;
-        try {
-          await window.__TAURI__.core.invoke("send_to_python", {
-            message: JSON.stringify({ command: "get_status" }),
-          });
-        } catch (err) {
-          console.warn("[startup] get_status error:", err);
-        }
-      }, 100);
-      timers.push(statusTimer);
-    };
-
-    init();
+    }
 
     return () => {
-      timers.forEach(clearTimeout);
+      startupMountedRef.current = false;
     };
   }, []);
 

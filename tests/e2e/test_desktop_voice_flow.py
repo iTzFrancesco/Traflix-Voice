@@ -162,6 +162,32 @@ def test_cloud_ui_only_exposes_turbo_and_automatic_gain(browser_page, e2e_base_u
     assert browser_page.locator('input[type="range"]').count() == 0
 
 
+def test_sidecar_status_sync_is_not_gated_by_audio_probe(browser_page, e2e_base_url):
+    configure_tauri_bridge(browser_page, lambda _source, _command, _args: None, lambda _source: [])
+    browser_page.add_init_script(
+        """
+        (() => {
+          const invoke = window.__TAURI__.core.invoke;
+          window.__TAURI__.core.invoke = (command, args = {}) =>
+            command === "get_audio_devices"
+              ? new Promise(() => {})
+              : invoke(command, args);
+        })();
+        """
+    )
+    open_app(browser_page, e2e_base_url)
+
+    browser_page.wait_for_function(
+        """
+        window.__e2e.calls.some((call) =>
+          call.command === "send_to_python" &&
+          JSON.parse(call.args.message).command === "get_status"
+        )
+        """,
+        timeout=1000,
+    )
+
+
 def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
     event_queue = queue.SimpleQueue()
     sidecar_commands = []
