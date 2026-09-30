@@ -153,6 +153,7 @@ pub fn run() {
             execute_paste,
             save_transcription,
             get_history,
+            delete_history_entry,
             clear_history,
             get_groq_usage,
             shutdown_python,

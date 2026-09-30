@@ -277,6 +277,72 @@ pub async fn get_history(state: State<'_, AppState>) -> Result<Vec<Transcription
     }
 }
 
+fn remove_history_entry(
+    entries: &mut Vec<TranscriptionEntry>,
+    newest_first_index: usize,
+    target: &TranscriptionEntry,
+) -> bool {
+    let storage_index = match newest_first_index
+        .checked_add(1)
+        .and_then(|offset| entries.len().checked_sub(offset))
+    {
+        Some(index) => index,
+        None => return false,
+    };
+
+    let matches_target = |entry: &TranscriptionEntry| {
+        entry.text == target.text
+            && entry.timestamp == target.timestamp
+            && entry.word_count == target.word_count
+    };
+
+    if entries
+        .get(storage_index)
+        .map(matches_target)
+        .unwrap_or(false)
+    {
+        entries.remove(storage_index);
+        return true;
+    }
+
+    if let Some(index) = entries.iter().rposition(matches_target) {
+        entries.remove(index);
+        return true;
+    }
+
+    false
+}
+
+/// Cancella una singola trascrizione senza modificare le altre voci o le statistiche.
+#[tauri::command]
+pub async fn delete_history_entry(
+    state: State<'_, AppState>,
+    index: usize,
+    text: String,
+    timestamp: String,
+    word_count: u32,
+) -> Result<bool, String> {
+    let _history_guard = state.history_lock.lock().unwrap();
+    let data = match fs::read_to_string(&state.history_path) {
+        Ok(data) => data,
+        Err(_) => return Ok(false),
+    };
+    let mut entries: Vec<TranscriptionEntry> = serde_json::from_str(&data).unwrap_or_default();
+    let target = TranscriptionEntry {
+        text,
+        timestamp,
+        word_count,
+    };
+
+    if !remove_history_entry(&mut entries, index, &target) {
+        return Ok(false);
+    }
+
+    let updated = serde_json::to_string(&entries).map_err(|e| e.to_string())?;
+    atomic_write(&state.history_path, &updated).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 /// Cancella tutta la cronologia e resetta le statistiche
 #[tauri::command]
 pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
@@ -294,6 +360,42 @@ pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
     let data = serde_json::to_string(&stats).map_err(|e| e.to_string())?;
     atomic_write(&state.stats_path, &data).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remove_history_entry;
+    use crate::state::TranscriptionEntry;
+
+    fn entry(text: &str, timestamp: &str) -> TranscriptionEntry {
+        TranscriptionEntry {
+            text: text.to_string(),
+            timestamp: timestamp.to_string(),
+            word_count: 1,
+        }
+    }
+
+    #[test]
+    fn removes_entry_using_newest_first_index() {
+        let oldest = entry("vecchia", "10:00");
+        let middle = entry("centrale", "10:01");
+        let newest = entry("recente", "10:02");
+        let mut entries = vec![oldest.clone(), middle, newest.clone()];
+
+        assert!(remove_history_entry(&mut entries, 0, &newest));
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].text, oldest.text);
+    }
+
+    #[test]
+    fn rejects_stale_entry_without_changing_history() {
+        let stored = entry("salvata", "10:00");
+        let mut entries = vec![stored];
+        let missing = entry("non presente", "10:01");
+
+        assert!(!remove_history_entry(&mut entries, 0, &missing));
+        assert_eq!(entries.len(), 1);
+    }
 }
 
 /// Restituisce le statistiche di utilizzo Groq Cloud
