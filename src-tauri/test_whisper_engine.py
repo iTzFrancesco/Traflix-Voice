@@ -1727,6 +1727,48 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
             engine._preload_default_model("parakeet-tdt-0.6b-v3-int8")
         mock_preload.assert_not_called()
 
+    def test_preload_serializes_first_transcription_model_load(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/models"
+        preload_started = threading.Event()
+        release_preload = threading.Event()
+        load_finished = threading.Event()
+        preloaded_adapter = MagicMock()
+
+        def blocking_preload(*_args, **_kwargs):
+            preload_started.set()
+            self.assertTrue(release_preload.wait(timeout=1))
+            return preloaded_adapter, "parakeet-tdt-0.6b-v3-int8"
+
+        with patch(
+            "whisper_engine.model.preload_default_model",
+            side_effect=blocking_preload,
+        ), patch("whisper_engine.model.load_model") as mock_load:
+            preload_thread = threading.Thread(
+                target=engine._preload_default_model,
+                args=("parakeet-tdt-0.6b-v3-int8",),
+            )
+            preload_thread.start()
+            self.assertTrue(preload_started.wait(timeout=1))
+
+            def load_model():
+                engine.load_model("parakeet-tdt-0.6b-v3-int8")
+                load_finished.set()
+
+            load_thread = threading.Thread(target=load_model)
+            load_thread.start()
+            self.assertFalse(load_finished.wait(timeout=0.05))
+
+            release_preload.set()
+            preload_thread.join(timeout=1)
+            load_thread.join(timeout=1)
+
+        self.assertFalse(preload_thread.is_alive())
+        self.assertFalse(load_thread.is_alive())
+        self.assertTrue(load_finished.is_set())
+        mock_load.assert_not_called()
+        self.assertIs(engine.model, preloaded_adapter)
+
     def test_preload_releases_duplicate_when_transcribe_wins_race(self):
         engine = WhisperEngine()
         engine.models_dir = "/models"

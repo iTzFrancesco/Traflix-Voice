@@ -162,21 +162,27 @@ class WhisperEngine:
         with self._model_lock:
             if self.model is not None:
                 return
-        loaded_model, size = model_module.preload_default_model(self.models_dir, model_size, self.log)
-        if loaded_model is not None:
-            with self._model_lock:
-                if self.model is not None:
-                    # A transcribe beat the preload thread; drop the duplicate
-                    # instead of leaking a second ~1 GB recognizer.
-                    model_module.release_model(loaded_model)
-                    try:
-                        import gc
-                        gc.collect()
-                    except Exception:
-                        pass
-                    return
-                self.model = loaded_model
-                self.current_model_size = size
+            # Keep the lock for the complete preload. A first transcription
+            # can arrive while the background preload is constructing the
+            # recognizer; serializing both paths avoids allocating two native
+            # backends before either one is visible on the engine.
+            loaded_model, size = model_module.preload_default_model(
+                self.models_dir, model_size, self.log
+            )
+            if loaded_model is None:
+                return
+            if self.model is not None:
+                # Retain the defensive cleanup for mocked/legacy backends
+                # that publish a model while the preload call is running.
+                model_module.release_model(loaded_model)
+                try:
+                    import gc
+                    gc.collect()
+                except Exception:
+                    pass
+                return
+            self.model = loaded_model
+            self.current_model_size = size
 
     def download_model(self, size):
         model_module.download_model(self.models_dir, size, self.log)
