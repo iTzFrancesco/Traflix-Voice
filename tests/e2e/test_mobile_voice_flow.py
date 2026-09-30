@@ -22,9 +22,7 @@ TAURI_MOCK = r"""
         }
         if (command === "get_history") return [];
         if (command === "get_groq_usage") return new Promise(() => {});
-        if (command === "plugin:voice-runtime|getRuntimeState") {
-          return { state: "ready" };
-        }
+        if (command === "plugin:voice-runtime|getRuntimeState") return new Promise(() => {});
         return null;
       },
     },

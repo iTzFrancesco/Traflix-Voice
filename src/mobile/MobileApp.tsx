@@ -165,7 +165,16 @@ export default function MobileApp() {
     let refreshPromise: Promise<void>;
     refreshPromise = (async () => {
       try {
-        const value: unknown = await invoke("plugin:voice-runtime|getRuntimeState");
+        const request = invoke("plugin:voice-runtime|getRuntimeState");
+        if (!request) return;
+        const value: unknown = await resolveWithin(request, MOBILE_DATA_TIMEOUT_MS);
+        if (value === null) {
+          if (!runtimeStateErrorLoggedRef.current) {
+            console.debug("[android-runtime] state snapshot timed out");
+            runtimeStateErrorLoggedRef.current = true;
+          }
+          return;
+        }
         const rawState =
           value !== null && typeof value === "object" && "state" in value
             ? value.state
