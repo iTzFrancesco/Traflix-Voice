@@ -182,16 +182,24 @@ export default function App() {
         // Synchronize the sidecar independently from optional device/model
         // probes. A slow audio backend must not delay the first ready state.
         let statusRequested = false;
+        let statusAttempts = 0;
         const requestStatus = async () => {
           if (statusRequested) return;
-          statusRequested = true;
           if (!startupMountedRef.current || !window.__TAURI__?.core?.invoke) return;
+          statusRequested = true;
+          statusAttempts += 1;
           try {
             await window.__TAURI__.core.invoke("send_to_python", {
               message: JSON.stringify({ command: "get_status" }),
             });
           } catch (err) {
+            statusRequested = false;
             console.warn("[startup] get_status error:", err);
+            if (statusAttempts < 2 && startupMountedRef.current) {
+              window.setTimeout(() => {
+                void requestStatus();
+              }, 250);
+            }
           }
         };
         const statusTimer = window.setTimeout(() => {
