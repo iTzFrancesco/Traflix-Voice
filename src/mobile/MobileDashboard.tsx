@@ -42,6 +42,7 @@ interface MobileDashboardProps {
   onHoldToSpeakChange: (value: boolean) => Promise<void>;
   onSettingChange: (key: string, value: string | boolean) => Promise<void>;
   onClearHistory: () => Promise<void>;
+  onDeleteHistoryEntry: (entry: TranscriptionEntry, index: number) => Promise<boolean>;
   onHistoryClick: (text: string) => Promise<boolean>;
   onOpenAndroidSettings: (screen: MobileSettingsScreen) => Promise<void>;
   androidSettingsError: string;
@@ -245,6 +246,7 @@ export default function MobileDashboard({
   onHoldToSpeakChange,
   onSettingChange,
   onClearHistory,
+  onDeleteHistoryEntry,
   onHistoryClick,
   onOpenAndroidSettings,
   androidSettingsError,
@@ -259,6 +261,8 @@ export default function MobileDashboard({
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [historyActionError, setHistoryActionError] = useState("");
+  const [confirmingDeleteKey, setConfirmingDeleteKey] = useState<string | null>(null);
+  const [deletingHistoryKey, setDeletingHistoryKey] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<{
     key: string;
     state: "copying" | "copied" | "error";
@@ -343,6 +347,36 @@ export default function MobileDashboard({
       setHistoryActionError("Impossibile cancellare la cronologia. Riprova.");
     } finally {
       setClearingHistory(false);
+    }
+  };
+
+  const handleDeleteHistoryEntry = async (
+    entry: TranscriptionEntry,
+    index: number,
+    key: string,
+  ) => {
+    if (deletingHistoryKey !== null) return;
+    if (confirmingDeleteKey !== key) {
+      setConfirmingDeleteKey(key);
+      setHistoryActionError("");
+      return;
+    }
+
+    setDeletingHistoryKey(key);
+    setConfirmingDeleteKey(null);
+    setHistoryActionError("");
+    try {
+      const deleted = await onDeleteHistoryEntry(entry, index);
+      if (!deleted) {
+        setConfirmingDeleteKey(key);
+        setHistoryActionError("La trascrizione non è più disponibile. Ricarica la cronologia.");
+      }
+    } catch (error) {
+      console.error("[mobile-history] delete failed:", error);
+      setConfirmingDeleteKey(key);
+      setHistoryActionError("Impossibile cancellare la trascrizione. Riprova.");
+    } finally {
+      setDeletingHistoryKey(null);
     }
   };
 
@@ -607,22 +641,35 @@ export default function MobileDashboard({
             <p>{historyEntries.length === 0 ? "Le prossime sessioni appariranno qui." : "Prova con una parola diversa."}</p>
           </div>
         ) : visibleHistory.map(({ entry, originalIndex }) => {
-          const key = historyEntryKey(entry);
+          const key = `${historyEntryKey(entry)}\u0000${originalIndex}`;
           const isCopying = copyFeedback?.key === key && copyFeedback.state === "copying";
           const isCopied = copyFeedback?.key === key && copyFeedback.state === "copied";
+          const isConfirmingDelete = confirmingDeleteKey === key;
+          const isDeleting = deletingHistoryKey === key;
           return (
-            <div key={key} role="listitem">
+            <div key={key} className="mobile-history-card" role="listitem">
               <button
                 type="button"
                 className="mobile-history-entry"
                 onClick={() => void handleHistoryEntryClick(entry.text, key)}
                 title="Copia negli appunti"
                 aria-label={`${isCopied ? "Copiato: " : "Copia: "}${entry.text}`}
-                disabled={isCopying}
+                disabled={isCopying || isDeleting}
               >
                 <div className="mobile-history-meta"><span>{entry.timestamp}</span><span>{isCopying ? "Copia…" : isCopied ? "Copiato" : entry.word_count > 0 ? `${entry.word_count} parole` : "Trascrizione"}</span></div>
                 <p>{entry.text.length > 190 ? `${entry.text.slice(0, 190)}…` : entry.text}</p>
               </button>
+              <div className="mobile-history-actions">
+                <button
+                  type="button"
+                  className={`mobile-delete-entry ${isConfirmingDelete ? "is-confirming" : ""}`}
+                  disabled={isDeleting}
+                  aria-label={`${isConfirmingDelete ? "Conferma eliminazione" : "Elimina"} trascrizione del ${entry.timestamp}`}
+                  onClick={() => void handleDeleteHistoryEntry(entry, originalIndex, key)}
+                >
+                  {isDeleting ? "Elimino…" : isConfirmingDelete ? "Conferma eliminazione" : "Elimina"}
+                </button>
+              </div>
             </div>
           );
         })}

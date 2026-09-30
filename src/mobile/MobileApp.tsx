@@ -81,6 +81,7 @@ export default function MobileApp() {
     entries: historyEntries,
     loadHistory,
     clearHistory: clearStoredHistory,
+    deleteHistoryEntry: deleteStoredHistoryEntry,
   } = useHistory();
   const { groqUsage, reloadGroqUsage } = useGroqUsage();
 
@@ -583,6 +584,7 @@ export default function MobileApp() {
       onHoldToSpeakChange={handleMobileHoldToSpeakChange}
       onSettingChange={handleSettingChange}
       onClearHistory={clearHistory}
+      onDeleteHistoryEntry={deleteStoredHistoryEntry}
       onHistoryClick={handleHistoryClick}
       onOpenAndroidSettings={openAndroidSettings}
       androidSettingsError={androidSettingsError}
