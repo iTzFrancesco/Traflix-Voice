@@ -14,7 +14,11 @@ import type { AppSettings } from "../types";
 const IS_DEV = import.meta.env.DEV;
 const MOBILE_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const RESUME_UPDATE_CHECK_INTERVAL_MS = 60_000;
-const RUNTIME_STATUS_POLL_INTERVAL_MS = 1_000;
+const MOBILE_SETTINGS_TIMEOUT_MS = 5_000;
+const MOBILE_DATA_TIMEOUT_MS = 2_000;
+const RUNTIME_STATUS_IDLE_POLL_INTERVAL_MS = 3_000;
+const RUNTIME_STATUS_ACTIVE_POLL_INTERVAL_MS = 250;
+const RUNTIME_STATUS_FEEDBACK_POLL_INTERVAL_MS = 1_000;
 const MOBILE_RUNTIME_STATES = new Set([
   "idle",
   "starting",
@@ -25,6 +29,8 @@ const MOBILE_RUNTIME_STATES = new Set([
   "error",
   "rate_limit",
 ]);
+const ACTIVE_RUNTIME_STATES = new Set(["starting", "listening", "processing"]);
+const FEEDBACK_RUNTIME_STATES = new Set(["result", "error", "rate_limit"]);
 
 type MobileStartupState = "loading" | "ready" | "error";
 type MobileNativeSettings = {
@@ -69,6 +75,32 @@ function normalizeMobileVersion(value: unknown): string | null {
   return MOBILE_VERSION_PATTERN.test(version) ? version : null;
 }
 
+function resolveWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
 export default function MobileApp() {
   const {
     settings,
@@ -105,6 +137,7 @@ export default function MobileApp() {
   const lastRuntimeStateRef = useRef<string | null>(null);
   const runtimeStateErrorLoggedRef = useRef(false);
   const runtimeStateRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const runtimeStatePollTimerRef = useRef<number | null>(null);
   const mobileUpdateCheckInFlightRef = useRef<Promise<void> | null>(null);
   const lastMobileUpdateCheckAtRef = useRef(0);
 
@@ -248,21 +281,24 @@ export default function MobileApp() {
     }
 
     lastDataRefreshAtRef.current = now;
+    const settingsPromise = resolveWithin(loadSettings(), MOBILE_SETTINGS_TIMEOUT_MS);
+    const optionalDataPromise = Promise.all([
+      resolveWithin(loadStats(), MOBILE_DATA_TIMEOUT_MS),
+      resolveWithin(loadHistory(), MOBILE_DATA_TIMEOUT_MS),
+      resolveWithin(reloadGroqUsage(), MOBILE_DATA_TIMEOUT_MS),
+      resolveWithin(loadAppVersion(), MOBILE_DATA_TIMEOUT_MS),
+      resolveWithin(loadRuntimeState(), MOBILE_DATA_TIMEOUT_MS),
+    ]);
+
     let refreshPromise: Promise<boolean>;
-    refreshPromise = Promise.allSettled([
-      loadSettings(),
-      loadStats(),
-      loadHistory(),
-      reloadGroqUsage(),
-      loadAppVersion(),
-      loadRuntimeState(),
-    ]).then(([settingsResult]) => (
-      settingsResult.status === "fulfilled" && settingsResult.value !== null
+    refreshPromise = settingsPromise.then((settingsResult) => (
+      settingsResult !== null
     )).finally(() => {
       if (mobileDataRefreshInFlightRef.current === refreshPromise) {
         mobileDataRefreshInFlightRef.current = null;
       }
     });
+    void optionalDataPromise;
     mobileDataRefreshInFlightRef.current = refreshPromise;
     return refreshPromise;
   }, [loadAppVersion, loadHistory, loadRuntimeState, loadSettings, loadStats, reloadGroqUsage]);
@@ -488,13 +524,47 @@ export default function MobileApp() {
 
   useEffect(() => {
     if (!window.__TAURI__?.core?.invoke) return;
+    let cancelled = false;
+
+    const nextPollDelay = () => {
+      const state = lastRuntimeStateRef.current;
+      if (state !== null && ACTIVE_RUNTIME_STATES.has(state)) {
+        return RUNTIME_STATUS_ACTIVE_POLL_INTERVAL_MS;
+      }
+      if (state !== null && FEEDBACK_RUNTIME_STATES.has(state)) {
+        return RUNTIME_STATUS_FEEDBACK_POLL_INTERVAL_MS;
+      }
+      return RUNTIME_STATUS_IDLE_POLL_INTERVAL_MS;
+    };
+
     const pollRuntimeState = () => {
-      if (document.visibilityState === "visible" && appReadyRef.current) {
-        void loadRuntimeState();
+      if (cancelled) return;
+      if (document.visibilityState !== "visible" || !appReadyRef.current) {
+        runtimeStatePollTimerRef.current = window.setTimeout(
+          pollRuntimeState,
+          RUNTIME_STATUS_IDLE_POLL_INTERVAL_MS,
+        );
+        return;
+      }
+
+      void loadRuntimeState().finally(() => {
+        if (!cancelled) {
+          runtimeStatePollTimerRef.current = window.setTimeout(
+            pollRuntimeState,
+            nextPollDelay(),
+          );
+        }
+      });
+    };
+
+    pollRuntimeState();
+    return () => {
+      cancelled = true;
+      if (runtimeStatePollTimerRef.current !== null) {
+        window.clearTimeout(runtimeStatePollTimerRef.current);
+        runtimeStatePollTimerRef.current = null;
       }
     };
-    const timer = window.setInterval(pollRuntimeState, RUNTIME_STATUS_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
   }, [loadRuntimeState]);
 
   useEffect(() => {
