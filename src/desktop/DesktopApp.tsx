@@ -181,7 +181,10 @@ export default function App() {
       startupPromiseRef.current = (async () => {
         // Synchronize the sidecar independently from optional device/model
         // probes. A slow audio backend must not delay the first ready state.
-        const statusTimer = window.setTimeout(async () => {
+        let statusRequested = false;
+        const requestStatus = async () => {
+          if (statusRequested) return;
+          statusRequested = true;
           if (!startupMountedRef.current || !window.__TAURI__?.core?.invoke) return;
           try {
             await window.__TAURI__.core.invoke("send_to_python", {
@@ -190,6 +193,9 @@ export default function App() {
           } catch (err) {
             console.warn("[startup] get_status error:", err);
           }
+        };
+        const statusTimer = window.setTimeout(() => {
+          void requestStatus();
         }, 100);
 
         try {
@@ -217,6 +223,8 @@ export default function App() {
           const audioTask = loadAudioDevices();
           await Promise.all([versionTask, audioTask, modelTask]);
           if (!startupMountedRef.current) return;
+          window.clearTimeout(statusTimer);
+          void requestStatus();
 
           // Load groq usage
           void reloadGroqUsage();
@@ -226,8 +234,8 @@ export default function App() {
           stopSoundRef.current = new Audio("/assets/sounds/stop.wav");
           if (startSoundRef.current) startSoundRef.current.volume = 1.0;
           if (stopSoundRef.current) stopSoundRef.current.volume = 1.0;
-        } finally {
-          window.clearTimeout(statusTimer);
+        } catch (err) {
+          console.warn("[startup] optional initialization error:", err);
         }
       })();
     }
