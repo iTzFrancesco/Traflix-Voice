@@ -67,6 +67,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Initialize Android project
+        run: npm exec tauri -- android init --ci --skip-targets-install
+
       - name: Run Android JVM tests
         run: ./gradlew :app:testReleaseUnitTest
         working-directory: src-tauri/gen/android
