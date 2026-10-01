@@ -4,6 +4,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.net.Uri
@@ -39,6 +41,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   private var currentEditorInfo: EditorInfo? = null
   private var editorGeneration = 0L
   private var recordingGeneration: Long? = null
+  private var transcriptionPending = false
   private var recordingForegroundActive = false
 
   override fun onCreate() {
@@ -55,15 +58,16 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
 
   override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
     super.onStartInput(attribute, restarting)
-    cloudTranscriber.cancel()
-    if (recordingGeneration != null) {
+    val keepCompletedRecordingPending = transcriptionPending
+    if (!keepCompletedRecordingPending) cloudTranscriber.cancel()
+    if (recordingGeneration != null && !keepCompletedRecordingPending) {
       recorder.cancel()
       stopRecordingForeground()
       keyboardView?.setState(MicIndicatorState.IDLE)
     }
     currentEditorInfo = attribute
     editorGeneration += 1
-    recordingGeneration = null
+    if (!keepCompletedRecordingPending) recordingGeneration = null
     keyboardView?.refreshMode()
   }
 
@@ -74,11 +78,19 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   }
 
   override fun onFinishInput() {
-    cloudTranscriber.cancel()
-    recorder.cancel()
+    val keepCompletedTranscription = transcriptionPending
+    if (keepCompletedTranscription) {
+      // Android calls onFinishInput before onStartInput when focus moves to a
+      // different editor. Keep the completed recording alive, but invalidate
+      // its old editor so the result is offered for recovery instead.
+      editorGeneration += 1
+    } else {
+      cloudTranscriber.cancel()
+      recorder.cancel()
+      recordingGeneration = null
+      keyboardView?.setState(MicIndicatorState.IDLE)
+    }
     stopRecordingForeground()
-    recordingGeneration = null
-    keyboardView?.setState(MicIndicatorState.IDLE)
     currentEditorInfo = null
     super.onFinishInput()
   }
@@ -137,12 +149,17 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     }
   }
 
+  override fun onCopyRecoverableText(text: String) {
+    copyRecoverableText(text)
+  }
+
   override fun onMeter(value: Float) {
     keyboardView?.setVolume(value)
   }
 
   override fun onRecordingFinished(file: File, durationMs: Long) {
     stopRecordingForeground()
+    transcriptionPending = true
     keyboardView?.setState(MicIndicatorState.PROCESSING, "Trascrizione Groq Cloud")
     cloudTranscriber.transcribe(
       file,
@@ -150,12 +167,14 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
       object : GroqCloudTranscriber.Listener {
         override fun onSuccess(text: String) {
           file.delete()
+          transcriptionPending = false
           persistTranscript(text, durationMs)
           commitIfEditorStillCurrent(text)
         }
 
         override fun onFailure(message: String) {
           file.delete()
+          transcriptionPending = false
           recordingGeneration = null
           keyboardView?.setState(MicIndicatorState.ERROR, message)
         }
@@ -166,11 +185,13 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   override fun onRecordingError(message: String) {
     cloudTranscriber.cancel()
     stopRecordingForeground()
+    transcriptionPending = false
     recordingGeneration = null
     keyboardView?.setState(MicIndicatorState.ERROR, message)
   }
 
   override fun onDestroy() {
+    transcriptionPending = false
     recorder.shutdown()
     stopRecordingForeground()
     cloudTranscriber.shutdown()
@@ -185,6 +206,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     cloudTranscriber.cancel()
     recorder.cancel()
     stopRecordingForeground()
+    transcriptionPending = false
     recordingGeneration = null
     keyboardView?.setState(MicIndicatorState.IDLE)
     super.onTaskRemoved(rootIntent)
@@ -205,30 +227,55 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
 
   private fun commitIfEditorStillCurrent(text: String) {
     val targetGeneration = recordingGeneration
-    if (targetGeneration == null || targetGeneration != editorGeneration) {
+    if (isSensitiveField()) {
+      recordingGeneration = null
       keyboardView?.setState(
         MicIndicatorState.ERROR,
-        "Il campo attivo è cambiato",
+        "Campo protetto · testo salvato in Cronologia",
       )
-      recordingGeneration = null
       return
     }
 
-    if (isSensitiveField()) {
+    if (targetGeneration == null || targetGeneration != editorGeneration) {
+      recordingGeneration = null
       keyboardView?.setState(
         MicIndicatorState.ERROR,
-        "Campo protetto: testo non inserito",
+        "Campo cambiato · copia testo",
+        recoverableText = text,
       )
-      recordingGeneration = null
       return
     }
 
     val committed = currentInputConnection?.commitText(text, 1) == true
+    recordingGeneration = null
     keyboardView?.setState(
       if (committed) MicIndicatorState.SUCCESS else MicIndicatorState.ERROR,
-      if (committed) "Testo inserito" else "Impossibile inserire il testo",
+      if (committed) "Testo inserito" else "Inserimento non riuscito · copia testo",
+      recoverableText = if (committed) null else text,
     )
-    recordingGeneration = null
+  }
+
+  fun copyRecoverableText(text: String) {
+    if (isSensitiveField()) {
+      keyboardView?.setState(
+        MicIndicatorState.ERROR,
+        "Campo protetto · testo salvato in Cronologia",
+      )
+      return
+    }
+
+    runCatching {
+      getSystemService(ClipboardManager::class.java)
+        .setPrimaryClip(ClipData.newPlainText("Traflix Voice", text))
+      keyboardView?.setState(MicIndicatorState.SUCCESS, "Testo copiato")
+    }.onFailure {
+      Log.w(TAG, "unable to copy recoverable transcript", it)
+      keyboardView?.setState(
+        MicIndicatorState.ERROR,
+        "Impossibile copiare il testo",
+        recoverableText = text,
+      )
+    }
   }
 
   private fun isSensitiveField(): Boolean {

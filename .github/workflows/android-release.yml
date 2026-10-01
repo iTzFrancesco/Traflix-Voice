@@ -67,6 +67,10 @@ jobs:
 
       - run: npm ci
 
+      - name: Run Android JVM tests
+        run: ./gradlew :app:testReleaseUnitTest
+        working-directory: src-tauri/gen/android
+
       - name: Restore Android signing key
         shell: bash
         env:
@@ -109,11 +113,10 @@ jobs:
           body: |
             Android private preview ${{ steps.release.outputs.version }}.
 
-            This release improves mobile startup, responsive Hub navigation,
-            copy and history feedback, runtime-state synchronization, audio
-            recorder lifecycle handling, meter rendering, and background
-            persistence. The attached universal APK is signed for direct
-            installation.
+            This release adds transcript recovery when Android cannot insert
+            text, keeps completed dictation available across editor changes,
+            and routes history deletion and clearing through the native data
+            stores. The attached universal APK is signed for direct installation.
           prerelease: true
           make_latest: false
           files: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk

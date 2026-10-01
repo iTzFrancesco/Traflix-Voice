@@ -91,6 +91,25 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     FAILED,
   }
 
+  override fun onCopyRecoverableText(text: String) {
+    if (focusedEditorSensitive) {
+      setOverlayState(MicIndicatorState.ERROR, "Campo protetto · testo salvato in Cronologia")
+      return
+    }
+
+    runCatching {
+      getSystemService(ClipboardManager::class.java)
+        .setPrimaryClip(ClipData.newPlainText("Traflix Voice", text))
+      setOverlayState(MicIndicatorState.SUCCESS, "Testo copiato")
+    }.onFailure {
+      Log.w(TAG, "unable to copy recoverable transcript", it)
+      setOverlayState(
+        MicIndicatorState.ERROR,
+        "Impossibile copiare · apri la cronologia",
+      )
+    }
+  }
+
   override fun onServiceConnected() {
     super.onServiceConnected()
     Log.i(TAG, "accessibility service connected")
@@ -299,8 +318,8 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
           file.delete()
           val insertionResult = insertIntoFocusedEditor(text)
           Log.i(TAG, "transcription insert result=$insertionResult")
+          persistTranscript(text, durationMs)
           if (insertionResult != TranscriptionInsertResult.FAILED) {
-            persistTranscript(text, durationMs)
             recordingEditorKey = null
             val detail = if (insertionResult == TranscriptionInsertResult.INSERTED) {
               "Testo inserito"
@@ -311,7 +330,12 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
           } else {
             clearRecordingEditor()
             recordingEditorKey = null
-            setOverlayState(MicIndicatorState.ERROR, "Impossibile inserire il testo")
+            setOverlayState(
+              MicIndicatorState.ERROR,
+              "Inserimento non riuscito · copia testo",
+              text,
+              true,
+            )
           }
         }
 
@@ -808,9 +832,14 @@ class VoiceAccessibilityService : AccessibilityService(), VoiceOverlayView.Liste
     )
   }
 
-  private fun setOverlayState(state: MicIndicatorState, detail: String? = null) {
+  private fun setOverlayState(
+    state: MicIndicatorState,
+    detail: String? = null,
+    recoverableText: String? = null,
+    showRecovery: Boolean = false,
+  ) {
     if (::runtimeStateStore.isInitialized) runtimeStateStore.set(state, detail)
-    val update = Runnable { overlay?.setState(state, detail) }
+    val update = Runnable { overlay?.setState(state, detail, recoverableText, showRecovery) }
     if (Looper.myLooper() == Looper.getMainLooper()) update.run() else mainHandler.post(update)
   }
 

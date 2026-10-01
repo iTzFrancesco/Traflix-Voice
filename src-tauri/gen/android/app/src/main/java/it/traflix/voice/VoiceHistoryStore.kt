@@ -4,7 +4,6 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,17 +45,39 @@ class VoiceHistoryStore(context: Context) {
     historyFile.parentFile?.mkdirs()
     val temporary = File(historyFile.parentFile, "${historyFile.name}.tmp")
     temporary.writeText(contents)
-    if (!temporary.renameTo(historyFile)) {
+    try {
+      VoiceDataFileLocks.replaceFileAtomically(temporary, historyFile)
+    } catch (error: Exception) {
       temporary.delete()
-      throw IllegalStateException("Impossibile salvare la cronologia")
+      throw IllegalStateException("Impossibile salvare la cronologia", error)
     }
   }
 
-  private fun <T> withFileLock(block: () -> T): T {
-    lockFile.parentFile?.mkdirs()
-    return RandomAccessFile(lockFile, "rw").use { accessFile ->
-      accessFile.channel.lock().use { block() }
+  fun delete(index: Int, text: String, timestamp: String, wordCount: Int): Boolean =
+    withFileLock {
+      if (!historyFile.exists()) return@withFileLock false
+      val entries = readEntries()
+      if (index < 0) return@withFileLock false
+      val storageIndex = entries.length() - index - 1
+      val matches: (Int) -> Boolean = { candidateIndex ->
+        val candidate = entries.optJSONObject(candidateIndex)
+        candidate != null &&
+          candidate.optString("text") == text &&
+          candidate.optString("timestamp") == timestamp &&
+          candidate.optInt("word_count") == wordCount
+      }
+      val removeIndex = when {
+        storageIndex in 0 until entries.length() && matches(storageIndex) -> storageIndex
+        else -> (entries.length() - 1 downTo 0).firstOrNull(matches) ?: -1
+      }
+      if (removeIndex < 0) return@withFileLock false
+      entries.remove(removeIndex)
+      atomicWrite(entries.toString())
+      true
     }
+
+  private fun <T> withFileLock(block: () -> T): T {
+    return VoiceDataFileLocks.withLockFile(lockFile, block)
   }
 
   private companion object {

@@ -35,6 +35,14 @@ class LanguageArgs {
   var language: String? = null
 }
 
+@InvokeArg
+class HistoryEntryArgs {
+  var index: Int = 0
+  var text: String? = null
+  var timestamp: String? = null
+  var wordCount: Int = 0
+}
+
 @TauriPlugin
 class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
   @Command
@@ -95,6 +103,34 @@ class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun getRuntimeState(invoke: Invoke) {
     invoke.resolveObject(VoiceRuntimeStateStore(activity).snapshot())
+  }
+
+  @Command
+  fun clearHistoryAndStats(invoke: Invoke) {
+    try {
+      VoiceDataResetStore(activity).clearHistoryAndStats()
+      invoke.resolve()
+    } catch (error: Exception) {
+      Log.e(TAG, "clear history and stats failed", error)
+      invoke.reject(error.message ?: "Impossibile cancellare la cronologia")
+    }
+  }
+
+  @Command
+  fun deleteHistoryEntry(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(HistoryEntryArgs::class.java)
+      val deleted = VoiceHistoryStore(activity).delete(
+        args.index,
+        args.text.orEmpty(),
+        args.timestamp.orEmpty(),
+        args.wordCount,
+      )
+      invoke.resolveObject(mapOf("deleted" to deleted))
+    } catch (error: Exception) {
+      Log.e(TAG, "delete history entry failed", error)
+      invoke.reject(error.message ?: "Impossibile cancellare la trascrizione")
+    }
   }
 
   @Command

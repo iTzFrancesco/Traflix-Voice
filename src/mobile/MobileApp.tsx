@@ -9,7 +9,7 @@ import { useGroqUsage } from "../hooks/useGroqUsage";
 import { useHistory } from "../hooks/useHistory";
 import { useSettings } from "../hooks/useSettings";
 import { useStats } from "../hooks/useStats";
-import type { AppSettings } from "../types";
+import type { AppSettings, TranscriptionEntry } from "../types";
 
 const IS_DEV = import.meta.env.DEV;
 const MOBILE_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
@@ -112,8 +112,6 @@ export default function MobileApp() {
   const {
     entries: historyEntries,
     loadHistory,
-    clearHistory: clearStoredHistory,
-    deleteHistoryEntry: deleteStoredHistoryEntry,
   } = useHistory();
   const { groqUsage, reloadGroqUsage } = useGroqUsage();
 
@@ -318,10 +316,24 @@ export default function MobileApp() {
   );
 
   const clearHistory = useCallback(async () => {
-    const cleared = await runStatsMutation(() => clearStoredHistory());
-    await loadStats();
-    if (cleared !== true) throw new Error("Impossibile cancellare la cronologia");
-  }, [clearStoredHistory, loadStats, runStatsMutation]);
+    await runStatsMutation(() => invoke("plugin:voice-runtime|clearHistoryAndStats"));
+    await Promise.all([loadHistory(), loadStats()]);
+  }, [invoke, loadHistory, loadStats, runStatsMutation]);
+
+  const deleteHistoryEntry = useCallback(
+    async (entry: TranscriptionEntry, index: number): Promise<boolean> => {
+      const result = await invoke("plugin:voice-runtime|deleteHistoryEntry", {
+        index,
+        text: entry.text,
+        timestamp: entry.timestamp,
+        wordCount: entry.word_count,
+      }) as { deleted?: boolean } | undefined;
+      if (result?.deleted !== true) return false;
+      await loadHistory();
+      return true;
+    },
+    [invoke, loadHistory],
+  );
 
   const handleSettingChange = useCallback(
     async (key: string, value: string | boolean) => {
@@ -663,7 +675,7 @@ export default function MobileApp() {
       onHoldToSpeakChange={handleMobileHoldToSpeakChange}
       onSettingChange={handleSettingChange}
       onClearHistory={clearHistory}
-      onDeleteHistoryEntry={deleteStoredHistoryEntry}
+      onDeleteHistoryEntry={deleteHistoryEntry}
       onHistoryClick={handleHistoryClick}
       onOpenAndroidSettings={openAndroidSettings}
       androidSettingsError={androidSettingsError}

@@ -3,7 +3,6 @@ package it.traflix.voice
 import android.content.Context
 import org.json.JSONObject
 import java.io.File
-import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -75,10 +74,7 @@ class VoiceMetricsStore(context: Context) {
   }
 
   private fun <T> withFileLock(block: () -> T): T {
-    lockFile.parentFile?.mkdirs()
-    return RandomAccessFile(lockFile, "rw").use { accessFile ->
-      accessFile.channel.lock().use { block() }
-    }
+    return VoiceDataFileLocks.withLockFile(lockFile, block)
   }
 
   private companion object {

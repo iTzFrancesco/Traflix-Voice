@@ -3,6 +3,7 @@ package it.traflix.voice
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import android.widget.Button
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -11,23 +12,31 @@ class VoiceOverlayView(
   context: android.content.Context,
   private val listener: Listener,
 ) : FrameLayout(context) {
+  private fun dp(value: Int): Int =
+    (value * resources.displayMetrics.density).roundToInt()
+
   interface Listener {
     fun onRecordingStartRequested()
     fun onRecordingStopRequested()
     fun onOverlayMoved(deltaX: Int, deltaY: Int)
     fun onOverlayDragFinished()
+    fun onCopyRecoverableText(text: String)
   }
 
   private val indicator = MicIndicatorView(context)
+  private val copyButton = Button(context)
   private val runtimeStateStore = VoiceRuntimeStateStore(context)
   private var recordingMode = RecordingMode.TOGGLE
   private var indicatorState = MicIndicatorState.IDLE
+  private var recoverableText: String? = null
   private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
   private var lastRawX = 0f
   private var lastRawY = 0f
   private var dragging = false
   private val transientStateReset = Runnable {
-    if (indicatorState == MicIndicatorState.SUCCESS || indicatorState == MicIndicatorState.ERROR) {
+    if (recoverableText == null &&
+      (indicatorState == MicIndicatorState.SUCCESS || indicatorState == MicIndicatorState.ERROR)
+    ) {
       setState(MicIndicatorState.IDLE)
     }
   }
@@ -41,6 +50,18 @@ class VoiceOverlayView(
       LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
     )
     indicator.setOnTouchListener { _, event -> handleTouch(event) }
+    copyButton.text = "Copia"
+    copyButton.contentDescription = "Copia la trascrizione non inserita"
+    copyButton.setOnClickListener {
+      recoverableText?.let(listener::onCopyRecoverableText)
+    }
+    addView(
+      copyButton,
+      LayoutParams(dp(40), dp(40)).apply {
+        gravity = android.view.Gravity.TOP or android.view.Gravity.START
+      },
+    )
+    copyButton.visibility = android.view.View.GONE
   }
 
   fun setRecordingMode(mode: RecordingMode) {
@@ -48,10 +69,27 @@ class VoiceOverlayView(
   }
 
   fun setState(state: MicIndicatorState, detail: String? = null) {
+    setState(state, detail, null)
+  }
+
+  fun setState(
+    state: MicIndicatorState,
+    detail: String? = null,
+    recoverableText: String? = null,
+    showRecovery: Boolean = false,
+  ) {
     removeCallbacks(transientStateReset)
     indicatorState = state
+    this.recoverableText = recoverableText
+    if (showRecovery && !recoverableText.isNullOrEmpty()) {
+      indicator.visibility = android.view.View.GONE
+      copyButton.visibility = android.view.View.VISIBLE
+    } else {
+      copyButton.visibility = android.view.View.GONE
+      indicator.visibility = android.view.View.VISIBLE
+      indicator.setIndicatorState(state)
+    }
     runtimeStateStore.set(state, detail)
-    indicator.setIndicatorState(state)
     if (detail != null) indicator.contentDescription = detail
     if (state == MicIndicatorState.SUCCESS || state == MicIndicatorState.ERROR) {
       postDelayed(transientStateReset, TRANSIENT_STATE_DURATION_MS)

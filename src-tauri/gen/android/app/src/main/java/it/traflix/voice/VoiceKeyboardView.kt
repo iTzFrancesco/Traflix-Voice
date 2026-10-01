@@ -3,6 +3,8 @@ package it.traflix.voice
 import android.graphics.Color
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.roundToInt
@@ -16,14 +18,19 @@ class VoiceKeyboardView(
     fun onRecordingStartRequested()
     fun onRecordingStopRequested()
     fun onSwitchKeyboardRequested()
+    fun onCopyRecoverableText(text: String)
   }
 
   private val indicator = MicIndicatorView(context)
   private val status = TextView(context)
+  private val copyButton = Button(context)
   private val runtimeStateStore = VoiceRuntimeStateStore(context)
   private var indicatorState = MicIndicatorState.IDLE
+  private var recoverableText: String? = null
   private val transientStateReset = Runnable {
-    if (indicatorState == MicIndicatorState.SUCCESS || indicatorState == MicIndicatorState.ERROR) {
+    if (recoverableText == null &&
+      (indicatorState == MicIndicatorState.SUCCESS || indicatorState == MicIndicatorState.ERROR)
+    ) {
       setState(MicIndicatorState.IDLE)
     }
   }
@@ -40,7 +47,17 @@ class VoiceKeyboardView(
     status.gravity = Gravity.CENTER_VERTICAL
     addView(
       status,
-      LayoutParams(LayoutParams.MATCH_PARENT, dp(24)),
+      LayoutParams(LayoutParams.MATCH_PARENT, dp(28)),
+    )
+
+    copyButton.text = "Copia testo"
+    copyButton.visibility = View.GONE
+    copyButton.setOnClickListener {
+      recoverableText?.let(listener::onCopyRecoverableText)
+    }
+    addView(
+      copyButton,
+      LayoutParams(LayoutParams.MATCH_PARENT, dp(44)),
     )
 
     val controls = LinearLayout(context).apply {
@@ -77,8 +94,18 @@ class VoiceKeyboardView(
   }
 
   fun setState(state: MicIndicatorState, detail: String? = null) {
+    setState(state, detail, null)
+  }
+
+  fun setState(
+    state: MicIndicatorState,
+    detail: String? = null,
+    recoverableText: String? = null,
+  ) {
     removeCallbacks(transientStateReset)
     indicatorState = state
+    this.recoverableText = recoverableText
+    copyButton.visibility = if (recoverableText.isNullOrEmpty()) View.GONE else View.VISIBLE
     runtimeStateStore.set(state, detail)
     indicator.setIndicatorState(state)
     if (detail != null) {
