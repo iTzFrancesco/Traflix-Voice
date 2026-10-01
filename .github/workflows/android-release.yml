@@ -70,10 +70,6 @@ jobs:
       - name: Initialize Android project
         run: npm exec tauri -- android init --ci --skip-targets-install
 
-      - name: Run Android JVM tests
-        run: ./gradlew :app:testReleaseUnitTest
-        working-directory: src-tauri/gen/android
-
       - name: Restore Android signing key
         shell: bash
         env:
@@ -96,6 +92,14 @@ jobs:
           TRAFLIX_ANDROID_KEY_ALIAS: ${{ secrets.TRAFLIX_ANDROID_KEY_ALIAS }}
           TRAFLIX_ANDROID_KEY_PASSWORD: ${{ secrets.TRAFLIX_ANDROID_KEY_PASSWORD }}
         run: npm exec tauri -- android build --apk --ci
+
+      - name: Remove Android signing key
+        shell: bash
+        run: rm -- "$RUNNER_TEMP/traflix-android.keystore"
+
+      - name: Run Android JVM tests
+        run: ./gradlew :app:testReleaseUnitTest
+        working-directory: src-tauri/gen/android
 
       - name: Verify APK
         shell: bash
