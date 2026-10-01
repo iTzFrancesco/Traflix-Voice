@@ -98,7 +98,7 @@ jobs:
         run: rm -- "$RUNNER_TEMP/traflix-android.keystore"
 
       - name: Run Android JVM tests
-        run: ./gradlew :app:testReleaseUnitTest
+        run: ./gradlew :app:testUniversalReleaseUnitTest
         working-directory: src-tauri/gen/android
 
       - name: Verify APK
