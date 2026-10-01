@@ -1,5 +1,5 @@
 #[cfg(windows)]
-pub fn simulate_ctrl_v() {
+pub fn simulate_ctrl_v() -> bool {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
     };
@@ -26,10 +26,26 @@ pub fn simulate_ctrl_v() {
         make_kbd(VK_CONTROL, KEYEVENTF_KEYUP), // Ctrl up
     ];
 
-    unsafe {
-        SendInput(4, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
+    let sent = unsafe { SendInput(4, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32) };
+    if sent == inputs.len() as u32 {
+        true
+    } else {
+        let releases = [
+            make_kbd(VK_V, KEYEVENTF_KEYUP),
+            make_kbd(VK_CONTROL, KEYEVENTF_KEYUP),
+        ];
+        unsafe {
+            SendInput(
+                releases.len() as u32,
+                releases.as_ptr(),
+                std::mem::size_of::<INPUT>() as i32,
+            );
+        }
+        false
     }
 }
 
 #[cfg(not(windows))]
-pub fn simulate_ctrl_v() {}
+pub fn simulate_ctrl_v() -> bool {
+    false
+}

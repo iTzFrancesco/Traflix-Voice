@@ -89,7 +89,9 @@ TAURI_MOCK = r"""
           case "delete_history_entry": history.splice(args.index, 1); return true;
           case "clear_history": history.splice(0, history.length); return null;
           case "check_model_exists": return false;
-          case "execute_paste": return null;
+          case "execute_paste":
+            if (window.__e2e.failPaste) throw new Error("simulated paste failure");
+            return null;
           case "stop_python":
           case "send_to_python": return await window.__tauriBridgeInvoke(command, args);
           default: return null;
@@ -161,6 +163,32 @@ def test_cloud_ui_only_exposes_turbo_and_automatic_gain(browser_page, e2e_base_u
     browser_page.get_by_role("tab", name="Sistema").click()
     expect(browser_page.get_by_text("Livello microfono automatico", exact=True)).to_be_visible()
     assert browser_page.locator('input[type="range"]').count() == 0
+
+
+def test_paste_failure_keeps_history_and_shows_recovery_hint(browser_page, e2e_base_url):
+    configure_tauri_bridge(browser_page, lambda _source, _command, _args: None, lambda _source: [])
+    open_app(browser_page, e2e_base_url)
+    browser_page.evaluate(
+        """
+        window.__e2e.failPaste = true;
+        window.__e2e.emit("python_output", JSON.stringify({
+          status: "result",
+          text: "testo da recuperare",
+          duration: 2,
+          provider: "cloud",
+        }));
+        """
+    )
+
+    browser_page.wait_for_function(
+        "window.__e2e.history.some((entry) => entry.text === 'testo da recuperare')"
+    )
+    expect(
+        browser_page.get_by_text(
+            "Incolla automatico non riuscito. Controlla Cronologia e copia il testo se è presente.",
+            exact=True,
+        )
+    ).to_be_visible()
 
 
 def test_sidecar_status_sync_is_not_gated_by_audio_probe(browser_page, e2e_base_url):

@@ -160,6 +160,7 @@ pub fn run() {
             clear_history,
             get_groq_usage,
             shutdown_python,
+            restart_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

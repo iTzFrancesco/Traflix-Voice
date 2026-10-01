@@ -23,61 +23,81 @@ export interface DesktopUpdateNotice {
 
 interface UseDesktopUpdaterOptions {
   enabled: boolean;
-  isBusy: boolean;
+  isBusyNow: () => boolean;
   showToast: (message: string, type: ToastType) => void;
 }
 
 export function useDesktopUpdater({
   enabled,
-  isBusy,
+  isBusyNow,
   showToast,
 }: UseDesktopUpdaterOptions) {
   const [update, setUpdate] = useState<DesktopUpdateNotice | null>(null);
   const updateRef = useRef<Update | null>(null);
-  const isBusyRef = useRef(isBusy);
+  const isBusyNowRef = useRef(isBusyNow);
   const downloadCompleteRef = useRef(false);
   const installInFlightRef = useRef(false);
+  const isInstallingRef = useRef(false);
   const checkInFlightRef = useRef<Promise<void> | null>(null);
   const lastCheckAtRef = useRef(0);
-  isBusyRef.current = isBusy;
+  isBusyNowRef.current = isBusyNow;
 
-  const downloadAndInstall = useCallback(async () => {
+  const downloadUpdate = useCallback(async () => {
     const pendingUpdate = updateRef.current;
-    if (!pendingUpdate || isBusyRef.current || installInFlightRef.current) return;
+    if (!pendingUpdate || downloadCompleteRef.current || installInFlightRef.current) return;
 
     installInFlightRef.current = true;
     try {
-      if (!downloadCompleteRef.current) {
-        let downloadedBytes = 0;
-        let contentLength: number | null = null;
-        setUpdate((previous) =>
-          previous ? { ...previous, state: "downloading", error: "" } : previous,
-        );
-
-        await pendingUpdate.download((event) => {
-          if (event.event === "Started") {
-            contentLength = event.data.contentLength ?? null;
-          } else if (event.event === "Progress") {
-            downloadedBytes += event.data.chunkLength;
-          }
-          setUpdate((previous) =>
-            previous
-              ? { ...previous, downloadedBytes, contentLength }
-              : previous,
-          );
-        });
-        downloadCompleteRef.current = true;
-      }
-
-      if (isBusyRef.current) {
-        setUpdate((previous) =>
-          previous ? { ...previous, state: "ready" } : previous,
-        );
-        return;
-      }
-
+      let downloadedBytes = 0;
+      let contentLength: number | null = null;
       setUpdate((previous) =>
-        previous ? { ...previous, state: "installing" } : previous,
+        previous ? { ...previous, state: "downloading", error: "" } : previous,
+      );
+
+      await pendingUpdate.download((event) => {
+        if (event.event === "Started") {
+          contentLength = event.data.contentLength ?? null;
+        } else if (event.event === "Progress") {
+          downloadedBytes += event.data.chunkLength;
+        }
+        setUpdate((previous) =>
+          previous
+            ? { ...previous, downloadedBytes, contentLength }
+            : previous,
+        );
+      });
+      downloadCompleteRef.current = true;
+      setUpdate((previous) =>
+        previous ? { ...previous, state: "ready" } : previous,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("[desktop-update] download failed:", error);
+      updateRef.current = null;
+      downloadCompleteRef.current = false;
+      await pendingUpdate.close().catch(() => {});
+      setUpdate((previous) =>
+        previous ? { ...previous, state: "error", error: message } : previous,
+      );
+    } finally {
+      installInFlightRef.current = false;
+    }
+  }, []);
+
+  const installUpdate = useCallback(async () => {
+    const pendingUpdate = updateRef.current;
+    if (
+      !pendingUpdate ||
+      !downloadCompleteRef.current ||
+      isBusyNowRef.current() ||
+      installInFlightRef.current
+    ) return;
+
+    installInFlightRef.current = true;
+    isInstallingRef.current = true;
+    try {
+      setUpdate((previous) =>
+        previous ? { ...previous, state: "installing", error: "" } : previous,
       );
       await window.__TAURI__.core.invoke("shutdown_python");
       await pendingUpdate.install({ restartAfterInstall: true });
@@ -90,9 +110,21 @@ export function useDesktopUpdater({
       setUpdate((previous) =>
         previous ? { ...previous, state: "error", error: message } : previous,
       );
+      await new Promise((resolve) => window.setTimeout(resolve, 1800));
+      await window.__TAURI__.core.invoke("restart_app");
     } finally {
+      isInstallingRef.current = false;
       installInFlightRef.current = false;
     }
+  }, []);
+
+  const dismissUpdate = useCallback(async () => {
+    if (installInFlightRef.current) return;
+    const pendingUpdate = updateRef.current;
+    updateRef.current = null;
+    downloadCompleteRef.current = false;
+    setUpdate(null);
+    await pendingUpdate?.close().catch(() => {});
   }, []);
 
   const checkForDesktopUpdate = useCallback(
@@ -125,7 +157,7 @@ export function useDesktopUpdater({
             error: "",
           });
           showToast(
-            `È disponibile Traflix Voice ${latest.version}: aggiornamento automatico avviato.`,
+            `È disponibile Traflix Voice ${latest.version}. Puoi scegliere quando scaricarlo e installarlo.`,
             "info",
           );
         } catch (error) {
@@ -141,11 +173,6 @@ export function useDesktopUpdater({
     },
     [enabled, showToast],
   );
-
-  useEffect(() => {
-    if (isBusy || (update?.state !== "available" && update?.state !== "ready")) return;
-    void downloadAndInstall();
-  }, [downloadAndInstall, isBusy, update?.state]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -170,11 +197,19 @@ export function useDesktopUpdater({
 
   const retryUpdate = useCallback(async () => {
     if (updateRef.current) {
-      void downloadAndInstall();
+      if (downloadCompleteRef.current) void installUpdate();
+      else void downloadUpdate();
       return;
     }
     await checkForDesktopUpdate(true);
-  }, [checkForDesktopUpdate, downloadAndInstall]);
+  }, [checkForDesktopUpdate, downloadUpdate, installUpdate]);
 
-  return { update, retryUpdate };
+  return {
+    update,
+    isInstallingRef,
+    retryUpdate,
+    downloadUpdate,
+    installUpdate,
+    dismissUpdate,
+  };
 }

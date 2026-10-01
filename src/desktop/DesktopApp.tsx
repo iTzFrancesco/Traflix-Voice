@@ -122,9 +122,20 @@ export default function App() {
     activeTranscriptionRef.current ||
     transcriptionStatus === "listening" ||
     transcriptionStatus === "processing";
-  const { update: desktopUpdate, retryUpdate } = useDesktopUpdater({
+  const {
+    update: desktopUpdate,
+    isInstallingRef: updateInstallingRef,
+    retryUpdate,
+    downloadUpdate,
+    installUpdate,
+    dismissUpdate,
+  } = useDesktopUpdater({
     enabled: !IS_DEV,
-    isBusy: isTranscriptionBusy,
+    isBusyNow: () =>
+      activeTranscriptionRef.current ||
+      transcriptionLockRef.current ||
+      transcriptionStatus === "listening" ||
+      transcriptionStatus === "processing",
     showToast,
   });
 
@@ -345,6 +356,10 @@ export default function App() {
   // recording can start immediately after the previous one is ended.
   const transcriptionCooldownRef = useRef(0);
   const startTranscription = useCallback(async (isTest?: boolean) => {
+    if (updateInstallingRef.current) {
+      showToast("Aggiornamento in corso. La dettatura riprenderà dopo il riavvio.", "info");
+      return;
+    }
     if (activeTranscriptionRef.current || transcriptionLockRef.current) return;
     const now = Date.now();
     if (now - transcriptionCooldownRef.current < TRANSCRIPTION_COOLDOWN_MS) return;
@@ -387,7 +402,15 @@ export default function App() {
     } finally {
       transcriptionLockRef.current = false;
     }
-  }, [modelStatus, selectedModel, selectedProvider, selectedLanguage, settings]);
+  }, [
+    modelStatus,
+    selectedModel,
+    selectedProvider,
+    selectedLanguage,
+    settings,
+    showToast,
+    updateInstallingRef,
+  ]);
 
   startFnRef.current = startTranscription;
 
@@ -657,6 +680,9 @@ export default function App() {
           update={desktopUpdate}
           isBusy={isTranscriptionBusy}
           onRetry={() => void retryUpdate()}
+          onDownload={() => void downloadUpdate()}
+          onInstall={() => void installUpdate()}
+          onDismiss={() => void dismissUpdate()}
         />
 
         {activeTab === "home" && (

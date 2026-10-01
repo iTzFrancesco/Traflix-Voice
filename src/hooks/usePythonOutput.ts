@@ -320,9 +320,13 @@ export function usePythonOutput({
             }
 
             if (pastePromise) {
-              void pastePromise.catch((error) =>
-                console.error("[RESULT] paste error:", error)
-              );
+              void pastePromise.catch((error) => {
+                console.error("[RESULT] paste error:", error);
+                showToast(
+                  "Incolla automatico non riuscito. Controlla Cronologia e copia il testo se è presente.",
+                  "error",
+                );
+              });
             }
 
             const wordCount = countWords(trimmedResultText);

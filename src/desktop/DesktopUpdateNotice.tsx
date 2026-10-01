@@ -4,12 +4,18 @@ interface DesktopUpdateNoticeProps {
   update: DesktopUpdateNoticeInfo | null;
   isBusy: boolean;
   onRetry: () => void;
+  onDownload: () => void;
+  onInstall: () => void;
+  onDismiss: () => void;
 }
 
 export default function DesktopUpdateNotice({
   update,
   isBusy,
   onRetry,
+  onDownload,
+  onInstall,
+  onDismiss,
 }: DesktopUpdateNoticeProps) {
   if (!update) return null;
 
@@ -19,16 +25,16 @@ export default function DesktopUpdateNotice({
       : null;
   const statusMessage = {
     available: isBusy
-      ? "La dettatura è in corso: il download partirà appena termina."
-      : "Download automatico in avvio…",
+      ? "Aggiornamento disponibile. Puoi continuare a dettare e scegliere quando scaricarlo."
+      : "Aggiornamento disponibile. Il download parte solo quando lo scegli.",
     downloading:
       percentage === null
         ? "Download dell’aggiornamento in corso…"
         : `Download dell’aggiornamento in corso… ${percentage}%`,
     ready: isBusy
-      ? "Download completato. L’installazione partirà al termine della dettatura."
-      : "Download completato. Avvio dell’installazione…",
-    installing: "Installazione automatica e riavvio di Traflix Voice…",
+      ? "Download completato. L’installazione è in attesa che termini la dettatura."
+      : "Download completato. Installa e riavvia quando preferisci.",
+    installing: "Installazione e riavvio di Traflix Voice…",
     error: `Aggiornamento non riuscito: ${update.error}`,
   }[update.state];
 
@@ -52,15 +58,6 @@ export default function DesktopUpdateNotice({
             <p className="mt-2 text-xs leading-relaxed text-white/60">{update.notes}</p>
           )}
         </div>
-        {update.state === "error" && (
-          <button
-            type="button"
-            className="shrink-0 rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold hover:bg-white/10"
-            onClick={onRetry}
-          >
-            Riprova
-          </button>
-        )}
       </div>
       {update.state === "downloading" && (
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -68,6 +65,45 @@ export default function DesktopUpdateNotice({
             className="h-full rounded-full bg-[var(--primary-orange)] transition-[width] duration-200"
             style={{ width: `${percentage ?? 8}%` }}
           />
+        </div>
+      )}
+      {(update.state === "available" || update.state === "ready" || update.state === "error") && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {update.state === "available" && (
+            <button
+              type="button"
+              className="rounded-lg bg-[var(--primary-orange)] px-3 py-1.5 text-xs font-semibold text-black hover:brightness-110"
+              onClick={onDownload}
+            >
+              Scarica aggiornamento
+            </button>
+          )}
+          {update.state === "ready" && (
+            <button
+              type="button"
+              className="rounded-lg bg-[var(--primary-orange)] px-3 py-1.5 text-xs font-semibold text-black enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={onInstall}
+              disabled={isBusy}
+            >
+              {isBusy ? "Attendi la fine della dettatura" : "Installa e riavvia"}
+            </button>
+          )}
+          {update.state === "error" && (
+            <button
+              type="button"
+              className="rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold hover:bg-white/10"
+              onClick={onRetry}
+            >
+              Riprova
+            </button>
+          )}
+          <button
+            type="button"
+            className="rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/75 hover:bg-white/10"
+            onClick={onDismiss}
+          >
+            Più tardi
+          </button>
         </div>
       )}
     </section>

@@ -191,6 +191,11 @@ pub fn shutdown_python<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn restart_app<R: Runtime>(app: AppHandle<R>) {
+    app.restart();
+}
+
 fn write_to_python(state: State<'_, AppState>, payload: &[u8]) -> Result<(), String> {
     let mut process_lock = state.python_process.lock().unwrap();
     if let Some(child) = process_lock.as_mut() {
@@ -233,7 +238,11 @@ pub async fn execute_paste<R: Runtime>(
     // target that has not observed the new clipboard sequence yet.
     thread::sleep(Duration::from_millis(50));
 
-    simulate_ctrl_v();
+    if !simulate_ctrl_v() {
+        return Err(
+            "Incolla automatico non riuscito; il testo è rimasto negli appunti".to_string(),
+        );
+    }
 
     if let Some(prev) = previous {
         thread::sleep(Duration::from_millis(100));
