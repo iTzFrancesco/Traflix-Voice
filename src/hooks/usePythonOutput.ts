@@ -343,7 +343,10 @@ export function usePythonOutput({
               wordCount
             );
 
-            if (selectedProviderRef.current === "cloud") {
+            const resultProvider = data.provider === "cloud" || data.provider === "local"
+              ? data.provider
+              : selectedProviderRef.current;
+            if (resultProvider === "cloud") {
               recordGroqUsage(duration);
             }
           }
