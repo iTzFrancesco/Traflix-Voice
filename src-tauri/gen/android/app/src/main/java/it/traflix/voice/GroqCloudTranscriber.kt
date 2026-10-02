@@ -113,6 +113,7 @@ class GroqCloudTranscriber(context: Context) {
     }
 
     val boundary = "----TraflixVoice${UUID.randomUUID()}"
+    val body = GroqMultipartBody(file, language, boundary)
     val connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"
       connectTimeout = CONNECT_TIMEOUT_MS
@@ -120,6 +121,8 @@ class GroqCloudTranscriber(context: Context) {
       doInput = true
       doOutput = true
       useCaches = false
+      // Do not forward the bearer credential or replay audio to a redirected endpoint.
+      instanceFollowRedirects = false
       setRequestProperty("Authorization", "Bearer $apiKey")
       setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
       setRequestProperty("Accept", "application/json")
@@ -143,18 +146,7 @@ class GroqCloudTranscriber(context: Context) {
       ensureCurrent(generation)
       uploadStartedAt = SystemClock.elapsedRealtime()
       connection.outputStream.buffered(BUFFER_SIZE_BYTES).use { output ->
-        writeTextPart(output, boundary, "model", MODEL)
-        writeTextPart(output, boundary, "response_format", "json")
-        if (language.isNotBlank() && language != "auto") {
-          writeTextPart(output, boundary, "language", language)
-        }
-        output.write("--$boundary\r\n".toByteArray())
-        output.write("Content-Disposition: form-data; name=\"file\"; filename=\"recording.wav\"\r\n".toByteArray())
-        output.write("Content-Type: audio/wav\r\n\r\n".toByteArray())
-        file.inputStream().buffered(BUFFER_SIZE_BYTES).use { input ->
-          input.copyTo(output, BUFFER_SIZE_BYTES)
-        }
-        output.write("\r\n--$boundary--\r\n".toByteArray())
+        body.writeTo(output) { ensureCurrent(generation) }
         output.flush()
       }
       uploadFinishedAt = SystemClock.elapsedRealtime()
@@ -204,13 +196,6 @@ class GroqCloudTranscriber(context: Context) {
   private fun elapsedMs(start: Long, end: Long): String =
     if (start == 0L || end == 0L) "na" else (end - start).toString()
 
-  private fun writeTextPart(output: java.io.OutputStream, boundary: String, name: String, value: String) {
-    output.write("--$boundary\r\n".toByteArray())
-    output.write("Content-Disposition: form-data; name=\"$name\"\r\n\r\n".toByteArray())
-    output.write(value.toByteArray(Charsets.UTF_8))
-    output.write("\r\n".toByteArray())
-  }
-
   private fun readResponseBody(input: InputStream?): String {
     if (input == null) return ""
     val body = ByteArrayOutputStream()
@@ -242,7 +227,6 @@ class GroqCloudTranscriber(context: Context) {
   private companion object {
     const val TAG = "GroqCloudTranscriber"
     const val ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
-    const val MODEL = "whisper-large-v3-turbo"
     const val CONNECT_TIMEOUT_MS = 10_000
     const val READ_TIMEOUT_MS = 45_000
     const val WAV_HEADER_BYTES = 44L
