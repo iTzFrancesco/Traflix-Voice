@@ -241,7 +241,7 @@ function vocabularyEntries(value: string): string[] {
 }
 
 function displayVocabulary(value: string): string {
-  return vocabularyEntries(value).map((entry) => `• ${entry}`).join("\n");
+  return vocabularyEntries(value).map((entry) => `• ${entry}`).join("\n") || "• ";
 }
 
 function limitVocabulary(value: string): string {

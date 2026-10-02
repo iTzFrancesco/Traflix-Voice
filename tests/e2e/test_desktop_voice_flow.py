@@ -427,11 +427,13 @@ def _assert_amplified_without_clipping(samples, raw_peak):
 
 def test_widget_vocabulary_event_focus_and_settings_persistence(browser_page, e2e_base_url):
     configure_tauri_bridge(browser_page, lambda *_: None, lambda *_: [])
+    browser_page.add_init_script("window.__e2e.settings.cloudVocabulary = ''")
     open_app(browser_page, e2e_base_url)
     browser_page.wait_for_function("window.__e2e.listeners.open_cloud_vocabulary")
     browser_page.evaluate("window.__e2e.emit('open_cloud_vocabulary')")
     vocabulary = browser_page.get_by_label("Vocabolario personale")
     expect(vocabulary).to_be_focused()
+    expect(vocabulary).to_have_value("\u2022 ")
     vocabulary.fill("\u2022 Traflix Voice")
     vocabulary.press("End")
     vocabulary.press("Enter")
