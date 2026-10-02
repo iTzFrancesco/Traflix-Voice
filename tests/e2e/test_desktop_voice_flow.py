@@ -217,6 +217,26 @@ def test_sidecar_status_sync_is_not_gated_by_audio_probe(browser_page, e2e_base_
     )
 
 
+def test_usage_follows_the_result_provider_not_the_current_setting(browser_page, e2e_base_url):
+    configure_tauri_bridge(browser_page, lambda *_: None, lambda *_: [])
+    open_app(browser_page, e2e_base_url)
+    browser_page.evaluate("localStorage.removeItem('groq_usage')")
+    browser_page.evaluate("""
+      window.__e2e.emit('python_output', JSON.stringify({
+        status: 'result', text: 'test local result', duration: 4, provider: 'local',
+      }))
+    """)
+    browser_page.wait_for_function("window.__e2e.history.length === 1")
+    assert browser_page.evaluate("localStorage.getItem('groq_usage')") is None
+    browser_page.evaluate("""
+      window.__e2e.emit('python_output', JSON.stringify({
+        status: 'result', text: 'test cloud result', duration: 3, provider: 'cloud',
+      }))
+    """)
+    browser_page.wait_for_function("window.__e2e.history.length === 2")
+    assert browser_page.evaluate("JSON.parse(localStorage.getItem('groq_usage')).audio_seconds") == 3
+
+
 def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
     event_queue = queue.SimpleQueue()
     sidecar_commands = []
@@ -302,7 +322,6 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
     try:
         with (
             patch.object(engine_module.sd, "InputStream", FakeInputStream),
-            patch.object(audio_module, "get_pre_roll", return_value=None),
             patch.object(transcriber, "create_groq_client", return_value=client),
         ):
             open_app(browser_page, e2e_base_url)
@@ -375,7 +394,7 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
         browser_page.wait_for_function("window.__e2e.settings.keepClipboardResult === true")
     finally:
         if not browser_page.is_closed():
-            browser_page.evaluate("window.__e2e.stopEventPolling()")
+            browser_page.evaluate("window.__e2e?.stopEventPolling()")
         engine.close_transcription_worker()
         transcriber.close_groq_client()
 
