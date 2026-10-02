@@ -3,14 +3,12 @@ import json
 import queue
 import threading
 import concurrent.futures
-import time as pytime
 import numpy as np
 import sounddevice as sd
 
 from whisper_engine.constants import (
     SAMPLE_RATE,
     BLOCK_SIZE,
-    CLOUD_PRE_ROLL_SECONDS,
     CLOUD_TAIL_DRAIN_SECONDS,
     DEFAULT_LOCAL_MODEL,
 )
@@ -349,6 +347,12 @@ class WhisperEngine:
         defer_processing=False,
     ):
         session = capture_session
+
+        def notify_cancelled_start():
+            with self._recording_lock:
+                if self._active_session is session and not self._shutting_down:
+                    self.log({"status": "ready", "message": "Dettatura annullata."})
+
         try:
             if session is None:
                 session = _RecordingSession(capture_queue, provider=self.provider)
@@ -358,6 +362,7 @@ class WhisperEngine:
                     self.is_recording = True
 
             if not session.active.is_set() or self._shutting_down:
+                notify_cancelled_start()
                 return
 
             # Keep provider and model choices from the session start so a
@@ -367,26 +372,11 @@ class WhisperEngine:
                 self.load_model(model_size)
 
             if not session.active.is_set():
+                notify_cancelled_start()
                 return
-            # Pre-roll: prepend last 300ms captured while idle to compensate
-            # hotkey (8ms poll) + IPC + InputStream open latency (20-50ms)
-            # Without this, a weak onset spoken exactly on click is lost before
-            # the stream delivers its first block. Cost is ~4800 samples kept
-            # while trimming still reduces overall payload by ~70%.
-            pre_roll = audio_module.get_pre_roll()
+            # The microphone is opened per session. There is no idle pre-roll:
+            # late callbacks from a closed stream must never enter another clip.
             audio_data = []
-            if pre_roll is not None and pre_roll.size > 0:
-                # Keep float32 contract and avoid modifying the idle ring buffer.
-                if pre_roll.dtype != np.float32:
-                    pre_roll = pre_roll.astype(np.float32, copy=False)
-                else:
-                    pre_roll = pre_roll.copy()
-                audio_data.append(pre_roll)
-
-            self.log({"status": "listening", "message": "In ascolto... parla ora."})
-            session.listening_notified = True
-
-            start_time = pytime.monotonic()
 
             def session_log(data):
                 # Keep enqueuing tail audio during drain, but drop the meter:
@@ -412,13 +402,14 @@ class WhisperEngine:
             with sd.InputStream(device=device_id, channels=1, callback=session_audio_callback,
                                 samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE,
                                 dtype="float32"):
+                if session.active.is_set():
+                    session.listening_notified = True
+                    self.log({"status": "listening", "message": "In ascolto... parla ora."})
                 while True:
                     data = session.queue.get()
                     if data is None:
                         break
                     audio_data.append(data)
-
-            recording_duration = max(0.0, pytime.monotonic() - start_time)
 
             # Early `processing` from stop_recording() already notified the UI;
             # skip the duplicate so sounds/logs fire once. The captured
@@ -442,6 +433,7 @@ class WhisperEngine:
             )
             if recording.dtype != np.float32:
                 recording = recording.astype(np.float32, copy=False)
+            recording_duration = recording.size / SAMPLE_RATE
 
             # Meter events use raw capture samples. Adjust only this private
             # transcription buffer so the widget continues to show the mic's
