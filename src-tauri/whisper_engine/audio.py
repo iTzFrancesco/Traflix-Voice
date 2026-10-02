@@ -1,11 +1,9 @@
-import collections
 import numpy as np
 
 from whisper_engine.constants import (
     SAMPLE_RATE,
     VOLUME_DB_SCALE,
     VOLUME_FLOOR_DB,
-    CLOUD_PRE_ROLL_SECONDS,
     AUTO_GAIN_TARGET_RMS,
     AUTO_GAIN_ACTIVITY_THRESHOLD,
     AUTO_GAIN_MAX,
@@ -13,34 +11,6 @@ from whisper_engine.constants import (
 )
 
 VOLUME_UPDATE_SAMPLES = max(1, SAMPLE_RATE // 20)
-
-# Ring buffer for pre-roll: keeps last 300ms even when not recording
-# to compensate hotkey->InputStream latency (press->stream 20-50ms lost)
-PRE_ROLL_SAMPLES = int(SAMPLE_RATE * CLOUD_PRE_ROLL_SECONDS)
-PRE_ROLL_MAX_BLOCKS = max(1, (PRE_ROLL_SAMPLES + 511) // 512)
-_pre_roll = collections.deque(maxlen=PRE_ROLL_MAX_BLOCKS)
-_pre_roll_samples = 0
-
-def get_pre_roll():
-    """Return concatenated pre-roll audio and clear buffer."""
-    global _pre_roll_samples
-    if not _pre_roll:
-        return None
-    # Concatenate blocks in order; they are already mono float32 copies
-    data = np.concatenate(list(_pre_roll), axis=0) if len(_pre_roll) > 1 else _pre_roll[0].copy()
-    # Keep only last PRE_ROLL_SAMPLES if we exceeded (deque ensures blocks, but samples may exceed)
-    if data.size > PRE_ROLL_SAMPLES:
-        data = data[-PRE_ROLL_SAMPLES:].copy()
-    _pre_roll.clear()
-    _pre_roll_samples = 0
-    return data
-
-def _push_pre_roll(mono_copy):
-    global _pre_roll_samples
-    _pre_roll.append(mono_copy)
-    _pre_roll_samples += mono_copy.size
-    # deque maxlen handles block count, but we also trim excess samples if single large block (not needed with 512)
-
 
 def calculate_volume(indata):
     """Return a perceptual 0-100 level for one microphone block.
@@ -76,7 +46,14 @@ def apply_automatic_gain(recording):
     if recording.size == 0:
         return recording
 
-    np.nan_to_num(recording, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    # Finite captures need one boolean scan, not three masks and write passes.
+    # Keep nan_to_num's sanitization and read-only behavior for other inputs.
+    if (
+        recording.dtype.kind not in "fc"
+        or not recording.flags.writeable
+        or not np.isfinite(recording).all()
+    ):
+        np.nan_to_num(recording, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
     frame_size = max(1, SAMPLE_RATE // 50)
     frame_count = recording.size // frame_size
     if frame_count == 0:
@@ -110,13 +87,6 @@ def audio_callback(indata, frames, time, status, audio_queue, is_recording, log_
         log_func({"status": "warning", "message": str(status)})
     if not is_recording:
         audio_callback._volume_sample_count = 0
-        # Keep pre-roll even when idle: 300ms ring buffer at ~32ms per block = 10 blocks
-        # Cost is one mono copy per block while idle (~15 copies/sec, trivial)
-        try:
-            mono_idle = indata[:, 0] if indata.ndim > 1 else indata
-            _push_pre_roll(mono_idle.copy())
-        except Exception:
-            pass
         return
 
     # InputStream is mono. Queue only the channel itself so the stop path can
@@ -146,4 +116,3 @@ def reset_volume_state():
     """Reset the meter at the start of a new recording session."""
     audio_callback._volume_sample_count = VOLUME_UPDATE_SAMPLES
     audio_callback._last_volume = None
-    # Do not clear _pre_roll here: it should survive across reset to be consumed on next start
