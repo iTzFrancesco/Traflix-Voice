@@ -1245,6 +1245,8 @@ class TestCloudProductionRoundTrips(unittest.TestCase):
                 return False
 
         def respond(request):
+            if request.method == "GET" and request.url.path == "/openai/v1/models":
+                return transcriber_module.httpx.Response(200, json={"data": []}, request=request)
             captured.append((request.content, time.monotonic()))
             return transcriber_module.httpx.Response(200, text="synthetic transcript", request=request)
 

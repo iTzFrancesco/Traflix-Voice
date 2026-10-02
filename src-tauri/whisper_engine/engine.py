@@ -248,7 +248,7 @@ class WhisperEngine:
             self.is_recording = True
         if previous is not None:
             previous.stop()
-        return self._capture_executor.submit(
+        capture = self._capture_executor.submit(
             self.transcribe,
             device_id,
             model_size,
@@ -257,6 +257,13 @@ class WhisperEngine:
             session,
             True,
         )
+        if session.provider == "cloud":
+            key = self.groq_api_key
+            transcriber.prewarm_groq_connection(
+                key,
+                lambda: self._shutting_down or key != self.groq_api_key,
+            )
+        return capture
 
     def close_transcription_worker(self):
         # Let the capture worker consume the stop sentinel before closing the

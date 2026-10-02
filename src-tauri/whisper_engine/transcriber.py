@@ -3,6 +3,7 @@ import math
 import os
 import struct
 import threading
+import time
 import httpx
 import numpy as np
 import concurrent.futures
@@ -21,9 +22,14 @@ from whisper_engine.groq_tracker import record_groq_usage
 _TRAF_DEBUG = os.environ.get("TRAF_DEBUG") == "1"
 _GROQ_CLIENT = None
 _GROQ_CLIENT_KEY = None
+_GROQ_CLIENT_EPOCH = 0
 _GROQ_CLIENT_LOCK = threading.Lock()
 _GROQ_CLIENT_LEASES = {}
 _GROQ_RETIRED_CLIENTS = {}
+_GROQ_WARMUP_LOCK = threading.Lock()
+_GROQ_WARMUPS = {}
+_GROQ_CONNECTION_ACTIVITY = {}
+_GROQ_WARMUP_LAST_ATTEMPT = None
 _USAGE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="groq-usage"
 )
@@ -62,6 +68,10 @@ _MULTIPART_PREFIXES = {
 _MULTIPART_PREFIXES[None] = _MULTIPART_BASE_PREFIX + _FILE_FIELD_PREFIX
 _WAV_HEADER = struct.Struct("<4sI4s4sIHHIIHH4sI")
 _GROQ_TRANSCRIPTION_URL = httpx.URL(GROQ_TRANSCRIPTION_URL)
+_GROQ_MODELS_URL = _GROQ_TRANSCRIPTION_URL.copy_with(path="/openai/v1/models")
+_GROQ_WARMUP_TIMEOUT = httpx.Timeout(2.0, connect=1.0, read=1.0, write=1.0, pool=0.05)
+_GROQ_WARMUP_IDLE_SECONDS = 240.0
+_GROQ_WARMUP_RETRY_SECONDS = 30.0
 _CLOUD_ERROR_MESSAGE_LIMIT = 512
 _CLOUD_SILENCE_PADDING_SAMPLES = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
 _CLOUD_TRIM_MASK_LIMIT = SAMPLE_RATE * 8
@@ -82,9 +92,10 @@ def create_groq_client(groq_api_key):
         },
         timeout=httpx.Timeout(30.0, connect=10.0, read=25.0, pool=5.0),
         limits=httpx.Limits(
-            max_connections=1,
+            # A slow models probe must leave one slot for the audio POST.
+            max_connections=2,
             max_keepalive_connections=1,
-            keepalive_expiry=60.0,
+            keepalive_expiry=300.0,
         ),
     )
     # HTTP/1.1 is persistent by default, and Groq's tiny text response does
@@ -100,6 +111,8 @@ def create_groq_client(groq_api_key):
 
 
 def _close_client(client):
+    with _GROQ_WARMUP_LOCK:
+        _GROQ_CONNECTION_ACTIVITY.pop(id(client), None)
     close = getattr(client, "close", None)
     if callable(close):
         try:
@@ -109,17 +122,21 @@ def _close_client(client):
             pass
 
 
-def _get_or_create_groq_client(groq_api_key, lease=False):
+def _get_or_create_groq_client(groq_api_key, lease=False, expected_epoch=None):
     """Select a client atomically and optionally hold it for one request."""
-    global _GROQ_CLIENT, _GROQ_CLIENT_KEY
+    global _GROQ_CLIENT, _GROQ_CLIENT_KEY, _GROQ_CLIENT_EPOCH
 
     with _GROQ_CLIENT_LOCK:
+        if expected_epoch is not None and expected_epoch != _GROQ_CLIENT_EPOCH:
+            return None
         if _GROQ_CLIENT is not None and _GROQ_CLIENT_KEY == groq_api_key:
             client = _GROQ_CLIENT
             idle_client = None
         else:
             old_client = _GROQ_CLIENT
             client = create_groq_client(groq_api_key)
+            if old_client is not None:
+                _GROQ_CLIENT_EPOCH += 1
             _GROQ_CLIENT = client
             _GROQ_CLIENT_KEY = groq_api_key
             idle_client = None
@@ -152,6 +169,82 @@ def acquire_groq_client(groq_api_key):
     return _get_or_create_groq_client(groq_api_key, lease=True)
 
 
+def record_groq_connection_activity(client):
+    """Reuse a connection that has just completed a buffered HTTP response."""
+    with _GROQ_WARMUP_LOCK:
+        _GROQ_CONNECTION_ACTIVITY[id(client)] = time.monotonic()
+
+
+def _warm_groq_connection(groq_api_key, shutting_down, expected_epoch):
+    client = None
+    response = None
+    try:
+        if _shutdown_requested(shutting_down):
+            return
+        client = _get_or_create_groq_client(
+            groq_api_key, lease=True, expected_epoch=expected_epoch,
+        )
+        if client is None or _shutdown_requested(shutting_down):
+            return
+        with _GROQ_CLIENT_LOCK:
+            if _GROQ_CLIENT is not client:
+                return
+        request = httpx.Request(
+            "GET",
+            _GROQ_MODELS_URL,
+            headers={"Authorization": client.headers["Authorization"]},
+            extensions={"timeout": _GROQ_WARMUP_TIMEOUT.as_dict()},
+        )
+        response = client.send(request, stream=False)
+        if response.status_code == 200:
+            record_groq_connection_activity(client)
+    except Exception:
+        # A connection probe must never interrupt dictation or expose credentials.
+        pass
+    finally:
+        if response is not None:
+            _close_client(response)
+        if client is not None:
+            release_groq_client(client)
+        with _GROQ_WARMUP_LOCK:
+            if _GROQ_WARMUPS.get(groq_api_key) is threading.current_thread():
+                _GROQ_WARMUPS.pop(groq_api_key, None)
+
+
+def prewarm_groq_connection(groq_api_key, shutting_down=False):
+    """Probe the shared connection asynchronously, once per in-flight key."""
+    global _GROQ_WARMUP_LAST_ATTEMPT
+    if not groq_api_key or _shutdown_requested(shutting_down):
+        return None
+    with _GROQ_WARMUP_LOCK:
+        now = time.monotonic()
+        if _GROQ_CLIENT is not None and _GROQ_CLIENT_KEY == groq_api_key:
+            last_activity = _GROQ_CONNECTION_ACTIVITY.get(id(_GROQ_CLIENT), -math.inf)
+            if now - last_activity < _GROQ_WARMUP_IDLE_SECONDS:
+                return None
+        worker = _GROQ_WARMUPS.get(groq_api_key)
+        if worker is not None:
+            return worker
+        if _GROQ_WARMUP_LAST_ATTEMPT is not None:
+            last_key, attempted_at = _GROQ_WARMUP_LAST_ATTEMPT
+            if last_key == groq_api_key and now - attempted_at < _GROQ_WARMUP_RETRY_SECONDS:
+                return None
+        worker = threading.Thread(
+            target=_warm_groq_connection,
+            args=(groq_api_key, shutting_down, _GROQ_CLIENT_EPOCH),
+            daemon=True,
+            name="groq-warmup",
+        )
+        _GROQ_WARMUPS[groq_api_key] = worker
+        _GROQ_WARMUP_LAST_ATTEMPT = (groq_api_key, now)
+        try:
+            worker.start()
+        except Exception:
+            _GROQ_WARMUPS.pop(groq_api_key, None)
+            return None
+        return worker
+
+
 def release_groq_client(client):
     """Release a request lease and close a retired client when it is idle."""
     client_id = id(client)
@@ -169,10 +262,11 @@ def release_groq_client(client):
 
 def close_groq_client():
     """Close the cached client during sidecar shutdown."""
-    global _GROQ_CLIENT, _GROQ_CLIENT_KEY
+    global _GROQ_CLIENT, _GROQ_CLIENT_KEY, _GROQ_CLIENT_EPOCH, _GROQ_WARMUP_LAST_ATTEMPT
 
     idle_clients = []
     with _GROQ_CLIENT_LOCK:
+        _GROQ_CLIENT_EPOCH += 1
         client = _GROQ_CLIENT
         _GROQ_CLIENT = None
         _GROQ_CLIENT_KEY = None
@@ -190,6 +284,8 @@ def close_groq_client():
 
     for idle_client in idle_clients:
         _close_client(idle_client)
+    with _GROQ_WARMUP_LOCK:
+        _GROQ_WARMUP_LAST_ATTEMPT = None
 
 
 def _encode_pcm16(recording, assume_normalized=False):
@@ -507,6 +603,7 @@ def transcribe_cloud(
         if _shutdown_requested(shutting_down):
             return
         response = client.send(request, stream=False)
+        record_groq_connection_activity(client)
         if response.status_code != 200:
             response.raise_for_status()
 
