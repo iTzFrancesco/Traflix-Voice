@@ -4,7 +4,6 @@ import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.Button
-import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 /** Compact microphone control rendered above the user's existing keyboard. */
@@ -21,6 +20,7 @@ class VoiceOverlayView(
     fun onOverlayMoved(deltaX: Int, deltaY: Int)
     fun onOverlayDragFinished()
     fun onCopyRecoverableText(text: String)
+    fun onResetRequested()
   }
 
   private val indicator = MicIndicatorView(context)
@@ -29,15 +29,14 @@ class VoiceOverlayView(
   private var recordingMode = RecordingMode.TOGGLE
   private var indicatorState = MicIndicatorState.IDLE
   private var recoverableText: String? = null
-  private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
-  private var lastRawX = 0f
-  private var lastRawY = 0f
-  private var dragging = false
+  private val gesture = VoiceOverlayGesture(ViewConfiguration.get(context).scaledTouchSlop)
+  private var activePointerId = MotionEvent.INVALID_POINTER_ID
+  private var holdStarted = false
   private val transientStateReset = Runnable {
     if (recoverableText == null &&
       (indicatorState == MicIndicatorState.SUCCESS || indicatorState == MicIndicatorState.ERROR)
     ) {
-      setState(MicIndicatorState.IDLE)
+      listener.onResetRequested()
     }
   }
 
@@ -50,14 +49,17 @@ class VoiceOverlayView(
       LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
     )
     indicator.setOnTouchListener { _, event -> handleTouch(event) }
+    indicator.setOnClickListener { activateControl() }
     copyButton.text = "Copia"
     copyButton.contentDescription = "Copia la trascrizione non inserita"
+    copyButton.textSize = 12f
+    copyButton.setPadding(0, 0, 0, 0)
     copyButton.setOnClickListener {
       recoverableText?.let(listener::onCopyRecoverableText)
     }
     addView(
       copyButton,
-      LayoutParams(dp(40), dp(40)).apply {
+      LayoutParams(dp(48), dp(48)).apply {
         gravity = android.view.Gravity.TOP or android.view.Gravity.START
       },
     )
@@ -65,7 +67,7 @@ class VoiceOverlayView(
   }
 
   fun setRecordingMode(mode: RecordingMode) {
-    recordingMode = mode
+    if (indicatorState == MicIndicatorState.IDLE) recordingMode = mode
   }
 
   fun setState(state: MicIndicatorState, detail: String? = null) {
@@ -90,7 +92,17 @@ class VoiceOverlayView(
       indicator.setIndicatorState(state)
     }
     runtimeStateStore.set(state, detail)
-    if (detail != null) indicator.contentDescription = detail
+    indicator.contentDescription = when (state) {
+      MicIndicatorState.IDLE -> "Avvia dettatura. Trascina per spostare il widget."
+      MicIndicatorState.RECORDING -> "Interrompi dettatura"
+      else -> detail ?: when (state) {
+        MicIndicatorState.STARTING -> "Avvio del microfono"
+        MicIndicatorState.PROCESSING -> "Trascrizione in corso"
+        MicIndicatorState.SUCCESS -> "Trascrizione inviata"
+        MicIndicatorState.ERROR -> "Errore di trascrizione. Tocca per riprovare."
+        else -> "Avvia dettatura"
+      }
+    }
     if (state == MicIndicatorState.SUCCESS || state == MicIndicatorState.ERROR) {
       postDelayed(transientStateReset, TRANSIENT_STATE_DURATION_MS)
     }
@@ -98,6 +110,10 @@ class VoiceOverlayView(
 
   override fun onDetachedFromWindow() {
     removeCallbacks(transientStateReset)
+    gesture.cancel()
+    activePointerId = MotionEvent.INVALID_POINTER_ID
+    if (holdStarted && canStop()) listener.onRecordingStopRequested()
+    holdStarted = false
     super.onDetachedFromWindow()
   }
 
@@ -106,68 +122,48 @@ class VoiceOverlayView(
   }
 
   private fun handleTouch(event: MotionEvent): Boolean {
-    when (recordingMode) {
-      RecordingMode.HOLD_TO_SPEAK -> when (event.actionMasked) {
-        MotionEvent.ACTION_DOWN -> {
-          dragging = false
-          if (isDismissibleState()) {
-            setState(MicIndicatorState.IDLE)
-          } else if (canStart()) {
-            listener.onRecordingStartRequested()
-          }
-          return true
-        }
-        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-          if (canStop()) listener.onRecordingStopRequested()
-          dragging = false
-          return true
+    when (event.actionMasked) {
+      MotionEvent.ACTION_DOWN -> {
+        activePointerId = event.getPointerId(0)
+        gesture.begin(event.rawX, event.rawY,
+          recordingMode == RecordingMode.TOGGLE && (canStart() || isDismissibleState()))
+        holdStarted = recordingMode == RecordingMode.HOLD_TO_SPEAK && canStart()
+        if (holdStarted) listener.onRecordingStartRequested()
+      }
+      MotionEvent.ACTION_MOVE -> {
+        if (activePointerId == MotionEvent.INVALID_POINTER_ID) return true
+        val delta = gesture.move(event.rawX, event.rawY)
+        if (delta != null && !canStop() && indicatorState != MicIndicatorState.PROCESSING) {
+          listener.onOverlayMoved(delta.first, delta.second)
         }
       }
-      RecordingMode.TOGGLE -> when (event.actionMasked) {
-        MotionEvent.ACTION_DOWN -> {
-          lastRawX = event.rawX
-          lastRawY = event.rawY
-          dragging = false
-          return true
+      MotionEvent.ACTION_UP -> {
+        if (event.getPointerId(event.actionIndex) != activePointerId) return true
+        val tapped = gesture.finish()
+        if (gesture.dragged) listener.onOverlayDragFinished()
+        if (holdStarted) {
+          if (canStop()) listener.onRecordingStopRequested()
+        } else if (tapped) {
+          indicator.performClick()
         }
-        MotionEvent.ACTION_MOVE -> {
-          if (!dragging && hypot(
-              event.rawX - lastRawX,
-              event.rawY - lastRawY,
-            ) >= touchSlop
-          ) {
-            dragging = true
-          }
-          if (dragging) {
-            val deltaX = (event.rawX - lastRawX).roundToInt()
-            val deltaY = (event.rawY - lastRawY).roundToInt()
-            if (deltaX != 0 || deltaY != 0) listener.onOverlayMoved(deltaX, deltaY)
-            lastRawX = event.rawX
-            lastRawY = event.rawY
-          }
-          return true
-        }
-        MotionEvent.ACTION_UP -> {
-          if (dragging) {
-            listener.onOverlayDragFinished()
-          } else if (canStop()) {
-            listener.onRecordingStopRequested()
-          } else if (isDismissibleState()) {
-            setState(MicIndicatorState.IDLE)
-          } else if (canStart()) {
-            listener.onRecordingStartRequested()
-          }
-          dragging = false
-          return true
-        }
-        MotionEvent.ACTION_CANCEL -> {
-          if (dragging) listener.onOverlayDragFinished()
-          dragging = false
-          return true
-        }
+        holdStarted = false
+        activePointerId = MotionEvent.INVALID_POINTER_ID
+      }
+      MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> {
+        gesture.cancel()
+        if (gesture.dragged) listener.onOverlayDragFinished()
+        if (holdStarted && canStop()) listener.onRecordingStopRequested()
+        holdStarted = false
+        activePointerId = MotionEvent.INVALID_POINTER_ID
       }
     }
     return true
+  }
+
+  private fun activateControl() {
+    if (canStop()) listener.onRecordingStopRequested()
+    else if (isDismissibleState()) listener.onResetRequested()
+    else if (canStart()) listener.onRecordingStartRequested()
   }
 
   private fun canStart(): Boolean = indicatorState == MicIndicatorState.IDLE
