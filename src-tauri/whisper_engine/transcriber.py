@@ -192,8 +192,7 @@ def close_groq_client():
         _close_client(idle_client)
 
 
-def _encode_wav_payload(recording, assume_normalized=False):
-    """Return the complete PCM WAV bytes for a mono recording."""
+def _encode_pcm16(recording, assume_normalized=False):
     if assume_normalized:
         # sounddevice delivers float32 samples in [-1, 1]. The cloud capture
         # path has already crossed that contract boundary, so skip two full
@@ -216,9 +215,11 @@ def _encode_wav_payload(recording, assume_normalized=False):
         clipped = np.clip(recording, -1.0, 1.0)
         np.multiply(clipped, 32767.0, out=clipped)
         audio_int16 = clipped.astype(np.int16)
-    pcm_data = audio_int16.tobytes()
-    data_size = len(pcm_data)
-    wav_header = _WAV_HEADER.pack(
+    return audio_int16
+
+
+def _encode_wav_header(data_size):
+    return _WAV_HEADER.pack(
         b"RIFF",
         36 + data_size,
         b"WAVE",
@@ -233,7 +234,12 @@ def _encode_wav_payload(recording, assume_normalized=False):
         b"data",
         data_size,
     )
-    return wav_header + pcm_data
+
+
+def _encode_wav_payload(recording, assume_normalized=False):
+    """Return the complete PCM WAV bytes for a mono recording."""
+    pcm = _encode_pcm16(recording, assume_normalized)
+    return b"".join((_encode_wav_header(pcm.nbytes), memoryview(pcm)))
 
 
 def encode_wav(recording, assume_normalized=False):
@@ -270,10 +276,11 @@ def encode_cloud_multipart_from_recording(
     language,
     assume_normalized=False,
 ):
-    """Encode and wrap cloud audio without an intermediate BytesIO copy."""
-    return _build_cloud_multipart(
-        _encode_wav_payload(recording, assume_normalized),
-        language,
+    """Join PCM and framing once, without materializing a separate WAV blob."""
+    pcm = _encode_pcm16(recording, assume_normalized)
+    return b"".join(
+        (_cloud_multipart_prefix(language), _encode_wav_header(pcm.nbytes),
+         memoryview(pcm), _MULTIPART_SUFFIX)
     )
 
 
@@ -359,7 +366,7 @@ def _prepare_local_recording(recording):
 
 
 def trim_cloud_silence(recording):
-    """Remove only leading/trailing near-silence before a cloud upload."""
+    """Remove only edge samples below PCM16 resolution, retaining word edges."""
     if recording.size == 0:
         return recording
 
@@ -376,22 +383,30 @@ def trim_cloud_silence(recording):
         first_active = int(active.argmax())
         last_active = recording.size - 1 - int(active[::-1].argmax())
     else:
-        # Avoid allocating a recording-sized mask for long dictations. The
-        # min/max check makes long silence cheap; edge scans allocate at most
-        # one second of temporary booleans at a time.
-        if recording.max() < threshold and recording.min() > -threshold:
-            return recording[:0]
-
-        scan_mask = np.empty(_CLOUD_TRIM_SCAN_CHUNK, dtype=np.bool_)
         first_active = None
-        for chunk_start in range(0, recording.size, _CLOUD_TRIM_SCAN_CHUNK):
-            chunk = recording[chunk_start : chunk_start + _CLOUD_TRIM_SCAN_CHUNK]
-            active = _active_sample_mask(chunk, threshold, scan_mask)
+        scan_mask = None
+        first_chunk = recording[:_CLOUD_TRIM_SCAN_CHUNK]
+        if first_chunk.any():
+            scan_mask = np.empty(_CLOUD_TRIM_SCAN_CHUNK, dtype=np.bool_)
+            active = _active_sample_mask(first_chunk, threshold, scan_mask)
             if active.any():
-                first_active = chunk_start + int(active.argmax())
-                break
+                # A normal onset proves this is not silence. Do not scan the
+                # entire interior before finding its trailing edge.
+                first_active = int(active.argmax())
         if first_active is None:
-            return recording[:0]
+            # Keep cheap full-silence detection for long idle recordings.
+            if recording.max() < threshold and recording.min() > -threshold:
+                return recording[:0]
+            if scan_mask is None:
+                scan_mask = np.empty(_CLOUD_TRIM_SCAN_CHUNK, dtype=np.bool_)
+            for chunk_start in range(_CLOUD_TRIM_SCAN_CHUNK, recording.size, _CLOUD_TRIM_SCAN_CHUNK):
+                chunk = recording[chunk_start : chunk_start + _CLOUD_TRIM_SCAN_CHUNK]
+                active = _active_sample_mask(chunk, threshold, scan_mask)
+                if active.any():
+                    first_active = chunk_start + int(active.argmax())
+                    break
+            if first_active is None:
+                return recording[:0]
 
         for chunk_end in range(recording.size, first_active, -_CLOUD_TRIM_SCAN_CHUNK):
             chunk_start = max(first_active, chunk_end - _CLOUD_TRIM_SCAN_CHUNK)
@@ -413,10 +428,8 @@ def transcribe_local(model, recording, language, recording_duration, shutting_do
     if shutting_down:
         return
 
-    # Leading/trailing silence carries no speech but costs full inference
-    # (R7: -16% on a realistic padded clip for Parakeet, neutral for turbo).
-    # The trim itself is sub-millisecond; the padding keeps word edges intact
-    # and WER stayed 0.0 on every fixture clip.
+    # Use the same conservative edge trim as cloud. Quiet speech must reach
+    # the recognizer rather than being classified as silence by its volume.
     trimmed = trim_cloud_silence(_prepare_local_recording(recording))
     if trimmed.size == 0:
         # Pure silence: skip seconds of inference (R20) and keep the local
