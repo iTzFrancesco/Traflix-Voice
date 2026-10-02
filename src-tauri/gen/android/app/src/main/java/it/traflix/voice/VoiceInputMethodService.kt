@@ -13,12 +13,12 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.text.InputType
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Toast
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -67,6 +67,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     }
     currentEditorInfo = attribute
     editorGeneration += 1
+    activeService = WeakReference(this)
     if (!keepCompletedRecordingPending) recordingGeneration = null
     keyboardView?.refreshMode()
   }
@@ -78,19 +79,18 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   }
 
   override fun onFinishInput() {
-    val keepCompletedTranscription = transcriptionPending
-    if (keepCompletedTranscription) {
-      // Android calls onFinishInput before onStartInput when focus moves to a
-      // different editor. Keep the completed recording alive, but invalidate
-      // its old editor so the result is offered for recovery instead.
-      editorGeneration += 1
-    } else {
+    editorGeneration += 1
+    val keepCompletedTranscription = transcriptionPending && VoiceOverlayVisibility.isDeviceAvailable(this)
+    // Retain a stopped recording or pending result across editor changes,
+    // but never send it to the replacement editor.
+    if (!keepCompletedTranscription) {
+      transcriptionPending = false
       cloudTranscriber.cancel()
       recorder.cancel()
       recordingGeneration = null
       keyboardView?.setState(MicIndicatorState.IDLE)
     }
-    stopRecordingForeground()
+    if (!keepCompletedTranscription) stopRecordingForeground()
     currentEditorInfo = null
     super.onFinishInput()
   }
@@ -100,6 +100,12 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   }
 
   override fun onRecordingStartRequested() {
+    if (recordingGeneration != null || transcriptionPending) return
+    if (!VoiceOverlayVisibility.isDeviceAvailable(this)) return
+    if (currentEditorInfo == null || currentInputConnection == null) {
+      keyboardView?.setState(MicIndicatorState.ERROR, "Apri un campo di testo o il terminale")
+      return
+    }
     if (isSensitiveField()) {
       keyboardView?.setState(
         MicIndicatorState.ERROR,
@@ -136,6 +142,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
 
   override fun onRecordingStopRequested() {
     if (recordingGeneration == null) return
+    transcriptionPending = true
     keyboardView?.setState(MicIndicatorState.PROCESSING)
     recorder.stop()
   }
@@ -159,6 +166,13 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
 
   override fun onRecordingFinished(file: File, durationMs: Long) {
     stopRecordingForeground()
+    if (!VoiceOverlayVisibility.isDeviceAvailable(this)) {
+      file.delete()
+      transcriptionPending = false
+      recordingGeneration = null
+      keyboardView?.setState(MicIndicatorState.IDLE)
+      return
+    }
     transcriptionPending = true
     keyboardView?.setState(MicIndicatorState.PROCESSING, "Trascrizione Groq Cloud")
     cloudTranscriber.transcribe(
@@ -191,6 +205,9 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   }
 
   override fun onDestroy() {
+    editorGeneration += 1
+    currentEditorInfo = null
+    if (activeService?.get() === this) activeService = null
     transcriptionPending = false
     recorder.shutdown()
     stopRecordingForeground()
@@ -200,6 +217,16 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
     mainHandler.removeCallbacksAndMessages(null)
     keyboardView = null
     super.onDestroy()
+  }
+
+  private fun externalEditorIdentity(): VoiceEditorIdentity? {
+    if (!VoiceOverlayVisibility.isDeviceAvailable(this)) return null
+    val editor = currentEditorInfo ?: return null
+    val packageName = editor.packageName?.takeIf { it.isNotBlank() } ?: return null
+    if (isSensitiveField() || currentInputConnection == null ||
+      recordingGeneration != null || transcriptionPending
+    ) return null
+    return VoiceEditorIdentity(packageName, editorGeneration)
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
@@ -227,7 +254,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
 
   private fun commitIfEditorStillCurrent(text: String) {
     val targetGeneration = recordingGeneration
-    if (isSensitiveField()) {
+    if (!VoiceOverlayVisibility.isDeviceAvailable(this) || isSensitiveField()) {
       recordingGeneration = null
       keyboardView?.setState(
         MicIndicatorState.ERROR,
@@ -246,7 +273,8 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
       return
     }
 
-    val committed = currentInputConnection?.commitText(text, 1) == true
+    val sinkText = VoiceInputSafety.textForEditor(text, currentEditorInfo?.inputType ?: 0)
+    val committed = currentInputConnection?.commitText(sinkText, 1) == true
     recordingGeneration = null
     keyboardView?.setState(
       if (committed) MicIndicatorState.SUCCESS else MicIndicatorState.ERROR,
@@ -256,7 +284,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
   }
 
   fun copyRecoverableText(text: String) {
-    if (isSensitiveField()) {
+    if (!VoiceOverlayVisibility.isDeviceAvailable(this) || isSensitiveField()) {
       keyboardView?.setState(
         MicIndicatorState.ERROR,
         "Campo protetto · testo salvato in Cronologia",
@@ -280,17 +308,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
 
   private fun isSensitiveField(): Boolean {
     val inputType = currentEditorInfo?.inputType ?: return false
-    val variation = inputType and InputType.TYPE_MASK_VARIATION
-    val inputClass = inputType and InputType.TYPE_MASK_CLASS
-    if (inputClass == InputType.TYPE_CLASS_TEXT) {
-      return variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
-        variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
-        variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-    }
-    if (inputClass == InputType.TYPE_CLASS_NUMBER) {
-      return variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
-    }
-    return inputClass == InputType.TYPE_CLASS_PHONE
+    return VoiceInputSafety.isSensitive(inputType)
   }
 
   private fun hasMicrophonePermission(): Boolean =
@@ -335,7 +353,7 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
         .apply { if (contentIntent != null) setContentIntent(contentIntent) }
         .build()
 
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         startForeground(
           RECORDING_NOTIFICATION_ID,
           notification,
@@ -394,9 +412,28 @@ class VoiceInputMethodService : InputMethodService(), VoiceKeyboardView.Listener
       0
     }
 
-  private companion object {
-    const val TAG = "VoiceInputMethodService"
-    const val RECORDING_CHANNEL_ID = "traflix_voice_recording"
-    const val RECORDING_NOTIFICATION_ID = 7101
+  companion object {
+    private var activeService: WeakReference<VoiceInputMethodService>? = null
+
+    internal fun captureTranscriptTarget(expectedPackage: String?): VoiceTranscriptTarget? {
+      if (Looper.myLooper() != Looper.getMainLooper()) return null
+      val reference = activeService ?: return null
+      val service = reference.get() ?: return null
+      val identity = service.externalEditorIdentity() ?: return null
+      val inputType = service.currentEditorInfo?.inputType ?: 0
+      if (expectedPackage != null && identity.packageName != expectedPackage) return null
+      return VoiceTranscriptTarget(
+        identity,
+        { reference.get()?.externalEditorIdentity() },
+        { text ->
+          val sinkText = VoiceInputSafety.textForEditor(text, inputType)
+          reference.get()?.currentInputConnection?.commitText(sinkText, 1) == true
+        },
+      )
+    }
+
+    private const val TAG = "VoiceInputMethodService"
+    private const val RECORDING_CHANNEL_ID = "traflix_voice_recording"
+    private const val RECORDING_NOTIFICATION_ID = 7101
   }
 }
