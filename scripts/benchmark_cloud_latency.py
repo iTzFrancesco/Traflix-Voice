@@ -10,6 +10,8 @@ network time.
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import json
 import statistics
 import sys
 import threading
@@ -54,6 +56,16 @@ fake_sounddevice = types.ModuleType("sounddevice")
 fake_sounddevice.InputStream = None
 sys.modules["sounddevice"] = fake_sounddevice
 
+try:
+    import huggingface_hub
+except ImportError:
+    # Cloud-only measurements never download or load a local model.
+    fake_hub = types.ModuleType("huggingface_hub")
+    def _no_model_download(*_args, **_kwargs):
+        raise AssertionError("Local model downloads are outside this benchmark")
+    fake_hub.hf_hub_download = _no_model_download
+    sys.modules["huggingface_hub"] = fake_hub
+
 from whisper_engine import engine as engine_module  # noqa: E402
 from whisper_engine import transcriber  # noqa: E402
 from whisper_engine.constants import BLOCK_SIZE  # noqa: E402
@@ -63,6 +75,7 @@ from whisper_engine.ipc import handle_command  # noqa: E402
 def _fake_http_client(_api_key):
     def handler(request):
         if _request_event is not None:
+            _request_event.requested_at = time.perf_counter()
             _request_event.set()
         return httpx.Response(200, text="testo simulato", request=request)
 
@@ -73,9 +86,8 @@ transcriber.create_groq_client = _fake_http_client
 
 
 class _FakeInputStream:
-    def __init__(self, engine, ready_event, blocks):
+    def __init__(self, engine, blocks):
         self.engine = engine
-        self.ready_event = ready_event
         self.blocks = blocks
 
     def __enter__(self):
@@ -84,7 +96,6 @@ class _FakeInputStream:
         block = np.full(BLOCK_SIZE, 0.03, dtype=np.float32)
         for _ in range(self.blocks):
             self.engine.audio_queue.put(block)
-        self.ready_event.set()
         return self
 
     def __exit__(self, *_args):
@@ -108,20 +119,20 @@ def run_once(blocks: int, prewarm: bool = False) -> tuple[float, float]:
     def log(event):
         if event.get("status") == "error":
             failures.append(event.get("message", "unknown engine error"))
+        if event.get("status") == "listening":
+            ready_event.set()
         if event.get("status") == "result":
+            result_event.resulted_at = time.perf_counter()
             result_event.set()
 
     engine.log = log
-    stream_factory = lambda **_kwargs: _FakeInputStream(engine, ready_event, blocks)
+    stream_factory = lambda **_kwargs: _FakeInputStream(engine, blocks)
 
     original_stream = engine_module.sd.InputStream
     engine_module.sd.InputStream = stream_factory
     try:
-        worker = threading.Thread(
-            target=engine.transcribe,
-            args=(None, "small", "it"),
-        )
-        worker.start()
+        engine.prepare_transcription_worker()
+        handle_command("transcribe", {"provider": "cloud", "language": "it"}, engine)
         if not ready_event.wait(1.0):
             raise RuntimeError(f"audio stream did not become ready: {failures}")
         deadline = time.perf_counter() + 1.0
@@ -134,29 +145,33 @@ def run_once(blocks: int, prewarm: bool = False) -> tuple[float, float]:
         handle_command("stop", {}, engine)
         if not request_event.wait(2.0):
             raise RuntimeError("fake Groq request did not start")
-        requested_at = time.perf_counter()
+        requested_at = request_event.requested_at
         if not result_event.wait(2.0):
             raise RuntimeError("fake transcription result did not arrive")
-        resulted_at = time.perf_counter()
-        worker.join(2.0)
-        if worker.is_alive():
-            raise RuntimeError("transcription worker did not finish")
+        resulted_at = result_event.resulted_at
         return (
             (requested_at - stopped_at) * 1000,
             (resulted_at - stopped_at) * 1000,
         )
     finally:
+        engine._shutting_down = True
+        engine.close_transcription_worker()
         engine_module.sd.InputStream = original_stream
         _request_event = None
 
 
-def summarize(label: str, samples: list[float]) -> None:
+def summarize(label: str, samples: list[float]) -> dict[str, float]:
+    summary = {
+        "median": statistics.median(samples),
+        "p95": sorted(samples)[(len(samples) * 95 + 99) // 100 - 1],
+        "mean": statistics.mean(samples),
+        "min": min(samples),
+        "max": max(samples),
+    }
     print(label)
-    print(f"median={statistics.median(samples):.3f}")
-    print(f"p95={statistics.quantiles(samples, n=20)[18]:.3f}")
-    print(f"mean={statistics.mean(samples):.3f}")
-    print(f"min={min(samples):.3f}")
-    print(f"max={max(samples):.3f}")
+    for key, value in summary.items():
+        print(f"{key}={value:.3f}")
+    return summary
 
 
 def main() -> None:
@@ -165,7 +180,24 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=50)
     parser.add_argument("--blocks", type=int, default=1)
     parser.add_argument("--prewarm", action="store_true")
+    parser.add_argument("--baseline-dir", type=Path, help="Optional pre-edit engine.py, audio.py and transcriber.py snapshot")
+    parser.add_argument("--output", type=Path, help="Optional numeric JSON evidence path")
     args = parser.parse_args()
+    if args.iterations < 2 or args.warmup < 0 or args.blocks < 1:
+        parser.error("Use at least two iterations, non-negative warmup and one block")
+
+    if args.baseline_dir:
+        def load_snapshot(name):
+            spec = importlib.util.spec_from_file_location("latency_baseline_" + name, args.baseline_dir / (name + ".py"))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        global engine_module, transcriber
+        engine_module = load_snapshot("engine")
+        transcriber = load_snapshot("transcriber")
+        engine_module.audio_module = load_snapshot("audio")
+        engine_module.transcriber = transcriber
+        transcriber.create_groq_client = _fake_http_client
 
     transcriber.close_groq_client()
     for _ in range(args.warmup):
@@ -178,8 +210,15 @@ def main() -> None:
         request_samples.append(requested)
         result_samples.append(resulted)
 
-    summarize("stop_to_request_ms", request_samples)
-    summarize("stop_to_result_ms", result_samples)
+    report = {
+        "stop_to_request_ms": summarize("stop_to_request_ms", request_samples),
+        "stop_to_result_ms": summarize("stop_to_result_ms", result_samples),
+        "blocks": args.blocks, "iterations": args.iterations, "prewarm": args.prewarm,
+        "network": "HTTPX MockTransport only", "workers": "production IPC and deferred transcription",
+    }
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     transcriber.close_groq_client()
 
 
