@@ -18,6 +18,7 @@ from whisper_engine.constants import (
     TRANSCRIPTION_TIMEOUT,
 )
 from whisper_engine.groq_tracker import record_groq_usage
+from whisper_engine import cloud_quality
 
 _TRAF_DEBUG = os.environ.get("TRAF_DEBUG") == "1"
 _GROQ_CLIENT = None
@@ -343,13 +344,24 @@ def encode_wav(recording, assume_normalized=False):
     return io.BytesIO(_encode_wav_payload(recording, assume_normalized))
 
 
-def _cloud_multipart_prefix(language):
+def _cloud_multipart_prefix(language, detailed=False, vocabulary=""):
     prefix = _MULTIPART_PREFIXES.get(language)
     if prefix is None:
         prefix = _MULTIPART_BASE_PREFIX
         if language:
             prefix += _LANGUAGE_FIELD_PREFIX + language.encode("utf-8") + b"\r\n"
         prefix += _FILE_FIELD_PREFIX
+    vocabulary = cloud_quality.normalize_vocabulary(vocabulary)
+    if detailed:
+        prefix = prefix.replace(_RESPONSE_FORMAT_FIELD, _RESPONSE_FORMAT_FIELD.replace(
+            b"\r\n\r\ntext\r\n", b"\r\n\r\nverbose_json\r\n"), 1)
+    if vocabulary:
+        prompt_field = (
+            b"--" + _MULTIPART_BOUNDARY + b"\r\n"
+            b'Content-Disposition: form-data; name="prompt"\r\n\r\n'
+            + vocabulary.encode("utf-8") + b"\r\n"
+        )
+        prefix = prefix.replace(_FILE_FIELD_PREFIX, prompt_field + _FILE_FIELD_PREFIX, 1)
     return prefix
 
 
@@ -371,11 +383,14 @@ def encode_cloud_multipart_from_recording(
     recording,
     language,
     assume_normalized=False,
+    *,
+    detailed=False,
+    vocabulary="",
 ):
     """Join PCM and framing once, without materializing a separate WAV blob."""
     pcm = _encode_pcm16(recording, assume_normalized)
     return b"".join(
-        (_cloud_multipart_prefix(language), _encode_wav_header(pcm.nbytes),
+        (_cloud_multipart_prefix(language, detailed, vocabulary), _encode_wav_header(pcm.nbytes),
          memoryview(pcm), _MULTIPART_SUFFIX)
     )
 
@@ -565,6 +580,11 @@ def transcribe_cloud(
     shutting_down,
     log_func,
     models_dir,
+    *,
+    correct_uncertain=False,
+    vocabulary="",
+    speech_filter=False,
+    speech_detector=None,
 ):
     recording_duration = _normalize_recording_duration(recording_duration)
     if _shutdown_requested(shutting_down):
@@ -585,11 +605,19 @@ def transcribe_cloud(
             log_func({"status": "ready", "message": "Nessun audio riconosciuto."})
             return
 
+        speech_present = speech_detector(cloud_recording) if speech_filter and speech_detector else None
+        if _shutdown_requested(shutting_down):
+            return
+        if speech_present is False:
+            log_func({"status": "ready", "message": "Nessuna voce rilevata."})
+            return
         cloud_language = _normalize_cloud_language(language)
         buffer = encode_cloud_multipart_from_recording(
             cloud_recording,
             cloud_language,
             assume_normalized=True,
+            detailed=correct_uncertain or speech_filter,
+            vocabulary=vocabulary,
         )
 
         client = acquire_groq_client(groq_api_key)
@@ -607,9 +635,17 @@ def transcribe_cloud(
         if response.status_code != 200:
             response.raise_for_status()
 
-        # Groq returns UTF-8 text; decoding the already-buffered body avoids
-        # HTTPX charset detection on the success path.
-        text = response.content.decode("utf-8", errors="replace").strip()
+        transcript = cloud_quality.parse_cloud_transcript(
+            response.content, correct_uncertain or speech_filter, recording_duration)
+        if speech_present is True and transcript.no_speech:
+            transcript = cloud_quality.CloudTranscript(transcript.text, transcript.uncertain)
+        correction = (
+            cloud_quality.correct_cloud_transcript(
+                client, transcript, cloud_language, lambda: _shutdown_requested(shutting_down))
+            if correct_uncertain else cloud_quality.CorrectionResult(
+                "" if speech_filter and transcript.no_speech else transcript.text)
+        )
+        text = correction.text
 
         if _TRAF_DEBUG:
             import sys as _sys
@@ -617,12 +653,17 @@ def transcribe_cloud(
             _sys.stderr.flush()
         if _shutdown_requested(shutting_down):
             return
-        log_func({"status": "result", "text": text, "duration": recording_duration})
+        if text:
+            log_func({"status": "result", "text": text, "duration": recording_duration})
+        else:
+            log_func({"status": "ready", "message": "Nessuna voce rilevata."})
         if models_dir and recording_duration > 0:
             _USAGE_EXECUTOR.submit(
                 record_groq_usage,
                 models_dir,
                 duration_seconds=recording_duration,
+                input_tokens=correction.input_tokens,
+                output_tokens=correction.output_tokens,
             )
 
     except ImportError:
