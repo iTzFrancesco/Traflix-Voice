@@ -57,7 +57,7 @@ class VoiceKeyboardView(
     }
     addView(
       copyButton,
-      LayoutParams(LayoutParams.MATCH_PARENT, dp(44)),
+      LayoutParams(LayoutParams.MATCH_PARENT, dp(48)),
     )
 
     val controls = LinearLayout(context).apply {
@@ -71,6 +71,7 @@ class VoiceKeyboardView(
 
     indicator.setIndicatorState(indicatorState)
     indicator.setOnTouchListener { _, event -> handleMicTouch(event) }
+    indicator.setOnClickListener { activateControl() }
     controls.addView(
       indicator,
       LayoutParams(0, dp(56), 1f).apply {
@@ -141,12 +142,16 @@ class VoiceKeyboardView(
         }
       }
       RecordingMode.TOGGLE -> if (event.actionMasked == MotionEvent.ACTION_UP) {
-        if (canStop()) listener.onRecordingStopRequested()
-        else if (canStart()) listener.onRecordingStartRequested()
+        indicator.performClick()
         return true
       }
     }
     return true
+  }
+
+  private fun activateControl() {
+    if (canStop()) listener.onRecordingStopRequested()
+    else if (canStart()) listener.onRecordingStartRequested()
   }
 
   private fun canStart(): Boolean = indicatorState == MicIndicatorState.IDLE ||

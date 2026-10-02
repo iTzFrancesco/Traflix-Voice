@@ -73,7 +73,13 @@ class MicIndicatorView @JvmOverloads constructor(
 
   init {
     isClickable = true
+    isFocusable = true
     contentDescription = "Microfono Traflix Voice"
+  }
+
+  override fun performClick(): Boolean {
+    super.performClick()
+    return true
   }
 
   fun setCompact(value: Boolean) {
