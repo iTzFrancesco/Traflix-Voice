@@ -644,13 +644,14 @@ class TestCloudTranscription(unittest.TestCase):
         client.send.side_effect = OSError("connection reset")
         events = []
 
-        with patch.object(transcriber_module, "get_groq_client", return_value=client):
+        with patch.object(transcriber_module, "acquire_groq_client", return_value=client):
             transcriber_module.transcribe_cloud(
                 self._recording(), "it", 1.0, "test-key", False,
                 events.append, None,
             )
 
         self.assertEqual([event["status"] for event in events], ["error", "ready"])
+        client.send.assert_called_once()
 
     def test_invalid_response_bytes_still_produce_a_result(self):
         response = MagicMock(status_code=200, content=b"ok\xff")
@@ -749,6 +750,22 @@ class TestCloudTranscription(unittest.TestCase):
 
 
 class TestGroqClientLifecycle(unittest.TestCase):
+    def test_two_leases_keep_a_rotated_client_open_until_both_finish(self):
+        old_client = MagicMock()
+        new_client = MagicMock()
+        transcriber_module.close_groq_client()
+        try:
+            with patch.object(transcriber_module, "create_groq_client", side_effect=[old_client, new_client]):
+                first = transcriber_module.acquire_groq_client("old-key")
+                second = transcriber_module.acquire_groq_client("old-key")
+                transcriber_module.get_groq_client("new-key")
+                transcriber_module.release_groq_client(first)
+                old_client.close.assert_not_called()
+                transcriber_module.release_groq_client(second)
+                old_client.close.assert_called_once()
+        finally:
+            transcriber_module.close_groq_client()
+
     def test_prewarm_rejects_stale_key_and_shutdown(self):
         engine = WhisperEngine()
         engine.groq_api_key = "new-key"
@@ -914,6 +931,71 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine.model = MagicMock()
         engine.current_model_size = "small"
         return engine
+
+    def test_listening_is_emitted_only_after_the_microphone_opens(self):
+        engine = self._setup_engine()
+        engine.provider = "cloud"
+        opened = False
+        events = []
+
+        def log(event):
+            events.append(event)
+            if event.get("status") == "listening":
+                self.assertTrue(opened, "listening must mean the microphone is open")
+                engine.stop_recording()
+
+        class FakeInputStream:
+            def __init__(self, **_kwargs):
+                pass
+
+            def __enter__(self):
+                nonlocal opened
+                opened = True
+                engine.audio_queue.put(np.full(BLOCK_SIZE, 0.1, dtype=np.float32))
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        engine.log = log
+        with patch("whisper_engine.engine.sd.InputStream", FakeInputStream), \
+             patch.object(engine, "_process_recording"):
+            engine.transcribe(None, "small")
+        self.assertEqual([e["status"] for e in events], ["listening", "processing"])
+
+    def test_microphone_open_failure_never_emits_listening(self):
+        engine = self._setup_engine()
+        engine.provider = "cloud"
+        events = []
+        engine.log = events.append
+        with patch("whisper_engine.engine.sd.InputStream", side_effect=RuntimeError("no mic")):
+            engine.transcribe(None, "small")
+        self.assertEqual([e["status"] for e in events], ["error", "ready"])
+
+    def test_stop_during_model_loading_returns_to_ready(self):
+        engine = self._setup_engine()
+        events = []
+        engine.log = events.append
+        with patch.object(engine, "load_model", side_effect=lambda *_: engine.stop_recording()), \
+             patch("whisper_engine.engine.sd.InputStream") as stream:
+            engine.transcribe(None, "small")
+        stream.assert_not_called()
+        self.assertEqual([e["status"] for e in events], ["ready"])
+
+    def test_inactive_callback_audio_is_not_prepended_to_the_next_session(self):
+        engine = self._setup_engine()
+        engine.provider = "cloud"
+        engine.log = lambda *_: None
+        engine.audio_callback(
+            np.full((BLOCK_SIZE, 1), 0.2, dtype=np.float32),
+            BLOCK_SIZE, None, None, recording_active=False,
+        )
+        block = np.full((BLOCK_SIZE, 1), 0.1, dtype=np.float32)
+        self._mock_input_stream(engine, [block])
+        with patch.object(engine, "_process_recording") as process:
+            engine.transcribe(None, "small")
+        np.testing.assert_array_equal(process.call_args.args[0], block[:, 0])
+        self.assertEqual(process.call_args.args[3], BLOCK_SIZE / SAMPLE_RATE)
 
     def _mock_input_stream(self, engine, audio_blocks=None):
         """Helper to mock sd.InputStream context manager."""
@@ -1124,6 +1206,85 @@ class TestTranscriptionFlow(unittest.TestCase):
         )
 
 
+class TestCloudProductionRoundTrips(unittest.TestCase):
+    def test_repeated_ipc_sessions_preserve_tail_and_reuse_the_http_client(self):
+        from whisper_engine import audio as audio_module
+
+        engine = WhisperEngine()
+        engine.groq_api_key = "synthetic-test-key"
+        engine.provider = "cloud"
+        listening = threading.Event()
+        results = queue.Queue()
+        callbacks = []
+        captured = []
+        events = []
+        silence = np.zeros((BLOCK_SIZE, 1), dtype=np.float32)
+        speech = np.full((BLOCK_SIZE, 1), 0.01, dtype=np.float32)
+        tail = np.full((BLOCK_SIZE, 1), -0.0002, dtype=np.float32)
+
+        def log(event):
+            events.append(event)
+            if event.get("status") == "listening":
+                listening.set()
+            elif event.get("status") == "result":
+                results.put(event)
+
+        engine.log = log
+
+        class FakeInputStream:
+            def __init__(self, **kwargs):
+                self.callback = kwargs["callback"]
+
+            def __enter__(self):
+                callbacks.append(self.callback)
+                self.callback(silence, BLOCK_SIZE, None, None)
+                self.callback(speech, BLOCK_SIZE, None, None)
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        def respond(request):
+            captured.append((request.content, time.monotonic()))
+            return transcriber_module.httpx.Response(200, text="synthetic transcript", request=request)
+
+        client = transcriber_module.httpx.Client(
+            transport=transcriber_module.httpx.MockTransport(respond),
+            headers={"Authorization": "Bearer synthetic-test-key"},
+        )
+        transcriber_module.close_groq_client()
+        try:
+            with patch("whisper_engine.engine.sd.InputStream", FakeInputStream), \
+                 patch.object(transcriber_module, "create_groq_client", return_value=client) as create:
+                engine.prepare_transcription_worker()
+                engine.prepare_groq_client()
+                for index in range(5):
+                    listening.clear()
+                    ipc_module.handle_command("transcribe", {"provider": "cloud", "language": "it"}, engine)
+                    self.assertTrue(listening.wait(2), "capture did not start")
+                    stopped_at = time.monotonic()
+                    ipc_module.handle_command("stop", {}, engine)
+                    callbacks[-1](tail, BLOCK_SIZE, None, None)
+                    result = results.get(timeout=3)
+                    self.assertEqual(result["provider"], "cloud")
+                    self.assertEqual(result["duration"], BLOCK_SIZE * 3 / SAMPLE_RATE)
+                    self.assertEqual(len(captured), index + 1)
+                    self.assertGreaterEqual(captured[-1][1] - stopped_at, 0.21)
+                create.assert_called_once_with("synthetic-test-key")
+            expected = np.concatenate((silence[:, 0], speech[:, 0], tail[:, 0]))
+            audio_module.apply_automatic_gain(expected)
+            expected_payload = encode_cloud_multipart_from_recording(expected, "it", True)
+            for payload, _timestamp in captured:
+                self.assertEqual(payload, expected_payload)
+            self.assertEqual([event["status"] for event in events].count("processing"), 5)
+            self.assertEqual([event["status"] for event in events].count("listening"), 5)
+        finally:
+            engine._shutting_down = True
+            engine.close_transcription_worker()
+            transcriber_module.close_groq_client()
+            client.close()
+
+
 class TestRecordingSession(unittest.TestCase):
     def test_stop_is_idempotent_and_wakes_only_its_queue(self):
         session = _RecordingSession()
@@ -1292,7 +1453,11 @@ class TestInstantStop(unittest.TestCase):
         engine.provider = "cloud"
         block = np.ones((BLOCK_SIZE,), dtype=np.float32)
         events = []
-        engine.log = events.append
+        def log(event):
+            events.append(event)
+            if event.get("status") == "listening":
+                engine.stop_recording()
+        engine.log = log
         captured = {}
 
         class FakeInputStream:
@@ -1300,10 +1465,7 @@ class TestInstantStop(unittest.TestCase):
                 pass
 
             def __enter__(self):
-                # Runs after transcribe logged `listening`: early `processing`
-                # fires here, then the 220ms drain keeps the tail.
                 engine.audio_queue.put(block.copy())
-                engine.stop_recording()
                 return self
 
             def __exit__(self, *_args):
@@ -1603,6 +1765,21 @@ class TestLocalSpeedRounds(unittest.TestCase):
         self.assertEqual(events[0]["status"], "result")
         self.assertEqual(events[0]["text"], "")
         self.assertEqual(events[0]["duration"], 1.0)
+
+    def test_local_transcribe_keeps_weak_words_and_consonants(self):
+        model = MagicMock()
+        segment = MagicMock(text="test transcript")
+        model.transcribe.return_value = [segment]
+        recording = np.zeros(SAMPLE_RATE * 5, dtype=np.float32)
+        recording[SAMPLE_RATE : SAMPLE_RATE * 4] = 0.0002
+        recording[SAMPLE_RATE * 2 : SAMPLE_RATE * 3] = 0.1
+        events = []
+        transcriber_module.transcribe_local(
+            model, recording, "it", 5.0, False, events.append,
+        )
+        heard = model.transcribe.call_args.args[0]
+        self.assertEqual(np.count_nonzero(heard), SAMPLE_RATE * 3)
+        self.assertEqual(events[-1]["text"], "test transcript")
 
 
 # ---------------------------------------------------------------------------
