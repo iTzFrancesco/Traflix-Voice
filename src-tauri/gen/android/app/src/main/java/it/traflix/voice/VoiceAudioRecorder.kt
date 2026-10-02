@@ -11,6 +11,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import java.io.BufferedOutputStream
 import java.io.File
@@ -62,6 +63,7 @@ class VoiceAudioRecorder(
     }
   }
   private var audioRecord: AudioRecord? = null
+  private var captureTail: VoiceCaptureTail? = null
   private var outputFile: File? = null
   private var audioFocusRequest: AudioFocusRequest? = null
 
@@ -71,7 +73,7 @@ class VoiceAudioRecorder(
       change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
     ) {
       Log.w(TAG, "stopping because audio focus was lost")
-      stop()
+      stopImmediately()
     }
   }
 
@@ -89,6 +91,10 @@ class VoiceAudioRecorder(
 
     synchronized(lock) {
       if (closed || recording.get()) return false
+      if (audioRecord != null) {
+        listener.onRecordingError("Microfono in chiusura. Riprova tra poco.")
+        return false
+      }
 
       val minimumBuffer = AudioRecord.getMinBufferSize(
         SAMPLE_RATE,
@@ -140,7 +146,9 @@ class VoiceAudioRecorder(
       audioRecord = record
       outputFile = file
       val sessionId = sessionCounter.incrementAndGet()
-      val startedAt = System.currentTimeMillis()
+      val startedAt = SystemClock.elapsedRealtime()
+      val tail = VoiceCaptureTail()
+      captureTail = tail
       activeSessionId = sessionId
       recording.set(true)
 
@@ -149,6 +157,7 @@ class VoiceAudioRecorder(
         recording.set(false)
         activeSessionId = 0L
         audioRecord = null
+        captureTail = null
         outputFile = null
         abandonAudioFocus()
         record.release()
@@ -158,12 +167,13 @@ class VoiceAudioRecorder(
 
       Log.i(TAG, "recording started bufferSize=$bufferSize")
       runCatching {
-        executor.execute { capture(record, file, bufferSize, sessionId, startedAt) }
+        executor.execute { capture(record, file, sessionId, startedAt, tail) }
       }.onFailure {
         Log.e(TAG, "unable to schedule capture loop", it)
         recording.set(false)
         activeSessionId = 0L
         audioRecord = null
+        captureTail = null
         outputFile = null
         runCatching { record.stop() }
         record.release()
@@ -176,12 +186,18 @@ class VoiceAudioRecorder(
   }
 
   fun stop() {
-    val wasRecording = synchronized(lock) {
-      val active = recording.compareAndSet(true, false)
-      if (active) runCatching { audioRecord?.stop() }
-      active
+    val accepted = synchronized(lock) {
+      recording.get() && captureTail?.requestStop(SystemClock.elapsedRealtime()) == true
     }
-    Log.d(TAG, "stop requested active=$wasRecording")
+    if (accepted) clearPendingMeter()
+    Log.d(TAG, "stop requested tailScheduled=$accepted")
+  }
+
+  private fun stopImmediately() {
+    synchronized(lock) {
+      recording.set(false)
+      runCatching { audioRecord?.stop() }
+    }
   }
 
   fun cancel() {
@@ -214,15 +230,16 @@ class VoiceAudioRecorder(
   private fun capture(
     record: AudioRecord,
     file: File,
-    bufferSize: Int,
     sessionId: Long,
     startedAt: Long,
+    tail: VoiceCaptureTail,
   ) {
     Log.d(TAG, "capture loop started")
     var output: BufferedOutputStream? = null
     var bytesWritten = 0
     var lastMeterAt = 0L
-    val buffer = ShortArray(bufferSize / BYTES_PER_SAMPLE)
+    val buffer = ShortArray(FRAME_SIZE)
+    val gain = VoicePcmGain()
 
     try {
       output = BufferedOutputStream(
@@ -232,7 +249,9 @@ class VoiceAudioRecorder(
       output.write(wavHeader(0))
       val pcm = ByteBuffer.allocate(buffer.size * BYTES_PER_SAMPLE).order(ByteOrder.LITTLE_ENDIAN)
 
-      while (recording.get() && isCurrentSession(sessionId)) {
+      while (recording.get() && isCurrentSession(sessionId) &&
+        tail.shouldCapture(SystemClock.elapsedRealtime())
+      ) {
         val count = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
         if (count < 0) {
           if (!recording.get() || !isCurrentSession(sessionId)) break
@@ -250,10 +269,11 @@ class VoiceAudioRecorder(
           pcm.putShort(buffer[index])
         }
         val pcmLength = count * BYTES_PER_SAMPLE
+        gain.analyze(buffer, count)
         output.write(pcm.array(), 0, pcmLength)
         bytesWritten += pcmLength
-        val now = System.currentTimeMillis()
-        if (now - lastMeterAt >= METER_INTERVAL_MS) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastMeterAt >= METER_INTERVAL_MS && !tail.stopRequested) {
           lastMeterAt = now
           val rmsLevel = sqrt(energy / count).toFloat() / Short.MAX_VALUE
           val peakLevel = peak.toFloat() / Short.MAX_VALUE
@@ -284,15 +304,17 @@ class VoiceAudioRecorder(
     } finally {
       runCatching { output?.flush() }
       runCatching { output?.close() }
+      runCatching { record.stop() }
       record.release()
       synchronized(lock) {
-        val owns = activeSessionId == sessionId
+        val owns = audioRecord === record
         if (owns) {
+          recording.set(false)
           audioRecord = null
+          captureTail = null
           outputFile = null
           abandonAudioFocus()
         }
-        owns
       }
       Log.d(
         TAG,
@@ -317,6 +339,8 @@ class VoiceAudioRecorder(
     }
 
     runCatching {
+      check(file.length() == WAV_HEADER_BYTES.toLong() + bytesWritten) { "Incomplete PCM capture" }
+      gain.applyToWav(file)
       RandomAccessFile(file, "rw").use { randomAccessFile ->
         randomAccessFile.seek(0)
         randomAccessFile.write(wavHeader(bytesWritten))
@@ -331,7 +355,7 @@ class VoiceAudioRecorder(
       return
     }
 
-    val duration = System.currentTimeMillis() - startedAt
+    val duration = bytesWritten.toLong() * 1000 / (SAMPLE_RATE * BYTES_PER_SAMPLE)
     Log.i(TAG, "recording finished durationMs=$duration bytes=$bytesWritten")
     mainHandler.post {
       if (isCurrentSession(sessionId) && !closed) {
@@ -369,7 +393,7 @@ class VoiceAudioRecorder(
     activeSessionId == sessionId
 
   private fun wavHeader(dataLength: Int): ByteArray {
-    val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+    val header = ByteBuffer.allocate(WAV_HEADER_BYTES).order(ByteOrder.LITTLE_ENDIAN)
     header.put("RIFF".toByteArray(Charsets.US_ASCII))
     header.putInt(36 + dataLength)
     header.put("WAVE".toByteArray(Charsets.US_ASCII))
@@ -400,6 +424,7 @@ class VoiceAudioRecorder(
     private const val PEAK_METER_WEIGHT = 0.32f
     private const val MAX_DURATION_MS = 5 * 60 * 1000L
     private const val FILE_BUFFER_SIZE_BYTES = 32 * 1024
+    private const val WAV_HEADER_BYTES = 44
   }
 
   private fun requestAudioFocus(): Boolean {
