@@ -51,6 +51,7 @@ export default function App() {
 
   // ── STATE ──
   const [activeTab, setActiveTab] = useState("home");
+  const [vocabularyFocusRequest, setVocabularyFocusRequest] = useState(0);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_LOCAL_MODEL);
   const [selectedProvider, setSelectedProvider] = useState<Provider>("local");
   const [selectedLanguage, setSelectedLanguage] = useState("it");
@@ -116,6 +117,7 @@ export default function App() {
     updateStats,
     saveTranscription,
     recordGroqUsage,
+    reloadGroqUsage,
   });
 
   const isTranscriptionBusy =
@@ -265,6 +267,18 @@ export default function App() {
   }, []);
 
   // Python events are handled by a dedicated hook so App remains a composition module.
+  useEffect(() => {
+    if (!window.__TAURI__?.event?.listen) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    window.__TAURI__.event.listen("open_cloud_vocabulary", () => {
+      setActiveTab("ia");
+      setVocabularyFocusRequest((request) => request + 1);
+    }).then((stop) => {
+      if (cancelled) stop(); else unlisten = stop;
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
 
   // ── HOTKEY EVENT LISTENERS (with refs to avoid re-registration) ──
   useEffect(() => {
@@ -394,6 +408,9 @@ export default function App() {
               : settings?.selectedDevice,
           language: selectedLanguage,
           provider: selectedProvider,
+          cloud_correct_uncertain: settings?.cloudCorrectionEnabled ?? true,
+          cloud_vocabulary: settings?.cloudVocabulary ?? "",
+          cloud_speech_filter: true,
         }),
       });
     } catch (err) {
@@ -708,6 +725,11 @@ export default function App() {
             onProviderToggle={handleProviderToggle}
             onModelAction={handleModelAction}
             onUnloadModel={handleUnloadModel}
+            cloudCorrectionEnabled={settings?.cloudCorrectionEnabled ?? true}
+            cloudVocabulary={settings?.cloudVocabulary ?? ""}
+            onCloudCorrectionChange={(value) => handleSettingChange("cloudCorrectionEnabled", value)}
+            onCloudVocabularyChange={(value) => handleSettingChange("cloudVocabulary", value)}
+            vocabularyFocusRequest={vocabularyFocusRequest}
           />
         )}
 

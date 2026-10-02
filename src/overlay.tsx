@@ -146,7 +146,7 @@ function Overlay() {
 
     root.innerHTML = `
       <div class="ow" id="w" role="button" aria-label="Traflix Voice. Doppio clic per aprire la console" tabindex="0">
-        <div style="width:26px;height:26px;flex-shrink:0"><img src="/assets/logo.png" alt="Traflix" draggable="false" style="width:26px;height:26px;border-radius:6px" /></div>
+        <button id="vocabulary-button" aria-label="Modifica vocabolario" title="Modifica vocabolario" style="width:26px;height:26px;flex-shrink:0;background:transparent;border:0;cursor:pointer"><img src="/assets/logo.png" alt="" draggable="false" style="width:26px;height:26px;border-radius:6px" /></button>
         <span class="lbl">Traflix Voice</span>
         <span class="dev-slot">${IS_DEV ? '<span class="devbadge widget-devbadge">DEV</span>' : ""}</span>
         <div class="spw"><div class="spr"></div></div>
@@ -159,6 +159,10 @@ function Overlay() {
     const widget = root.firstElementChild as HTMLDivElement;
     const vizWrap = widget.querySelector(".vw") as HTMLDivElement;
     const versionMeta = widget.querySelector("#version-meta") as HTMLSpanElement;
+    const vocabularyElement = widget.querySelector("#vocabulary-button");
+    if (!(vocabularyElement instanceof HTMLButtonElement)) return;
+    const vocabularyButton: HTMLButtonElement = vocabularyElement;
+    vocabularyButton.addEventListener("click", () => void requestMainWindow("vocabulary"));
 
     if (!IS_DEV && window.__TAURI__?.core?.invoke) {
       window.__TAURI__.core.invoke("is_dev").then((isDev: unknown) => {
@@ -267,6 +271,7 @@ function Overlay() {
     let visualState: WidgetVisualState = "idle";
 
     function applyVisualState(nextState: WidgetVisualState) {
+      vocabularyButton.disabled = nextState !== "idle";
       const stateChanged = visualState !== nextState;
       visualState = nextState;
       isListening = nextState === "recording";
@@ -305,7 +310,7 @@ function Overlay() {
       scheduleAnimation();
     }
 
-    async function requestMainWindow() {
+    async function requestMainWindow(section?: "vocabulary") {
       if (isOpeningMain) return;
       isOpeningMain = true;
 
@@ -322,8 +327,8 @@ function Overlay() {
       try {
         const [position] = await Promise.all([positionPromise, exitDelay]);
         const payload = position && Number.isFinite(position.x) && Number.isFinite(position.y)
-          ? { x: Math.round(position.x), y: Math.round(position.y) }
-          : {};
+          ? { x: Math.round(position.x), y: Math.round(position.y), section }
+          : { section };
         await window.__TAURI__.event.emit("show_main_window", payload);
       } catch (_) {
         widgetMotion = null;
@@ -335,6 +340,7 @@ function Overlay() {
 
     // ── MOUSE CLICK (double-click to show main) ──
     widget.addEventListener("mousedown", (e: MouseEvent) => {
+      if (e.target instanceof Element && e.target.closest("#vocabulary-button")) return;
       const now = Date.now();
       if (now - lastClick < 300) {
         lastClick = 0;
@@ -347,6 +353,7 @@ function Overlay() {
       }
     });
     widget.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.target instanceof Element && e.target.closest("#vocabulary-button")) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         void requestMainWindow();
@@ -356,6 +363,12 @@ function Overlay() {
     // ── EVENT LISTENERS ──
     let overlayCancelled = false;
     const unlistenFns: (() => void)[] = [];
+
+    window.__TAURI__.event.listen("cloud_provider_updated", (event: { payload: unknown }) => {
+      vocabularyButton.hidden = event.payload !== "cloud";
+    }).then((fn) => {
+      if (overlayCancelled) fn(); else unlistenFns.push(fn);
+    });
 
     window.__TAURI__.event
       .listen("overlay_appearing", () => {
@@ -424,8 +437,11 @@ function Overlay() {
     async function loadInitialMode() {
       try {
         if (window.__TAURI__?.core?.invoke) {
-          const s = await window.__TAURI__.core.invoke("load_settings") as { widgetMode?: string };
-          if (s && s.widgetMode === "recording") {
+          const s: unknown = await window.__TAURI__.core.invoke("load_settings");
+          if (typeof s === "object" && s !== null && "provider" in s) {
+            vocabularyButton.hidden = s.provider !== "cloud";
+          }
+          if (typeof s === "object" && s !== null && "widgetMode" in s && s.widgetMode === "recording") {
             widgetMode = "recording";
           }
           // Sync visibility with initial mode state

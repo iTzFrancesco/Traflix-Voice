@@ -68,6 +68,7 @@ pub async fn save_settings<R: Runtime>(
 
     // Emit widget mode update for the overlay
     let _ = app.emit("widget_mode_updated", settings.widget_mode.clone());
+    let _ = app.emit("cloud_provider_updated", settings.provider.clone());
 
     Ok(())
 }

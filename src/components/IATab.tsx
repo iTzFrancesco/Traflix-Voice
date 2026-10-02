@@ -1,5 +1,6 @@
 import type { WhisperModel, Provider, GroqUsage } from "../types";
 import ModelCard from "./ModelCard";
+import { useEffect, useState } from "react";
 
 interface IATabProps {
   models: WhisperModel[];
@@ -10,6 +11,11 @@ interface IATabProps {
   onProviderToggle: (provider: Provider) => void;
   onModelAction: (modelId: string) => void;
   onUnloadModel?: () => void;
+  cloudCorrectionEnabled: boolean;
+  cloudVocabulary: string;
+  onCloudCorrectionChange: (enabled: boolean) => void;
+  onCloudVocabularyChange: (vocabulary: string) => void;
+  vocabularyFocusRequest: number;
 }
 
 export default function IATab({
@@ -21,7 +27,22 @@ export default function IATab({
   onProviderToggle,
   onModelAction,
   onUnloadModel,
+  cloudCorrectionEnabled,
+  cloudVocabulary,
+  onCloudCorrectionChange,
+  onCloudVocabularyChange,
+  vocabularyFocusRequest,
 }: IATabProps) {
+  const [vocabularyDraft, setVocabularyDraft] = useState(displayVocabulary(cloudVocabulary));
+  useEffect(() => setVocabularyDraft(displayVocabulary(cloudVocabulary)), [cloudVocabulary]);
+  useEffect(() => {
+    if (!vocabularyFocusRequest) return;
+    const input = document.getElementById("cloud-vocabulary");
+    if (input instanceof HTMLTextAreaElement) {
+      input.scrollIntoView({ block: "center" });
+      input.focus();
+    }
+  }, [vocabularyFocusRequest]);
   const dailySecs = Number.isFinite(groqUsage?.audio_seconds) && (groqUsage?.audio_seconds ?? 0) >= 0
     ? groqUsage?.audio_seconds ?? 0
     : 0;
@@ -135,6 +156,50 @@ export default function IATab({
       )}
 
       {/* Local models */}
+      {selectedProvider === "cloud" && (
+        <div className="panel p-4 mb-3 flex flex-col gap-4">
+          <label className="flex items-start gap-3 cursor-pointer" title="I passaggi dubbi possono essere verificati da GPT-OSS su Groq. Le frasi affidabili passano direttamente da Whisper Turbo.">
+            <input
+              type="checkbox"
+              checked={cloudCorrectionEnabled}
+              onChange={(event) => onCloudCorrectionChange(event.target.checked)}
+              className="mt-1 accent-[var(--primary-orange)]"
+            />
+            <span>
+              <span className="block text-[0.85rem] font-bold text-[var(--ink)]">Correzione solo quando serve</span>
+            </span>
+          </label>
+          <div>
+            <p className="text-[0.7rem] leading-4 text-[var(--muted)] m-0 mb-3">
+              Token correzione oggi: {(groqUsage?.llmInputTokens ?? 0) + (groqUsage?.llmOutputTokens ?? 0)}
+            </p>
+            <label htmlFor="cloud-vocabulary" className="block text-[0.85rem] font-bold text-[var(--ink)] mb-1">Vocabolario personale</label>
+            <textarea
+              id="cloud-vocabulary"
+              rows={5}
+              value={vocabularyDraft}
+              placeholder={"• Traflix Voice\n• Groq Cloud"}
+              className="w-full resize-y rounded-lg border border-[var(--stroke)] bg-[var(--bg)] px-3 py-2 text-[0.8rem] leading-6 text-[var(--ink)]"
+              onChange={(event) => setVocabularyDraft(limitVocabulary(event.target.value))}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                const input = event.currentTarget;
+                const cursor = input.selectionStart;
+                const next = limitVocabulary(input.value.slice(0, cursor) + "\n• " + input.value.slice(input.selectionEnd));
+                setVocabularyDraft(next);
+                requestAnimationFrame(() => input.setSelectionRange(Math.min(cursor + 3, next.length), Math.min(cursor + 3, next.length)));
+              }}
+              onBlur={() => {
+                const vocabulary = vocabularyEntries(vocabularyDraft).join("\n");
+                if (vocabulary !== vocabularyEntries(cloudVocabulary).join("\n")) onCloudVocabularyChange(vocabulary);
+              }}
+            />
+            <p className="text-[0.7rem] leading-4 text-[var(--muted)] mt-2 mb-0">Invio per aggiungere una voce.</p>
+          </div>
+        </div>
+      )}
+
       {selectedProvider !== "cloud" && (
         <div className="grid grid-cols-1 gap-[0.7rem]">
           {models.map((model) => {
@@ -169,6 +234,26 @@ export default function IATab({
       )}
     </div>
   );
+}
+
+function vocabularyEntries(value: string): string[] {
+  return value.split(/[\r\n,]+/).map((entry) => entry.replace(/^\s*[•*-]\s*/, "").trim()).filter(Boolean);
+}
+
+function displayVocabulary(value: string): string {
+  return vocabularyEntries(value).map((entry) => `• ${entry}`).join("\n");
+}
+
+function limitVocabulary(value: string): string {
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  let result = "";
+  for (const character of value) {
+    bytes += encoder.encode(character).length;
+    if (bytes > 224) break;
+    result += character;
+  }
+  return result;
 }
 
 function renderDots(filled: number, total: number, color: string) {

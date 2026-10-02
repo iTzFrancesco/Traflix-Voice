@@ -19,7 +19,7 @@ export function useSettings() {
           "load_settings"
         )) as AppSettings | null;
         if (!loaded || typeof loaded.hotkey === "undefined") {
-          console.warn("[settings] invalid data:", JSON.stringify(loaded));
+          console.warn("[settings] invalid data returned by load_settings");
           continue;
         }
         console.log(

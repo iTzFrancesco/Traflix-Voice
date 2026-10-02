@@ -49,6 +49,8 @@ TAURI_MOCK = r"""
     groqApiKey: "fake-e2e-key",
     provider: "cloud",
     widgetMode: "always",
+    cloudCorrectionEnabled: true,
+    cloudVocabulary: "Traflix Voice, Groq Cloud",
   };
   const stats = { total_words: 0, avg_wpm: 0, total_time: 0 };
   const eventListeners = Object.create(null);
@@ -135,6 +137,9 @@ def browser_page():
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         yield page
+        if not page.is_closed():
+            page.evaluate("window.__e2e?.stopEventPolling()")
+            page.wait_for_timeout(50)
         browser.close()
 
 
@@ -237,7 +242,8 @@ def test_usage_follows_the_result_provider_not_the_current_setting(browser_page,
     assert browser_page.evaluate("JSON.parse(localStorage.getItem('groq_usage')).audio_seconds") == 3
 
 
-def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
+@pytest.mark.parametrize("has_speech", [True, False])
+def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url, has_speech):
     event_queue = queue.SimpleQueue()
     sidecar_commands = []
     audio_started = threading.Event()
@@ -286,9 +292,11 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
             return False
 
     def groq_handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": []}, request=request)
         captured["request"] = request
         groq_request_seen.set()
-        return httpx.Response(200, text="trascrizione e2e completata", request=request)
+        return httpx.Response(200, json={"text": "trascrizione e2e completata", "segments": [{"text": "trascrizione e2e completata", "start": 0, "end": 2, "avg_logprob": -0.03, "no_speech_prob": 0.01}]}, request=request)
 
     client = httpx.Client(
         transport=httpx.MockTransport(groq_handler),
@@ -323,6 +331,7 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
         with (
             patch.object(engine_module.sd, "InputStream", FakeInputStream),
             patch.object(transcriber, "create_groq_client", return_value=client),
+            patch.object(engine, "_detect_cloud_speech", return_value=has_speech),
         ):
             open_app(browser_page, e2e_base_url)
             expect(browser_page.get_by_text("Pronto", exact=True)).to_be_visible(timeout=5000)
@@ -339,6 +348,13 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
             browser_page.wait_for_function(
                 "window.__e2e.calls.some((call) => call.command === 'stop_python')"
             )
+            if not has_speech:
+                expect(browser_page.get_by_text("Pronto", exact=True)).to_be_visible(timeout=5000)
+                assert not groq_request_seen.is_set()
+                assert browser_page.evaluate("window.__e2e.history.length") == 0
+                calls = browser_page.evaluate("window.__e2e.calls")
+                assert not any(call["command"] in ("execute_paste", "save_transcription", "update_stats") for call in calls)
+                return
             browser_page.wait_for_function(
                 "window.__e2e.history.some((entry) => entry.text === 'trascrizione e2e completata')",
                 timeout=5000,
@@ -349,6 +365,8 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url):
 
         request = captured["request"]
         assert str(request.url) == GROQ_TRANSCRIPTION_URL
+        assert b"verbose_json\r\n" in request.content
+        assert b"Traflix Voice, Groq Cloud\r\n" in request.content
         assert b"whisper-large-v3-turbo\r\n" in request.content
         assert b"whisper-large-v3\r\n" not in request.content
 
@@ -405,3 +423,25 @@ def _assert_amplified_without_clipping(samples, raw_peak):
     output_peak = float(np.max(np.abs(samples))) / 32767.0
     assert output_peak > raw_peak * 2
     assert output_peak <= 0.981
+
+
+def test_widget_vocabulary_event_focus_and_settings_persistence(browser_page, e2e_base_url):
+    configure_tauri_bridge(browser_page, lambda *_: None, lambda *_: [])
+    open_app(browser_page, e2e_base_url)
+    browser_page.wait_for_function("window.__e2e.listeners.open_cloud_vocabulary")
+    browser_page.evaluate("window.__e2e.emit('open_cloud_vocabulary')")
+    vocabulary = browser_page.get_by_label("Vocabolario personale")
+    expect(vocabulary).to_be_focused()
+    vocabulary.fill("\u2022 Traflix Voice")
+    vocabulary.press("End")
+    vocabulary.press("Enter")
+    vocabulary.type("Silero")
+    vocabulary.press("Enter")
+    vocabulary.type("TypeScript")
+    vocabulary.press("Tab")
+    browser_page.wait_for_function("window.__e2e.settings.cloudVocabulary === 'Traflix Voice\\nSilero\\nTypeScript'")
+    browser_page.get_by_text("Correzione solo quando serve", exact=True).click()
+    browser_page.wait_for_function("window.__e2e.settings.cloudCorrectionEnabled === false")
+    browser_page.get_by_role("tab", name="Cronologia", exact=True).click()
+    browser_page.get_by_role("tab", name="Motore IA").click()
+    expect(vocabulary).to_have_value("\u2022 Traflix Voice\n\u2022 Silero\n\u2022 TypeScript")

@@ -12,6 +12,8 @@ export interface AppSettings {
   groqApiKey: string;
   provider: string;
   widgetMode?: string;
+  cloudCorrectionEnabled?: boolean;
+  cloudVocabulary?: string;
 }
 
 export interface AppStats {

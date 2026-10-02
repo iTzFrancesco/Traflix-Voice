@@ -18,6 +18,7 @@ use crate::state::AppState;
 struct WidgetPositionPayload {
     x: Option<i32>,
     y: Option<i32>,
+    section: Option<String>,
 }
 
 fn parse_widget_position(payload: &str) -> Option<(i32, i32)> {
@@ -127,6 +128,11 @@ pub fn install_listeners<R: Runtime>(app: &mut App<R>) {
     app.listen("show_main_window", move |event| {
         let widget_position = parse_widget_position(event.payload());
         show_main_window_at(&app_handle_show, widget_position);
+        let vocabulary_requested = serde_json::from_str::<WidgetPositionPayload>(event.payload())
+            .is_ok_and(|payload| payload.section.as_deref() == Some("vocabulary"));
+        if vocabulary_requested {
+            let _ = app_handle_show.emit_to("main", "open_cloud_vocabulary", ());
+        }
     });
 }
 
