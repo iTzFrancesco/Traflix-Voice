@@ -35,6 +35,13 @@ pub struct AppSettings {
     pub provider: String,
     #[serde(rename = "widgetMode", default = "default_widget_mode")]
     pub widget_mode: String,
+    #[serde(
+        rename = "cloudCorrectionEnabled",
+        default = "default_cloud_correction"
+    )]
+    pub cloud_correction_enabled: bool,
+    #[serde(rename = "cloudVocabulary", default)]
+    pub cloud_vocabulary: String,
 }
 
 fn default_language() -> String {
@@ -65,6 +72,10 @@ fn default_keep_clipboard_result() -> bool {
     true
 }
 
+fn default_cloud_correction() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
@@ -81,6 +92,8 @@ impl Default for AppSettings {
             groq_api_key: String::new(),
             provider: "local".to_string(),
             widget_mode: "always".to_string(),
+            cloud_correction_enabled: true,
+            cloud_vocabulary: String::new(),
         }
     }
 }
@@ -96,11 +109,19 @@ pub struct AppStats {
 pub struct GroqUsage {
     pub date: String,
     pub audio_seconds: f32,
-    #[serde(rename = "audioSecondsHourly")]
+    #[serde(rename = "audioSecondsHourly", alias = "audio_seconds_hourly", default)]
     pub audio_seconds_hourly: f32,
     pub hourly_reset: String,
-    #[serde(default)]
+    #[serde(default, alias = "_hour_bucket")]
     pub hour_key: i64,
+    #[serde(default, rename = "llmInputTokens")]
+    pub llm_input_tokens: u64,
+    #[serde(default, rename = "llmOutputTokens")]
+    pub llm_output_tokens: u64,
+    #[serde(default, rename = "llmInputTokensHourly")]
+    pub llm_input_tokens_hourly: u64,
+    #[serde(default, rename = "llmOutputTokensHourly")]
+    pub llm_output_tokens_hourly: u64,
 }
 
 impl Default for GroqUsage {
@@ -111,6 +132,10 @@ impl Default for GroqUsage {
             audio_seconds_hourly: 0.0,
             hourly_reset: String::new(),
             hour_key: 0,
+            llm_input_tokens: 0,
+            llm_output_tokens: 0,
+            llm_input_tokens_hourly: 0,
+            llm_output_tokens_hourly: 0,
         }
     }
 }

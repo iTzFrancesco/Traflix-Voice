@@ -25,6 +25,7 @@ interface UsePythonOutputOptions {
     wordCount: number
   ) => Promise<void>;
   recordGroqUsage: (durationSecs: number) => void;
+  reloadGroqUsage: () => Promise<void>;
 }
 
 type ModelStatus = Record<
@@ -83,6 +84,7 @@ export function usePythonOutput({
   updateStats,
   saveTranscription,
   recordGroqUsage,
+  reloadGroqUsage,
 }: UsePythonOutputOptions) {
   const [modelStatus, setModelStatus] = useState<ModelStatus>({});
   const [modelReady, setModelReady] = useState(false);
@@ -150,6 +152,7 @@ export function usePythonOutput({
 
     let cancelled = false;
     let unlisten: (() => void) | null = null;
+    let usageRefresh: ReturnType<typeof setTimeout> | null = null;
 
     window.__TAURI__.event
       .listen("python_output", (event: { payload: unknown }) => {
@@ -180,6 +183,12 @@ export function usePythonOutput({
             pastePromise = window.__TAURI__.core.invoke("execute_paste", {
               text: data.text,
             });
+          }
+
+          if ((data.status === "result" || data.status === "ready") &&
+            (data.provider === "cloud" || selectedProviderRef.current === "cloud")) {
+            if (usageRefresh !== null) clearTimeout(usageRefresh);
+            usageRefresh = setTimeout(() => { void reloadGroqUsage(); }, 250);
           }
 
           if (data.status === "starting" || data.status === "loading_model") {
@@ -361,11 +370,13 @@ export function usePythonOutput({
 
     return () => {
       cancelled = true;
+      if (usageRefresh !== null) clearTimeout(usageRefresh);
       if (unlisten) unlisten();
     };
   }, [
     updateStats,
     recordGroqUsage,
+    reloadGroqUsage,
     saveTranscription,
     showToast,
     updateModelStatus,

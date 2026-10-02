@@ -78,23 +78,20 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
                 }
             };
 
-            let (selected_model, compute_device, groq_api_key, provider) = {
+            let settings = {
                 let app_state = app_handle.state::<AppState>();
-                let settings = load_settings_from_file(&app_state.settings_path);
-                (
-                    settings.model,
-                    settings.compute_device,
-                    settings.groq_api_key,
-                    settings.provider,
-                )
+                load_settings_from_file(&app_state.settings_path)
             };
             let init_msg = serde_json::json!({
                 "command": "init",
                 "models_dir": models_dir_str,
-                "compute_device": compute_device,
-                "model": selected_model,
-                "groq_api_key": groq_api_key,
-                "provider": provider,
+                "compute_device": settings.compute_device,
+                "model": settings.model,
+                "groq_api_key": settings.groq_api_key,
+                "provider": settings.provider,
+                "cloud_correct_uncertain": settings.cloud_correction_enabled,
+                "cloud_vocabulary": settings.cloud_vocabulary,
+                "cloud_speech_filter": true,
             });
             let _ =
                 child.write(format!("{}\n", serde_json::to_string(&init_msg).unwrap()).as_bytes());

@@ -12,9 +12,6 @@ const EMPTY_USAGE = (
   _lastHour: hour,
 });
 
-const IS_ANDROID_RUNTIME =
-  typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
-
 function localDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -43,6 +40,8 @@ function normalizeUsage(
   const hourChanged = usage._lastHour !== thisHour;
   if (hourChanged) {
     usage.audio_seconds_hourly = 0;
+    usage.llmInputTokensHourly = 0;
+    usage.llmOutputTokensHourly = 0;
     usage._lastHour = thisHour;
   }
   if (hourChanged || !usage.hourly_reset) {
@@ -59,17 +58,20 @@ function readUsage(now = Date.now()): GroqUsage | null {
   try {
     const raw = localStorage.getItem("groq_usage");
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as GroqUsage;
-    return normalizeUsage(parsed, now);
+    return normalizeExternalUsage(JSON.parse(raw), now);
   } catch {
     return null;
   }
 }
 
-function normalizeExternalUsage(value: unknown): GroqUsage | null {
+function normalizeExternalUsage(value: unknown, now = Date.now()): GroqUsage | null {
   if (typeof value !== "object" || value === null) return null;
-  const record = value as Record<string, unknown>;
-  const hourKey = Number(record.hour_key);
+  const record: Record<string, unknown> = Object.fromEntries(Object.entries(value));
+  const hourKey = Number(record.hour_key ?? record._hour_bucket ?? record._lastHour);
+  const tokens = (field: string): number => {
+    const count = Number(record[field]);
+    return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
+  };
   return normalizeUsage({
     date: typeof record.date === "string" ? record.date : "",
     audio_seconds: Number(record.audio_seconds),
@@ -78,7 +80,11 @@ function normalizeExternalUsage(value: unknown): GroqUsage | null {
     ),
     hourly_reset: typeof record.hourly_reset === "string" ? record.hourly_reset : "",
     _lastHour: Number.isFinite(hourKey) && hourKey > 0 ? hourKey : undefined,
-  });
+    llmInputTokens: tokens("llmInputTokens"),
+    llmOutputTokens: tokens("llmOutputTokens"),
+    llmInputTokensHourly: tokens("llmInputTokensHourly"),
+    llmOutputTokensHourly: tokens("llmOutputTokensHourly"),
+  }, now);
 }
 
 export function useGroqUsage() {
@@ -86,10 +92,10 @@ export function useGroqUsage() {
   const usageRef = useRef<GroqUsage | null>(null);
 
   const reloadGroqUsage = useCallback(async (): Promise<void> => {
-    if (IS_ANDROID_RUNTIME && window.__TAURI__?.core?.invoke) {
+    if (window.__TAURI__?.core?.invoke) {
       try {
         const value = await window.__TAURI__.core.invoke("get_groq_usage");
-        const usage = normalizeExternalUsage(value);
+        const usage = normalizeExternalUsage(value) ?? readUsage();
         usageRef.current = usage;
         setGroqUsage(usage);
       } catch {

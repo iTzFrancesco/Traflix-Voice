@@ -170,6 +170,25 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cloud_usage_reads_sidecar_audio_and_correction_counters() {
+        let usage: crate::state::GroqUsage = serde_json::from_value(serde_json::json!({
+            "date": "2026-10-02", "audio_seconds": 15.6,
+            "audio_seconds_hourly": 10.2, "hourly_reset": "15:00",
+            "_hour_bucket": 497000, "llmInputTokens": 226,
+            "llmOutputTokens": 86, "llmInputTokensHourly": 200,
+            "llmOutputTokensHourly": 80
+        }))
+        .unwrap();
+        assert_eq!(usage.audio_seconds_hourly, 10.2);
+        assert_eq!(usage.hour_key, 497000);
+        assert_eq!(usage.llm_input_tokens, 226);
+        assert_eq!(usage.llm_output_tokens_hourly, 80);
+        let encoded = serde_json::to_value(usage).unwrap();
+        assert_eq!(encoded["audioSecondsHourly"], serde_json::json!(10.2_f32));
+        assert_eq!(encoded["llmOutputTokens"], 86);
+    }
+
     use super::*;
 
     #[test]
@@ -210,6 +229,8 @@ mod tests {
         assert_eq!(s.model, "parakeet-tdt-0.6b-v3-int8");
         assert_eq!(s.selected_language, "it");
         assert!(s.keep_clipboard_result);
+        assert!(s.cloud_correction_enabled);
+        assert!(s.cloud_vocabulary.is_empty());
     }
 
     #[test]
@@ -229,6 +250,8 @@ mod tests {
         }"#;
         let settings: AppSettings = serde_json::from_str(legacy).unwrap();
         assert!(settings.keep_clipboard_result);
+        assert!(settings.cloud_correction_enabled);
+        assert!(settings.cloud_vocabulary.is_empty());
 
         let explicit = r#"{
             "hotkey": "XBUTTON2",
@@ -267,6 +290,8 @@ mod tests {
             groq_api_key: String::new(),
             provider: "local".to_string(),
             widget_mode: "always".to_string(),
+            cloud_correction_enabled: false,
+            cloud_vocabulary: "Example term".to_string(),
         };
 
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -286,6 +311,8 @@ mod tests {
         assert_eq!(loaded.selected_language, original.selected_language);
         assert_eq!(loaded.compute_device, original.compute_device);
         assert!(!loaded.hold_to_speak);
+        assert!(!loaded.cloud_correction_enabled);
+        assert_eq!(loaded.cloud_vocabulary, "Example term");
 
         // Modify and save again
         let modified = AppSettings {
