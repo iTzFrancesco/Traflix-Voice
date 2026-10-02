@@ -18,9 +18,9 @@ GROQ_MULTIPART_BOUNDARY = "------------------------traflix-voice-8c4e9b"
 VOLUME_FLOOR_DB = -58.0
 VOLUME_CEILING_DB = -12.0
 VOLUME_DB_SCALE = 100.0 / (VOLUME_CEILING_DB - VOLUME_FLOOR_DB)
-CLOUD_SILENCE_THRESHOLD = 0.003
+# Trim only audio below one PCM16 quantization step. A volume gate cannot
+# distinguish background noise from quiet consonants or whispered words.
+CLOUD_SILENCE_THRESHOLD = 1.0 / 32767.0
 CLOUD_SILENCE_PADDING_SECONDS = 0.32
 # Drain to keep tail after stop (reverberation / weak fricative)
 CLOUD_TAIL_DRAIN_SECONDS = 0.22
-# Pre-roll to compensate press->stream latency (hotkey 8ms + IPC + InputStream open)
-CLOUD_PRE_ROLL_SECONDS = 0.30
