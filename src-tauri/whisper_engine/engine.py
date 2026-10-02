@@ -3,6 +3,8 @@ import json
 import queue
 import threading
 import concurrent.futures
+from functools import partial
+from pathlib import Path
 import numpy as np
 import sounddevice as sd
 
@@ -24,9 +26,11 @@ class _RecordingSession:
         self,
         capture_queue=None,
         provider=None,
+        cloud_options=None,
     ):
         self.queue = capture_queue if capture_queue is not None else queue.SimpleQueue()
         self.provider = provider
+        self.cloud_options = cloud_options
         self.active = threading.Event()
         self.active.set()
         # The callback runs under the CPython GIL. Reading this per-session
@@ -89,6 +93,12 @@ class WhisperEngine:
         self.compute_device = "cpu"
         self.groq_api_key = None
         self.provider = "local"
+        self.cloud_correct_uncertain = False
+        self.cloud_vocabulary = ""
+        self.cloud_speech_filter = False
+        self._speech_gate = None
+        self._speech_gate_lock = threading.Lock()
+        self._speech_gate_prepared = False
         self._loading_in_progress = False
         # Capture must be independent from cloud/local processing. A request
         # can still be waiting on Groq when the user starts the next clip.
@@ -240,7 +250,9 @@ class WhisperEngine:
     ):
         """Dispatch recording without paying per-session thread startup."""
         audio_module.reset_volume_state()
-        session = _RecordingSession(provider=self.provider)
+        cloud_options = ((self.cloud_correct_uncertain, self.cloud_vocabulary, self.cloud_speech_filter)
+                         if self.cloud_correct_uncertain or self.cloud_vocabulary or self.cloud_speech_filter else None)
+        session = _RecordingSession(provider=self.provider, cloud_options=cloud_options)
         with self._recording_lock:
             previous = self._active_session
             self._active_session = session
@@ -258,6 +270,8 @@ class WhisperEngine:
             True,
         )
         if session.provider == "cloud":
+            if self.cloud_speech_filter:
+                threading.Thread(target=self.prepare_speech_gate, daemon=True).start()
             key = self.groq_api_key
             transcriber.prewarm_groq_connection(
                 key,
@@ -272,6 +286,34 @@ class WhisperEngine:
         self.stop_recording()
         self._capture_executor.shutdown(wait=True, cancel_futures=True)
         self._transcription_executor.shutdown(wait=False, cancel_futures=True)
+        gate = self._speech_gate
+        if gate is not None:
+            gate.close()
+
+    def prepare_speech_gate(self):
+        with self._speech_gate_lock:
+            if self._speech_gate_prepared or self._shutting_down:
+                return
+            self._speech_gate_prepared = True
+        try:
+            from whisper_engine.speech_gate import SpeechGate
+            bundle_root = getattr(sys, "_MEIPASS", None)
+            path = (Path(bundle_root) / "speech-vad" / "silero_vad.onnx" if bundle_root
+                    else Path(__file__).resolve().parents[1] / "target" / "speech-vad" / "silero_vad.onnx")
+            gate = SpeechGate(path)
+            with self._speech_gate_lock:
+                if self._shutting_down:
+                    gate.close()
+                    return
+                self._speech_gate = gate
+            if not gate.available:
+                self.log({"status": "warning", "message": "Filtro del silenzio non disponibile. Verifica il pacchetto desktop."})
+        except Exception:
+            self.log({"status": "warning", "message": "Filtro del silenzio non disponibile. Verifica il pacchetto desktop."})
+
+    def _detect_cloud_speech(self, recording):
+        gate = self._speech_gate
+        return gate.detect(recording) if gate is not None else None
 
     def audio_callback(
         self,
@@ -301,10 +343,15 @@ class WhisperEngine:
         language,
         recording_duration,
         log_func=None,
+        cloud_options=None,
     ):
         log = log_func or self.log
+        correct_uncertain, vocabulary, speech_filter = cloud_options or (
+            self.cloud_correct_uncertain, self.cloud_vocabulary, self.cloud_speech_filter)
         transcriber.transcribe_cloud(recording, language, recording_duration, self.groq_api_key,
-                                     lambda: self._shutting_down, log, self.models_dir)
+                                     lambda: self._shutting_down, log, self.models_dir,
+                                     correct_uncertain=correct_uncertain, vocabulary=vocabulary,
+                                     speech_filter=speech_filter, speech_detector=self._detect_cloud_speech)
 
     def _transcribe_local(self, recording, model_size, language, recording_duration, log_func=None):
         log = log_func or self.log
@@ -325,6 +372,7 @@ class WhisperEngine:
         language,
         recording_duration,
         provider,
+        cloud_options=None,
     ):
         def tagged_log(data):
             # Tag every result with the backend that produced it so a dictation
@@ -336,7 +384,11 @@ class WhisperEngine:
 
         try:
             if provider == "cloud":
-                self._transcribe_cloud(recording, language, recording_duration, tagged_log)
+                if cloud_options is None:
+                    self._transcribe_cloud(recording, language, recording_duration, tagged_log)
+                else:
+                    self._transcribe_cloud(recording, language, recording_duration, tagged_log,
+                                           cloud_options=cloud_options)
             else:
                 self._transcribe_local(recording, model_size, language, recording_duration, tagged_log)
         except Exception as e:
@@ -447,9 +499,13 @@ class WhisperEngine:
             # unprocessed level.
             audio_module.apply_automatic_gain(recording)
 
+            process = (
+                partial(self._process_recording, cloud_options=session.cloud_options)
+                if session.cloud_options is not None else self._process_recording
+            )
             if defer_processing:
                 self._transcription_executor.submit(
-                    self._process_recording,
+                    process,
                     recording,
                     model_size,
                     language,
@@ -457,7 +513,7 @@ class WhisperEngine:
                     provider,
                 )
             else:
-                self._process_recording(
+                process(
                     recording,
                     model_size,
                     language,

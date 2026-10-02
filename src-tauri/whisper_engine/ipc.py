@@ -3,6 +3,7 @@ import json
 import threading
 
 from whisper_engine.constants import DEFAULT_LOCAL_MODEL, GROQ_MODEL
+from whisper_engine.cloud_quality import normalize_vocabulary
 
 
 _FAST_STATUS_LINES = {
@@ -41,6 +42,11 @@ def handle_command(cmd, data, engine):
         engine.models_dir = data.get("models_dir")
         engine.groq_api_key = data.get("groq_api_key")
         engine.provider = data.get("provider", "local")
+        engine.cloud_correct_uncertain = data.get("cloud_correct_uncertain") is True
+        engine.cloud_vocabulary = normalize_vocabulary(data.get("cloud_vocabulary"))
+        engine.cloud_speech_filter = data.get("cloud_speech_filter") is True
+        if engine.provider == "cloud" and engine.cloud_speech_filter:
+            threading.Thread(target=engine.prepare_speech_gate, daemon=True).start()
         preload_model = data.get("model", DEFAULT_LOCAL_MODEL)
         engine.log({"status": "info", "message": f"Cartella modelli: {engine.models_dir}, provider: {engine.provider}"})
         if engine.provider == "local":
@@ -99,6 +105,9 @@ def handle_command(cmd, data, engine):
             threading.Thread(target=engine._preload_default_model, args=(preload_model,), daemon=True).start()
     elif cmd == "transcribe":
         engine.provider = data.get("provider", "local")
+        engine.cloud_correct_uncertain = data.get("cloud_correct_uncertain", engine.cloud_correct_uncertain) is True
+        engine.cloud_vocabulary = normalize_vocabulary(data.get("cloud_vocabulary", engine.cloud_vocabulary))
+        engine.cloud_speech_filter = data.get("cloud_speech_filter", engine.cloud_speech_filter) is True
         engine.start_transcription(
             data.get("device"),
             data.get("model", DEFAULT_LOCAL_MODEL),

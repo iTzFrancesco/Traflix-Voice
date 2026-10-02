@@ -6,6 +6,7 @@ import hashlib
 import subprocess
 import sys
 import venv
+from prepare_speech_model import prepare_speech_model
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +56,7 @@ def main() -> int:
         return 0
 
     isolated_python = build_python()
+    speech_model_dir = prepare_speech_model()
     entry_point = TAURI_DIR / "whisper_engine.py"
     command = [
         str(isolated_python),
@@ -78,6 +80,7 @@ def main() -> int:
 
     command.extend(("--hidden-import", "sherpa_onnx"))
     command.extend(("--collect-binaries", "sherpa_onnx"))
+    command.extend(("--add-data", f"{speech_model_dir};speech-vad"))
 
     command.append(str(entry_point))
     subprocess.run(command, cwd=TAURI_DIR, check=True)
