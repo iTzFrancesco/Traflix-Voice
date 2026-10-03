@@ -120,10 +120,8 @@ jobs:
           body: |
             Android private preview ${{ steps.release.outputs.version }}.
 
-            This release adds transcript recovery when Android cannot insert
-            text, keeps completed dictation available across editor changes,
-            and routes history deletion and clearing through the native data
-            stores. The attached universal APK is signed for direct installation.
+            The attached universal APK is signed for direct installation and
+            built by GitHub Actions for the Android preview channel.
           prerelease: true
           make_latest: false
           files: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk

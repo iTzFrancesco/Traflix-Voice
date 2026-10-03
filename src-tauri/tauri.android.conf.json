@@ -1,5 +1,5 @@
 {
-  "version": "0.1.20",
+  "version": "0.1.21",
   "build": {
     "beforeBuildCommand": "npm run build"
   },
@@ -23,7 +23,7 @@
   "bundle": {
     "resources": [],
     "android": {
-      "versionCode": 1006018
+      "versionCode": 1006019
     }
   }
 }
