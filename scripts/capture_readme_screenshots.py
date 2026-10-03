@@ -7,6 +7,7 @@ Regenerate after visible UI changes so the GitHub hero stays current::
     python scripts/capture_readme_screenshots.py
 """
 import io
+import json
 import shutil
 import subprocess
 import sys
@@ -24,11 +25,12 @@ from test_desktop_voice_flow import TAURI_MOCK  # noqa: E402
 PORT = 1431
 BASE_URL = f"http://127.0.0.1:{PORT}"
 OUT_PATH = REPO_ROOT / "docs" / "assets" / "readme" / "traflix-voice-desktop.webp"
+APP_VERSION = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))["version"]
 
 # Same shape as the e2e mock, but with release-like data so the hero shows
 # the current Home tab instead of an empty state.
 MOCK = (
-    TAURI_MOCK.replace('"1.6.2-e2e"', '"1.6.9"')
+    TAURI_MOCK.replace('"1.6.2-e2e"', f'"{APP_VERSION}"')
     .replace('cloudVocabulary: "Traflix Voice, Groq Cloud"',
              'cloudVocabulary: "Traflix Streaming\\nTraflix Voice\\nsubagent"')
     .replace("const stats = { total_words: 0, avg_wpm: 0, total_time: 0 };",

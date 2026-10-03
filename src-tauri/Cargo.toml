@@ -1,6 +1,6 @@
 [package]
 name = "Traflix-Voice"
-version = "1.6.9"
+version = "1.7.0"
 description = "Dettatura vocale locale fornita da  OpenAI Whisper."
 authors = ["Francesco | Traflix"]
 edition = "2021"
@@ -34,4 +34,4 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 cpal = "0.15"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
