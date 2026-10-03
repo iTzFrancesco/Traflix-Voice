@@ -91,7 +91,7 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
                 "provider": settings.provider,
                 "cloud_correct_uncertain": settings.cloud_correction_enabled,
                 "cloud_vocabulary": settings.cloud_vocabulary,
-                "cloud_speech_filter": true,
+                "cloud_speech_filter": settings.cloud_speech_filter,
             });
             let _ =
                 child.write(format!("{}\n", serde_json::to_string(&init_msg).unwrap()).as_bytes());

@@ -410,7 +410,7 @@ export default function App() {
           provider: selectedProvider,
           cloud_correct_uncertain: settings?.cloudCorrectionEnabled ?? true,
           cloud_vocabulary: settings?.cloudVocabulary ?? "",
-          cloud_speech_filter: true,
+          cloud_speech_filter: settings?.cloudSpeechFilter ?? true,
         }),
       });
     } catch (err) {
@@ -727,8 +727,10 @@ export default function App() {
             onUnloadModel={handleUnloadModel}
             cloudCorrectionEnabled={settings?.cloudCorrectionEnabled ?? true}
             cloudVocabulary={settings?.cloudVocabulary ?? ""}
+            cloudSpeechFilter={settings?.cloudSpeechFilter ?? true}
             onCloudCorrectionChange={(value) => handleSettingChange("cloudCorrectionEnabled", value)}
             onCloudVocabularyChange={(value) => handleSettingChange("cloudVocabulary", value)}
+            onCloudSpeechFilterChange={(value) => handleSettingChange("cloudSpeechFilter", value)}
             vocabularyFocusRequest={vocabularyFocusRequest}
           />
         )}

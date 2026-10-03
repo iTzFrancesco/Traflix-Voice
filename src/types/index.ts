@@ -14,6 +14,7 @@ export interface AppSettings {
   widgetMode?: string;
   cloudCorrectionEnabled?: boolean;
   cloudVocabulary?: string;
+  cloudSpeechFilter?: boolean;
 }
 
 export interface AppStats {

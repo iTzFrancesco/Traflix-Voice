@@ -42,6 +42,8 @@ pub struct AppSettings {
     pub cloud_correction_enabled: bool,
     #[serde(rename = "cloudVocabulary", default)]
     pub cloud_vocabulary: String,
+    #[serde(rename = "cloudSpeechFilter", default = "default_cloud_speech_filter")]
+    pub cloud_speech_filter: bool,
 }
 
 fn default_language() -> String {
@@ -76,6 +78,13 @@ fn default_cloud_correction() -> bool {
     true
 }
 
+fn default_cloud_speech_filter() -> bool {
+    // The local Silero gate drops silent uploads before they reach Groq.
+    // Existing installs never stored this key, so default-on preserves
+    // their behavior; the IA tab now exposes the toggle.
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
@@ -94,6 +103,7 @@ impl Default for AppSettings {
             widget_mode: "always".to_string(),
             cloud_correction_enabled: true,
             cloud_vocabulary: String::new(),
+            cloud_speech_filter: true,
         }
     }
 }

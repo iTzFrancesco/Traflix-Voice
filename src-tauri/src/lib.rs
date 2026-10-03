@@ -231,6 +231,7 @@ mod tests {
         assert!(s.keep_clipboard_result);
         assert!(s.cloud_correction_enabled);
         assert!(s.cloud_vocabulary.is_empty());
+        assert!(s.cloud_speech_filter);
     }
 
     #[test]
@@ -252,6 +253,9 @@ mod tests {
         assert!(settings.keep_clipboard_result);
         assert!(settings.cloud_correction_enabled);
         assert!(settings.cloud_vocabulary.is_empty());
+        // A settings.json written before the speech-filter toggle existed
+        // must keep dropping silent uploads exactly as before.
+        assert!(settings.cloud_speech_filter);
 
         let explicit = r#"{
             "hotkey": "XBUTTON2",
@@ -292,6 +296,7 @@ mod tests {
             widget_mode: "always".to_string(),
             cloud_correction_enabled: false,
             cloud_vocabulary: "Example term".to_string(),
+            cloud_speech_filter: false,
         };
 
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -313,6 +318,7 @@ mod tests {
         assert!(!loaded.hold_to_speak);
         assert!(!loaded.cloud_correction_enabled);
         assert_eq!(loaded.cloud_vocabulary, "Example term");
+        assert!(!loaded.cloud_speech_filter);
 
         // Modify and save again
         let modified = AppSettings {
@@ -416,6 +422,7 @@ mod tests {
         assert!(settings.hold_to_speak);
         assert_eq!(settings.widget_mode, "always");
         assert!(settings.keep_clipboard_result);
+        assert!(settings.cloud_speech_filter);
 
         // Round-trip back to JSON
         let serialized = serde_json::to_string(&settings).unwrap();
@@ -427,6 +434,7 @@ mod tests {
         assert!(serialized.contains("\"autoPaste\""));
         assert!(serialized.contains("\"widgetMode\""));
         assert!(serialized.contains("\"keepClipboardResult\""));
+        assert!(serialized.contains("\"cloudSpeechFilter\""));
     }
 
     #[test]

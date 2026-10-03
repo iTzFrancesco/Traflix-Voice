@@ -13,8 +13,10 @@ interface IATabProps {
   onUnloadModel?: () => void;
   cloudCorrectionEnabled: boolean;
   cloudVocabulary: string;
+  cloudSpeechFilter: boolean;
   onCloudCorrectionChange: (enabled: boolean) => void;
   onCloudVocabularyChange: (vocabulary: string) => void;
+  onCloudSpeechFilterChange: (enabled: boolean) => void;
   vocabularyFocusRequest: number;
 }
 
@@ -29,8 +31,10 @@ export default function IATab({
   onUnloadModel,
   cloudCorrectionEnabled,
   cloudVocabulary,
+  cloudSpeechFilter,
   onCloudCorrectionChange,
   onCloudVocabularyChange,
+  onCloudSpeechFilterChange,
   vocabularyFocusRequest,
 }: IATabProps) {
   const [vocabularyDraft, setVocabularyDraft] = useState(displayVocabulary(cloudVocabulary));
@@ -167,6 +171,17 @@ export default function IATab({
             />
             <span>
               <span className="block text-[0.85rem] font-bold text-[var(--ink)]">Correzione solo quando serve</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-3 cursor-pointer" title="Rileva la voce sul PC prima di inviare l'audio a Groq. Disattivalo solo se i dettati brevi o sussurrati vengono scartati come silenzio.">
+            <input
+              type="checkbox"
+              checked={cloudSpeechFilter}
+              onChange={(event) => onCloudSpeechFilterChange(event.target.checked)}
+              className="mt-1 accent-[var(--primary-orange)]"
+            />
+            <span>
+              <span className="block text-[0.85rem] font-bold text-[var(--ink)]">Filtro del silenzio</span>
             </span>
           </label>
           <div>
