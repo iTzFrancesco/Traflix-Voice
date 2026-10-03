@@ -62,21 +62,6 @@ export function useHotkey() {
     recordingRef.current = isRecording;
   }, [isRecording]);
 
-  // Mentre si registra una nuova scorciatoia, l'hook nativo che ingoia
-  // XBUTTON1/2 va messo in pausa, altrimenti il WebView non riceve il click
-  // e il pulsante non può essere catturato come nuovo hotkey. Al termine
-  // (o smontando il componente) la soppressione riparte da sola.
-  useEffect(() => {
-    window.__TAURI__?.core
-      ?.invoke("set_hotkey_capture_active", { active: isRecording })
-      .catch(() => {});
-    return () => {
-      window.__TAURI__?.core
-        ?.invoke("set_hotkey_capture_active", { active: false })
-        .catch(() => {});
-    };
-  }, [isRecording]);
-
   const startRecording = useCallback(() => {
     recordedModifiersRef.current = [];
     pressedModifiersRef.current.clear();
