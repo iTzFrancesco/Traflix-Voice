@@ -1,7 +1,13 @@
 import { useCallback } from "react";
 
 const IS_DEV = import.meta.env.DEV;
-interface SidebarProps { activeTab: string; onTabChange: (tab: string) => void; appVersion: string; }
+interface SidebarProps {
+  activeTab: string;
+  onTabChange: (tab: string) => void;
+  appVersion: string;
+  isCheckingForUpdates: boolean;
+  onCheckForUpdates: () => void;
+}
 
 const tabs = [
   { id: "home", label: "Console", short: "C", svg: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>' },
@@ -11,7 +17,13 @@ const tabs = [
   { id: "sistema", label: "Sistema", short: "S", svg: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09A1.65 1.65 0 0 0 19.4 15z"/>' },
 ];
 
-export default function Sidebar({ activeTab, onTabChange, appVersion }: SidebarProps) {
+export default function Sidebar({
+  activeTab,
+  onTabChange,
+  appVersion,
+  isCheckingForUpdates,
+  onCheckForUpdates,
+}: SidebarProps) {
   const handleKeyDown = useCallback((e: React.KeyboardEvent, index: number) => {
     const next = e.key === "ArrowDown" ? index + 1 : e.key === "ArrowUp" ? index - 1 : null;
     if (next !== null) {
@@ -30,6 +42,39 @@ export default function Sidebar({ activeTab, onTabChange, appVersion }: SidebarP
         <span className="sr-only">{tab.label}</span>{active && <span className="absolute -left-2 top-3 h-4 w-[2px] rounded-r bg-[var(--accent)]" />}
       </button>; })}
     </div>
-    <div className="mt-auto flex flex-col items-center gap-1.5"><span className={`rounded-md px-1.5 py-1 text-[.58rem] font-extrabold tracking-[.16em] ${IS_DEV ? "bg-[#ff626b]/15 text-[#ff626b] shadow-[0_0_12px_rgba(255,98,107,.18)]" : "text-[#77736d]"}`}>{IS_DEV ? "DEV" : "VOICE"}</span><span className="font-mono text-[.78rem] font-bold tracking-[-.05em] text-[#d7d2ca]">v{appVersion || "…"}</span></div>
+    <div className="mt-auto flex flex-col items-center gap-1.5">
+      {!IS_DEV && (
+        <button
+          type="button"
+          title={isCheckingForUpdates ? "Controllo aggiornamenti in corso" : "Controlla aggiornamenti"}
+          aria-label="Controlla aggiornamenti"
+          aria-busy={isCheckingForUpdates}
+          disabled={isCheckingForUpdates}
+          onClick={onCheckForUpdates}
+          className="mb-2 flex h-9 w-9 items-center justify-center rounded-xl text-[#8d8a85] transition-colors hover:bg-white/[.055] hover:text-[#e4e0d9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-wait disabled:opacity-60"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`h-4 w-4 ${isCheckingForUpdates ? "animate-spin" : ""}`}
+            aria-hidden="true"
+          >
+            <path d="M20 7v5h-5" />
+            <path d="M4 17v-5h5" />
+            <path d="M5.6 9A7 7 0 0 1 17 5.5L20 12" />
+            <path d="M18.4 15A7 7 0 0 1 7 18.5L4 12" />
+          </svg>
+          <span className="sr-only">
+            {isCheckingForUpdates ? "Controllo aggiornamenti in corso" : "Controlla aggiornamenti"}
+          </span>
+        </button>
+      )}
+      <span className={`rounded-md px-1.5 py-1 text-[.58rem] font-extrabold tracking-[.16em] ${IS_DEV ? "bg-[#ff626b]/15 text-[#ff626b] shadow-[0_0_12px_rgba(255,98,107,.18)]" : "text-[#77736d]"}`}>{IS_DEV ? "DEV" : "VOICE"}</span>
+      <span className="font-mono text-[.78rem] font-bold tracking-[-.05em] text-[#d7d2ca]">v{appVersion || "…"}</span>
+    </div>
   </nav>;
 }

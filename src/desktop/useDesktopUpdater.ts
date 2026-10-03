@@ -33,6 +33,7 @@ export function useDesktopUpdater({
   showToast,
 }: UseDesktopUpdaterOptions) {
   const [update, setUpdate] = useState<DesktopUpdateNotice | null>(null);
+  const [isCheckingForUpdate, setIsCheckingForUpdate] = useState(false);
   const updateRef = useRef<Update | null>(null);
   const isBusyNowRef = useRef(isBusyNow);
   const downloadCompleteRef = useRef(false);
@@ -129,12 +130,19 @@ export function useDesktopUpdater({
 
   const checkForDesktopUpdate = useCallback(
     async (force = false) => {
-      if (!enabled || !window.__TAURI__?.core?.invoke || updateRef.current) return;
+      if (!enabled || !window.__TAURI__?.core?.invoke) return;
+      if (updateRef.current) {
+        if (force) {
+          showToast(`È già disponibile Traflix Voice ${updateRef.current.version}.`, "info");
+        }
+        return;
+      }
       if (checkInFlightRef.current) return checkInFlightRef.current;
 
       const now = Date.now();
       if (!force && now - lastCheckAtRef.current < UPDATE_CHECK_INTERVAL_MS) return;
       lastCheckAtRef.current = now;
+      setIsCheckingForUpdate(true);
 
       let checkPromise: Promise<void>;
       checkPromise = (async () => {
@@ -142,6 +150,7 @@ export function useDesktopUpdater({
           const latest = await checkForUpdate({ timeout: 20_000 });
           if (!latest) {
             setUpdate(null);
+            if (force) showToast("Traflix Voice è già aggiornato.", "success");
             return;
           }
 
@@ -162,6 +171,11 @@ export function useDesktopUpdater({
           );
         } catch (error) {
           console.warn("[desktop-update] check failed:", error);
+          if (force) {
+            showToast("Impossibile controllare gli aggiornamenti. Verifica la connessione e riprova.", "error");
+          }
+        } finally {
+          setIsCheckingForUpdate(false);
         }
       })().finally(() => {
         if (checkInFlightRef.current === checkPromise) {
@@ -204,8 +218,15 @@ export function useDesktopUpdater({
     await checkForDesktopUpdate(true);
   }, [checkForDesktopUpdate, downloadUpdate, installUpdate]);
 
+  const checkForUpdateNow = useCallback(
+    () => checkForDesktopUpdate(true),
+    [checkForDesktopUpdate],
+  );
+
   return {
     update,
+    isCheckingForUpdate,
+    checkForUpdateNow,
     isInstallingRef,
     retryUpdate,
     downloadUpdate,

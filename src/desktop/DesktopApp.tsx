@@ -126,6 +126,8 @@ export default function App() {
     transcriptionStatus === "processing";
   const {
     update: desktopUpdate,
+    isCheckingForUpdate,
+    checkForUpdateNow,
     isInstallingRef: updateInstallingRef,
     retryUpdate,
     downloadUpdate,
@@ -690,7 +692,13 @@ export default function App() {
     <div
       className="app-canvas flex h-dvh w-dvw"
     >
-      <Sidebar activeTab={activeTab} onTabChange={handleTabChange} appVersion={appVersion} />
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        appVersion={appVersion}
+        isCheckingForUpdates={isCheckingForUpdate}
+        onCheckForUpdates={() => void checkForUpdateNow()}
+      />
 
       <main className="flex-1 px-5 py-6 overflow-y-auto flex flex-col relative">
         <DesktopUpdateNotice
