@@ -135,6 +135,7 @@ def measure(client: httpx.Client, samples: np.ndarray, language: str,
         if not recording.size:
             row["error_type"] = "SilentInput"
             return row
+        recording = transcriber.pad_abrupt_clip_edges(recording)
         cloud_language = None if case == "auto" else transcriber._normalize_cloud_language(language)
         payload = encode_payload(recording, cloud_language, case)
         row.update(payload_bytes=len(payload), uploaded_audio_seconds=recording.size / SAMPLE_RATE)
