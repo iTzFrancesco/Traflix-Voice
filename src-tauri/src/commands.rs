@@ -73,6 +73,19 @@ pub async fn save_settings<R: Runtime>(
     Ok(())
 }
 
+/// Mette in pausa/riattiva la soppressione XBUTTON mentre le impostazioni
+/// registrano un nuovo hotkey, così il WebView può catturare il click.
+/// No-op fuori desktop.
+#[tauri::command]
+pub async fn set_hotkey_capture_active(active: bool) -> Result<(), String> {
+    #[cfg(desktop)]
+    crate::mouse_suppress::set_capture_active(active);
+    #[cfg(not(desktop))]
+    let _ = active;
+
+    Ok(())
+}
+
 /// Aggiorna le statistiche e le salva su disco
 #[tauri::command]
 pub async fn update_stats(

@@ -2,6 +2,8 @@ mod commands;
 mod hotkey;
 #[cfg(desktop)]
 mod hotkey_runtime;
+#[cfg(desktop)]
+mod mouse_suppress;
 mod settings;
 #[cfg(desktop)]
 mod sidecar;
@@ -87,6 +89,10 @@ pub fn run() {
         {
             let app_handle = app.handle().clone();
             hotkey_runtime::spawn(app_handle.clone(), hotkey_config);
+            // Ingoia XBUTTON/MButton configurati come hotkey così non navigano
+            // nel browser mentre Traflix registra (alla chiusura tutto torna
+            // normale perché l'hook muore col processo).
+            mouse_suppress::spawn();
 
             #[cfg(debug_assertions)]
             let sidecar_path =
@@ -147,6 +153,7 @@ pub fn run() {
             is_dev,
             load_settings,
             save_settings,
+            set_hotkey_capture_active,
             get_stats,
             update_stats,
             get_audio_devices,

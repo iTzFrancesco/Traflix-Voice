@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::hotkey::is_key_pressed;
+use crate::mouse_suppress;
 use crate::state::HotkeyConfig;
 
 // Keep the cloud record/stop gesture responsive without waking the process at
@@ -30,6 +31,9 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, hotkey_config: Arc<RwLock<Vec
             thread::sleep(POLL_INTERVAL);
 
             let config = hotkey_config.read().unwrap();
+            // Tiene aggiornata la maschera dell'hook mouse: solo i pulsanti
+            // configurati come hotkey singolo vengono ingoiati.
+            mouse_suppress::refresh_from_configs(&config);
             if config.is_empty() {
                 // A malformed/cleared configuration must not leave hold-to-
                 // speak stuck in the active state forever.
