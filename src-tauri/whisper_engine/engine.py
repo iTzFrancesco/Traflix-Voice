@@ -2,6 +2,7 @@ import sys
 import json
 import queue
 import threading
+import time
 import concurrent.futures
 from functools import partial
 from pathlib import Path
@@ -44,6 +45,11 @@ class _RecordingSession:
         # cannot leave the UI stuck in `processing` with no result to follow.
         self.listening_notified = False
         self.processing_notified = False
+        # Onset diagnostics: created_at marks the transcribe command, while
+        # first_block_at marks the first microphone block. Their gap is the
+        # window in which speech before the `listening` signal is lost.
+        self.created_at = time.monotonic()
+        self.first_block_at = None
         self._stop_lock = threading.Lock()
         self._stop_sent = False
         self._drain_timer = None
@@ -373,6 +379,7 @@ class WhisperEngine:
         recording_duration,
         provider,
         cloud_options=None,
+        capture_latency_ms=None,
     ):
         def tagged_log(data):
             # Tag every result with the backend that produced it so a dictation
@@ -380,6 +387,12 @@ class WhisperEngine:
             # any future history consumers. Other statuses stay untouched.
             if data.get("status") == "result" and "provider" not in data:
                 data = {**data, "provider": provider}
+            if (
+                data.get("status") == "result"
+                and capture_latency_ms is not None
+                and "capture_latency_ms" not in data
+            ):
+                data = {**data, "capture_latency_ms": capture_latency_ms}
             self.log(data)
 
         try:
@@ -468,6 +481,8 @@ class WhisperEngine:
                     data = session.queue.get()
                     if data is None:
                         break
+                    if session.first_block_at is None:
+                        session.first_block_at = time.monotonic()
                     audio_data.append(data)
 
             # Early `processing` from stop_recording() already notified the UI;
@@ -503,6 +518,10 @@ class WhisperEngine:
                 partial(self._process_recording, cloud_options=session.cloud_options)
                 if session.cloud_options is not None else self._process_recording
             )
+            if session.first_block_at is not None:
+                capture_latency_ms = int((session.first_block_at - session.created_at) * 1000)
+            else:
+                capture_latency_ms = None
             if defer_processing:
                 self._transcription_executor.submit(
                     process,
@@ -511,6 +530,7 @@ class WhisperEngine:
                     language,
                     recording_duration,
                     provider,
+                    capture_latency_ms=capture_latency_ms,
                 )
             else:
                 process(
@@ -519,6 +539,7 @@ class WhisperEngine:
                     language,
                     recording_duration,
                     provider,
+                    capture_latency_ms=capture_latency_ms,
                 )
 
         except Exception as e:

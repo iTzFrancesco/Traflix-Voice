@@ -1,4 +1,5 @@
 import io
+import struct
 import unittest
 import wave
 from unittest.mock import patch
@@ -14,7 +15,13 @@ from whisper_engine.constants import (
     GROQ_TRANSCRIPTION_URL,
     SAMPLE_RATE,
 )
-from whisper_engine.transcriber import encode_cloud_multipart, encode_wav, trim_cloud_silence
+from whisper_engine.transcriber import (
+    _cloud_multipart_prefix,
+    encode_cloud_multipart,
+    encode_wav,
+    pad_abrupt_clip_edges,
+    trim_cloud_silence,
+)
 
 
 class TestCloudPayload(unittest.TestCase):
@@ -235,6 +242,121 @@ class TestCloudPayload(unittest.TestCase):
 
         get_client.assert_not_called()
         self.assertEqual(events[-1]["status"], "ready")
+
+    def test_pad_abrupt_clip_edges_adds_silence_only_on_active_edges(self):
+        from whisper_engine.constants import CLOUD_EDGE_PAD_SECONDS
+
+        pad = int(SAMPLE_RATE * CLOUD_EDGE_PAD_SECONDS)
+        speech = np.full(8000, 0.05, dtype=np.float32)
+
+        both = pad_abrupt_clip_edges(speech)
+        self.assertEqual(both.size, speech.size + pad * 2)
+        np.testing.assert_array_equal(both[:pad], np.zeros(pad, dtype=np.float32))
+        np.testing.assert_array_equal(both[pad : pad + speech.size], speech)
+        np.testing.assert_array_equal(both[-pad:], np.zeros(pad, dtype=np.float32))
+
+        leading_only = np.concatenate([speech, np.zeros(4000, dtype=np.float32)])
+        padded = pad_abrupt_clip_edges(leading_only)
+        self.assertEqual(padded.size, leading_only.size + pad)
+        np.testing.assert_array_equal(padded[:pad], np.zeros(pad, dtype=np.float32))
+
+        trailing_only = np.concatenate([np.zeros(4000, dtype=np.float32), speech])
+        padded = pad_abrupt_clip_edges(trailing_only)
+        self.assertEqual(padded.size, trailing_only.size + pad)
+        np.testing.assert_array_equal(padded[-pad:], np.zeros(pad, dtype=np.float32))
+
+    def test_pad_abrupt_clip_edges_leaves_clean_and_empty_clips_unchanged(self):
+        clean = np.concatenate(
+            [np.zeros(4000, dtype=np.float32),
+             np.full(8000, 0.05, dtype=np.float32),
+             np.zeros(4000, dtype=np.float32)]
+        )
+        self.assertIs(pad_abrupt_clip_edges(clean), clean)
+
+        empty = np.array([], dtype=np.float32)
+        self.assertIs(pad_abrupt_clip_edges(empty), empty)
+
+    def test_cloud_prompt_always_anchors_the_product_name(self):
+        self.assertIn(b"Traflix Voice", _cloud_multipart_prefix("it"))
+        self.assertIn(b"Traflix Voice", _cloud_multipart_prefix("it", vocabulary="parola personale"))
+
+        already = _cloud_multipart_prefix("it", vocabulary="Traflix Voice, Groq Cloud")
+        self.assertEqual(already.count(b"Traflix Voice"), 1)
+        self.assertIn("Groq Cloud".encode("utf-8"), already)
+
+        lower = _cloud_multipart_prefix("it", vocabulary="traflix voice")
+        self.assertEqual(lower.count(b"traflix voice"), 1)
+
+    def test_abrupt_cloud_onset_is_padded_before_upload(self):
+        from whisper_engine.constants import CLOUD_EDGE_PAD_SECONDS
+
+        captured = {}
+
+        def handler(request):
+            captured["request"] = request
+            return httpx.Response(200, text=" ciao ", request=request)
+
+        client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={
+                "Authorization": "Bearer fake-key",
+                "Content-Type": f"multipart/form-data; boundary={GROQ_MULTIPART_BOUNDARY}",
+            },
+        )
+        events = []
+        transcriber.close_groq_client()
+        try:
+            with patch.object(transcriber, "create_groq_client", return_value=client):
+                transcriber.transcribe_cloud(
+                    np.full(160, 0.03, dtype=np.float32),
+                    "it",
+                    0.01,
+                    "fake-key",
+                    False,
+                    events.append,
+                    None,
+                )
+        finally:
+            transcriber.close_groq_client()
+
+        request = captured["request"]
+        wav_start = request.content.index(b"RIFF")
+        data_size = struct.unpack_from("<I", request.content, wav_start + 40)[0]
+        pad = int(SAMPLE_RATE * CLOUD_EDGE_PAD_SECONDS)
+        self.assertEqual(data_size // 2, 160 + pad * 2)
+        self.assertIn(b"Traflix Voice", request.content)
+        self.assertEqual(events[-1]["text"], "ciao")
+        # Usage accounting still sees the original dictation length.
+        self.assertEqual(events[-1]["duration"], 0.01)
+
+    def test_abrupt_local_onset_is_padded_before_inference(self):
+        from whisper_engine.constants import CLOUD_EDGE_PAD_SECONDS
+
+        seen = {}
+
+        class FakeSegment:
+            text = "ciao"
+
+        class FakeModel:
+            def transcribe(self, recording, language=""):
+                seen["size"] = recording.size
+                seen["language"] = language
+                return [FakeSegment()]
+
+        events = []
+        transcriber.transcribe_local(
+            FakeModel(),
+            np.full(8000, 0.05, dtype=np.float32),
+            "it",
+            0.5,
+            False,
+            events.append,
+        )
+
+        pad = int(SAMPLE_RATE * CLOUD_EDGE_PAD_SECONDS)
+        self.assertEqual(seen["size"], 8000 + pad * 2)
+        self.assertEqual(seen["language"], "it")
+        self.assertEqual(events[-1]["text"], "ciao")
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ sys.modules["sounddevice"] = MagicMock()
 sys.modules["huggingface_hub"] = MagicMock()
 
 from whisper_engine.engine import WhisperEngine, _RecordingSession
-from whisper_engine.constants import SAMPLE_RATE, BLOCK_SIZE
+from whisper_engine.constants import SAMPLE_RATE, BLOCK_SIZE, CLOUD_EDGE_PAD_SECONDS
 from whisper_engine.audio import (
     VOLUME_UPDATE_SAMPLES,
     audio_callback as _ac,
@@ -1072,8 +1072,37 @@ class TestTranscriptionFlow(unittest.TestCase):
         call_args = engine.model.transcribe.call_args
         self.assertIsNotNone(call_args, "model.transcribe should have been called")
         recording = call_args[0][0]
-        expected_len = BLOCK_SIZE * 2
+        # Both clip edges carry speech, so abrupt-edge padding is added on
+        # each side while the concatenated blocks stay in the middle.
+        edge_pad = int(SAMPLE_RATE * CLOUD_EDGE_PAD_SECONDS)
+        expected_len = BLOCK_SIZE * 2 + edge_pad * 2
         self.assertEqual(len(recording), expected_len)
+        np.testing.assert_array_equal(recording[:edge_pad], np.zeros(edge_pad, dtype=np.float32))
+        np.testing.assert_array_equal(
+            recording[edge_pad : edge_pad + BLOCK_SIZE * 2],
+            np.concatenate((block1[:, 0], block2[:, 0])),
+        )
+        np.testing.assert_array_equal(recording[-edge_pad:], np.zeros(edge_pad, dtype=np.float32))
+
+    def test_result_carries_capture_latency_ms(self):
+        """The hotkey-to-first-block gap is reported on every result."""
+        engine = self._setup_engine()
+        events = []
+        engine.log = events.append
+
+        mock_segment = MagicMock()
+        mock_segment.text = "ciao mondo"
+        engine.model.transcribe.return_value = [mock_segment]
+
+        self._mock_input_stream(engine, [np.full((BLOCK_SIZE, 1), 0.1, dtype=np.float32)])
+        with patch.object(engine, "load_model"):
+            engine.transcribe(0, "small")
+
+        results = [e for e in events if e.get("status") == "result"]
+        self.assertEqual(len(results), 1)
+        latency = results[0].get("capture_latency_ms")
+        self.assertIsInstance(latency, int)
+        self.assertGreaterEqual(latency, 0)
 
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_transcribe_error_logged(self, mock_stdout):
@@ -1275,6 +1304,10 @@ class TestCloudProductionRoundTrips(unittest.TestCase):
                 create.assert_called_once_with("synthetic-test-key")
             expected = np.concatenate((silence[:, 0], speech[:, 0], tail[:, 0]))
             audio_module.apply_automatic_gain(expected)
+            # The clip ends mid-signal, so abrupt-edge padding is appended
+            # after trimming before the upload (duration still reports the
+            # original three blocks).
+            expected = transcriber_module.pad_abrupt_clip_edges(expected)
             expected_payload = encode_cloud_multipart_from_recording(expected, "it", True)
             for payload, _timestamp in captured:
                 self.assertEqual(payload, expected_payload)
@@ -1473,7 +1506,7 @@ class TestInstantStop(unittest.TestCase):
             def __exit__(self, *_args):
                 return False
 
-        def fake_process(recording, *_args):
+        def fake_process(recording, *_args, **_kwargs):
             captured["recording"] = recording.copy()
 
         with patch.object(sd, "InputStream", FakeInputStream):

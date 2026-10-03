@@ -24,3 +24,11 @@ CLOUD_SILENCE_THRESHOLD = 1.0 / 32767.0
 CLOUD_SILENCE_PADDING_SECONDS = 0.32
 # Drain to keep tail after stop (reverberation / weak fricative)
 CLOUD_TAIL_DRAIN_SECONDS = 0.22
+# Short digital-silence context added only when speech touches the clip edge.
+# The microphone opens per session, so a dictation started mid-word reaches
+# the decoder with an abrupt onset; without leading context Whisper tends to
+# swallow the first syllable ("Puoi" -> "Poi").
+CLOUD_EDGE_PAD_SECONDS = 0.12
+# Anchor the product name in every cloud prompt so the decoder spells proper
+# nouns consistently even when the user vocabulary is empty.
+CLOUD_DEFAULT_PROMPT = "Traflix Voice"

@@ -9,6 +9,8 @@ import numpy as np
 import concurrent.futures
 
 from whisper_engine.constants import (
+    CLOUD_DEFAULT_PROMPT,
+    CLOUD_EDGE_PAD_SECONDS,
     GROQ_MODEL,
     GROQ_MULTIPART_BOUNDARY,
     GROQ_TRANSCRIPTION_URL,
@@ -75,6 +77,7 @@ _GROQ_WARMUP_IDLE_SECONDS = 240.0
 _GROQ_WARMUP_RETRY_SECONDS = 30.0
 _CLOUD_ERROR_MESSAGE_LIMIT = 512
 _CLOUD_SILENCE_PADDING_SAMPLES = int(SAMPLE_RATE * CLOUD_SILENCE_PADDING_SECONDS)
+_EDGE_PAD_SAMPLES = int(SAMPLE_RATE * CLOUD_EDGE_PAD_SECONDS)
 _CLOUD_TRIM_MASK_LIMIT = SAMPLE_RATE * 8
 _CLOUD_TRIM_SCAN_CHUNK = SAMPLE_RATE
 
@@ -344,6 +347,44 @@ def encode_wav(recording, assume_normalized=False):
     return io.BytesIO(_encode_wav_payload(recording, assume_normalized))
 
 
+def _ensure_default_prompt(vocabulary):
+    """Anchor the product name in the decoder prompt when it is missing.
+
+    The user vocabulary is empty by default, leaving Whisper without a hint
+    for proper nouns ("Traflix" -> "traflixs"/"traflix ss"). Prepending the
+    product name keeps the spelling stable; user entries are preserved after
+    it within the same byte cap used for the prompt field.
+    """
+    if CLOUD_DEFAULT_PROMPT.casefold() in vocabulary.casefold():
+        return vocabulary
+    combined = f"{CLOUD_DEFAULT_PROMPT}, {vocabulary}" if vocabulary else CLOUD_DEFAULT_PROMPT
+    return combined.encode("utf-8")[:224].decode("utf-8", errors="ignore").strip().rstrip(",")
+
+
+def pad_abrupt_clip_edges(recording):
+    """Add short digital silence only when speech touches the clip edge.
+
+    Trimming keeps 0.32 s of natural padding, but a dictation that starts or
+    ends mid-word has no silence to keep: the decoder then sees an abrupt
+    onset and drops the first syllable. Padding just those edges gives the
+    recognizer onset context without changing clean clips. The reported
+    recording duration stays untouched; only this buffer grows.
+    """
+    if recording.size == 0 or _EDGE_PAD_SAMPLES <= 0:
+        return recording
+    threshold = CLOUD_SILENCE_THRESHOLD
+    leading = abs(float(recording[0])) >= threshold
+    trailing = abs(float(recording[-1])) >= threshold
+    if not leading and not trailing:
+        return recording
+    pad = np.zeros(_EDGE_PAD_SAMPLES, dtype=np.float32)
+    parts = [pad] if leading else []
+    parts.append(recording)
+    if trailing:
+        parts.append(pad)
+    return np.concatenate(parts)
+
+
 def _cloud_multipart_prefix(language, detailed=False, vocabulary=""):
     prefix = _MULTIPART_PREFIXES.get(language)
     if prefix is None:
@@ -351,7 +392,7 @@ def _cloud_multipart_prefix(language, detailed=False, vocabulary=""):
         if language:
             prefix += _LANGUAGE_FIELD_PREFIX + language.encode("utf-8") + b"\r\n"
         prefix += _FILE_FIELD_PREFIX
-    vocabulary = cloud_quality.normalize_vocabulary(vocabulary)
+    vocabulary = _ensure_default_prompt(cloud_quality.normalize_vocabulary(vocabulary))
     if detailed:
         prefix = prefix.replace(_RESPONSE_FORMAT_FIELD, _RESPONSE_FORMAT_FIELD.replace(
             b"\r\n\r\ntext\r\n", b"\r\n\r\nverbose_json\r\n"), 1)
@@ -548,6 +589,9 @@ def transcribe_local(model, recording, language, recording_duration, shutting_do
         # empty text (no paste, UI back to ready).
         log_func({"status": "result", "text": "", "duration": recording_duration})
         return
+    # A dictation that starts/ends mid-word has no natural edge silence;
+    # give the transducer the same onset context the cloud path receives.
+    trimmed = pad_abrupt_clip_edges(trimmed)
 
     lang_param = "" if language == "auto" else language
 
@@ -604,6 +648,9 @@ def transcribe_cloud(
         if cloud_recording.size == 0:
             log_func({"status": "ready", "message": "Nessun audio riconosciuto."})
             return
+        # Pad only abrupt edges (see pad_abrupt_clip_edges). The usage
+        # duration reported to the UI keeps the original recording length.
+        cloud_recording = pad_abrupt_clip_edges(cloud_recording)
 
         speech_present = speech_detector(cloud_recording) if speech_filter and speech_detector else None
         if _shutdown_requested(shutting_down):

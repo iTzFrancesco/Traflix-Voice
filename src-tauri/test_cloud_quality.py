@@ -101,7 +101,13 @@ class TestCloudQuality(unittest.TestCase):
         detailed = transcriber.encode_cloud_multipart_from_recording(
             samples, "it", True, detailed=True, vocabulary=vocabulary)
         self.assertIn(b"verbose_json\r\n", detailed)
-        self.assertIn(normalized.encode(), detailed)
+        # The product anchor is prepended, so the raw user vocabulary no
+        # longer appears verbatim; its head must survive within the byte cap.
+        prompt_value = detailed.split(b'name="prompt"\r\n\r\n', 1)[1].split(b"\r\n--", 1)[0]
+        self.assertLessEqual(len(prompt_value), 224)
+        self.assertNotIn(b"\n", prompt_value)
+        self.assertTrue(prompt_value.startswith("Traflix Voice".encode()))
+        self.assertIn("Groq".encode(), prompt_value)
         self.assertEqual(baseline.split(b"Content-Type: audio/wav\r\n\r\n")[1],
                          detailed.split(b"Content-Type: audio/wav\r\n\r\n")[1])
 
