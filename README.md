@@ -101,8 +101,13 @@ Android requires a signed APK for direct installation.
 1. Start the application and select a microphone in **System**.
 2. In **AI**, download the Parakeet TDT 0.6B v3 model for local dictation,
    or enable Groq Cloud mode (paste your API key in **System** first).
-3. Press the configured hotkey and speak; the overlay shows live status.
-4. Press it again to stop. The transcription is pasted into the focused
+   Add the names and technical terms you dictate most often to the personal
+   vocabulary in **AI** so cloud transcription spells them consistently.
+3. Press the configured hotkey, wait for the overlay's listening signal,
+   then speak; audio spoken before the microphone opens cannot be recovered.
+   The overlay shows live status.
+4. Press it again to stop, pausing briefly after your last word so the final
+   syllable is captured. The transcription is pasted into the focused
    application and saved to history with word count and timing. It also stays
    on the clipboard, so if you miss it you can paste it again with Ctrl+V.
 5. Check **Home** to confirm which engine (Locale/Cloud) ran last; use
