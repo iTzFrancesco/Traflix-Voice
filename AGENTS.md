@@ -65,7 +65,11 @@ The optional live Groq benchmark may read `GROQ_API_KEY` from the process enviro
 ## CI and releases
 
 - CI runs Rust formatting, Clippy, Rust tests, Python checks, Python tests, and a Windows MSI build for pushes and pull requests targeting `main`.
-- The release workflow runs for tags matching `v*` and publishes the Windows MSI with generated release notes.
+- Read [docs/releasing.md](docs/releasing.md) before changing app versions, creating release tags, or publishing a release. Follow that guide for both Windows and Android.
+- A request to push changes to GitHub means a normal push. Do not bump versions, create release tags, or run a local build unless the user explicitly asks for an updated release. The existing CI workflow still runs on pushes to `main` and creates a Windows MSI artifact; it does not publish a GitHub Release or update installed apps.
+- An updated-build request means a GitHub Actions release for Windows and Android by default. Keep the work in small, focused commits, push the approved changes, then tag the approved `main` commit with `vX.Y.Z` and `android-vX.Y.Z`. Do not build the release locally. Follow the release guide for version bumps, signing secrets, artifacts, and verification.
+- The Windows tag workflow publishes the signed MSI, its `.sig` file, and the generated Tauri updater manifest `latest.json`. The Android tag workflow publishes a signed `app-universal-release.apk` as a prerelease. Android updates use the `android-vX.Y.Z` tag and APK asset; neither client uses a `release.json` file.
+- Do not push to GitHub or create a secondary branch unless the user asks.
 - Do not change release behavior, signing configuration, or updater settings without verifying the resulting artifact and its security implications.
 
 ## Change guidelines

@@ -18,6 +18,7 @@
   <a href="#features">Features</a> ·
   <a href="#supported-workflow">Workflow</a> ·
   <a href="#installation">Installation</a> ·
+  <a href="docs/releasing.md">Release guide</a> ·
   <a href="docs/">Documentation</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
@@ -160,16 +161,22 @@ asset, verifies its SHA-256 and device ABI, and opens Android’s package instal
 automatically. Android still requires the user to confirm the update and, on
 some devices, allow installs from this app.
 
-The desktop app checks GitHub’s latest stable PC release (`v*`) on startup and
-when it returns to the foreground. It announces a newer version, downloads the
-signed MSI update when no dictation is active, and installs it automatically
-with a progress window before restarting Traflix Voice. Android prereleases
-(`android-v*`) are kept out of the desktop update channel. The desktop release
-workflow publishes the signed MSI installer and its `latest.json` manifest.
+The desktop app checks GitHub’s latest stable PC release (`v*`) at startup and
+when it returns to the foreground. Automatic checks run at most once every six
+hours. Use the refresh button above the sidebar version to check at any time.
+When an update is available, choose **Scarica aggiornamento**, then choose
+**Installa e riavvia** after the download finishes. Installation waits until
+dictation ends. Android prereleases (`android-v*`) are kept out of the desktop
+update channel. The desktop release workflow publishes the signed MSI installer
+and its `latest.json` manifest.
 The stable `latest.json` release asset is also available to other integrations;
 it includes the Tauri `windows-x86_64` target and the `windows-x86_64-msi` alias.
 
 ## Development and testing
+
+Read the [release guide](docs/releasing.md) before changing versions, pushing
+release tags, or publishing Windows or Android builds. Normal code pushes and
+versioned releases use different GitHub Actions workflows.
 
 ```powershell
 npm run build
