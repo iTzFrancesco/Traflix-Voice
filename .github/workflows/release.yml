@@ -38,7 +38,7 @@ jobs:
           restore-keys: rust-${{ runner.os }}-cargo-release-
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
-      - run: cargo test
+      - run: pwsh -File ..\scripts\test-rust.ps1
 
   check-python:
     name: Check Python
