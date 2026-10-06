@@ -118,7 +118,8 @@ function Overlay() {
       @keyframes spin { to { transform:rotate(360deg); } }
       @keyframes widget-enter { 0% { opacity:0; transform:translate3d(0,8px,0) scale(.92); filter:blur(2px); } 58% { opacity:1; transform:translate3d(0,-1px,0) scale(1.018); filter:blur(0); } 100% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } }
       @keyframes widget-exit { 0% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } 100% { opacity:0; transform:translate3d(0,-5px,0) scale(.94); filter:blur(1.5px); } }
-      .ow { height:38px; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; transition:border-color 0.3s cubic-bezier(0.4,0,0.2,1),box-shadow 0.3s cubic-bezier(0.4,0,0.2,1); }
+      .ow { height:38px; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; outline:none; transition:border-color 0.3s cubic-bezier(0.4,0,0.2,1),box-shadow 0.3s cubic-bezier(0.4,0,0.2,1); }
+      .ow:focus-visible { outline:2px solid rgba(255,157,36,0.8); outline-offset:2px; }
       .ow.widget-enter { animation:widget-enter .42s cubic-bezier(.22,1,.36,1) both; }
       .ow.widget-exit { animation:widget-exit .22s cubic-bezier(.4,0,1,1) both; pointer-events:none; }
       .ow:active { cursor:grabbing; }
@@ -162,7 +163,26 @@ function Overlay() {
     const vocabularyElement = widget.querySelector("#vocabulary-button");
     if (!(vocabularyElement instanceof HTMLButtonElement)) return;
     const vocabularyButton: HTMLButtonElement = vocabularyElement;
-    vocabularyButton.addEventListener("click", () => void requestMainWindow("vocabulary"));
+    let isCloudProvider = false;
+
+    function updateVocabularyAvailability(provider: unknown) {
+      isCloudProvider = provider === "cloud";
+      vocabularyButton.hidden = false;
+      vocabularyButton.disabled = isCloudProvider && (isListening || isProcessing);
+      vocabularyButton.tabIndex = isCloudProvider ? 0 : -1;
+      vocabularyButton.title = isCloudProvider ? "Modifica vocabolario" : "Traflix Voice";
+      vocabularyButton.setAttribute("role", isCloudProvider ? "button" : "img");
+      vocabularyButton.setAttribute(
+        "aria-label",
+        isCloudProvider ? "Modifica vocabolario" : "Logo Traflix Voice",
+      );
+    }
+
+    vocabularyButton.addEventListener("click", () => {
+      if (isCloudProvider && !isListening && !isProcessing) {
+        void requestMainWindow("vocabulary");
+      }
+    });
 
     if (!IS_DEV && window.__TAURI__?.core?.invoke) {
       window.__TAURI__.core.invoke("is_dev").then((isDev: unknown) => {
@@ -271,11 +291,11 @@ function Overlay() {
     let visualState: WidgetVisualState = "idle";
 
     function applyVisualState(nextState: WidgetVisualState) {
-      vocabularyButton.disabled = nextState !== "idle";
       const stateChanged = visualState !== nextState;
       visualState = nextState;
       isListening = nextState === "recording";
       isProcessing = nextState === "processing";
+      vocabularyButton.disabled = isCloudProvider && nextState !== "idle";
       targetVolume = nextState === "recording" ? targetVolume : 0;
 
       if (!stateChanged) {
@@ -340,7 +360,7 @@ function Overlay() {
 
     // ── MOUSE CLICK (double-click to show main) ──
     widget.addEventListener("mousedown", (e: MouseEvent) => {
-      if (e.target instanceof Element && e.target.closest("#vocabulary-button")) return;
+      if (isCloudProvider && e.target instanceof Element && e.target.closest("#vocabulary-button")) return;
       const now = Date.now();
       if (now - lastClick < 300) {
         lastClick = 0;
@@ -353,7 +373,7 @@ function Overlay() {
       }
     });
     widget.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.target instanceof Element && e.target.closest("#vocabulary-button")) return;
+      if (isCloudProvider && e.target instanceof Element && e.target.closest("#vocabulary-button")) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         void requestMainWindow();
@@ -365,7 +385,7 @@ function Overlay() {
     const unlistenFns: (() => void)[] = [];
 
     window.__TAURI__.event.listen("cloud_provider_updated", (event: { payload: unknown }) => {
-      vocabularyButton.hidden = event.payload !== "cloud";
+      updateVocabularyAvailability(event.payload);
     }).then((fn) => {
       if (overlayCancelled) fn(); else unlistenFns.push(fn);
     });
@@ -439,7 +459,7 @@ function Overlay() {
         if (window.__TAURI__?.core?.invoke) {
           const s: unknown = await window.__TAURI__.core.invoke("load_settings");
           if (typeof s === "object" && s !== null && "provider" in s) {
-            vocabularyButton.hidden = s.provider !== "cloud";
+            updateVocabularyAvailability(s.provider);
           }
           if (typeof s === "object" && s !== null && "widgetMode" in s && s.widgetMode === "recording") {
             widgetMode = "recording";
