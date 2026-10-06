@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
+use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri_plugin_shell::process::CommandChild;
 
 // ─── STRUTTURE DATI ──────────────────────────────────────────────────────────
@@ -168,7 +169,8 @@ pub struct AudioDeviceInfo {
 pub struct AppState {
     pub stats: Mutex<AppStats>,
     pub stats_write_lock: Mutex<()>,
-    pub python_process: Mutex<Option<CommandChild>>,
+    pub python_process: Arc<Mutex<Option<CommandChild>>>,
+    pub python_write_lock: Arc<AsyncMutex<()>>,
     pub settings_path: PathBuf,
     pub stats_path: PathBuf,
     pub history_path: PathBuf,

@@ -2,7 +2,9 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::info;
 use std::fs;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri_plugin_shell::process::CommandChild;
 
 use crate::clipboard::simulate_ctrl_v;
 use crate::hotkey::parse_hotkey;
@@ -130,7 +132,14 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<AppStats, String> {
 /// Restituisce i dispositivi audio disponibili
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
-pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+pub async fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+    tauri::async_runtime::spawn_blocking(enumerate_audio_devices)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[cfg(not(target_os = "android"))]
+fn enumerate_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
     let host = cpal::default_host();
     let mut devices = Vec::new();
     let input_devices = host.input_devices().map_err(|e| e.to_string())?;
@@ -148,13 +157,19 @@ pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
 /// Android records through the native VoiceAudioRecorder instead of cpal.
 #[cfg(target_os = "android")]
 #[tauri::command]
-pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+pub async fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
     Ok(Vec::new())
 }
 
 /// Controlla se un modello esiste già su disco
 #[tauri::command]
-pub fn check_model_exists(app: AppHandle, model_id: String) -> bool {
+pub async fn check_model_exists(app: AppHandle, model_id: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || model_exists(app, model_id))
+        .await
+        .unwrap_or(false)
+}
+
+fn model_exists(app: AppHandle, model_id: String) -> bool {
     let app_dir = app.path().app_data_dir().unwrap_or_default();
     let dir = app_dir.join("models").join(&model_id);
     [
@@ -169,27 +184,44 @@ pub fn check_model_exists(app: AppHandle, model_id: String) -> bool {
 
 /// Invia un comando al processo Python
 #[tauri::command]
-pub fn send_to_python(state: State<'_, AppState>, message: String) -> Result<(), String> {
+pub async fn send_to_python(state: State<'_, AppState>, message: String) -> Result<(), String> {
+    let _write_guard = state.python_write_lock.lock().await;
+    let python_process = Arc::clone(&state.python_process);
     let mut payload = message.into_bytes();
     payload.push(b'\n');
-    write_to_python(state, &payload)
+    tauri::async_runtime::spawn_blocking(move || write_to_python(&python_process, &payload))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 /// Fast path for the most latency-sensitive command in the recording flow.
 #[tauri::command]
-pub fn stop_python(state: State<'_, AppState>) -> Result<(), String> {
-    write_to_python(state, b"{\"command\":\"stop\"}\n")
+pub async fn stop_python(state: State<'_, AppState>) -> Result<(), String> {
+    let _write_guard = state.python_write_lock.lock().await;
+    let python_process = Arc::clone(&state.python_process);
+    tauri::async_runtime::spawn_blocking(move || {
+        write_to_python(&python_process, b"{\"command\":\"stop\"}\n")
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn shutdown_python<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+pub async fn shutdown_python<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     #[cfg(desktop)]
-    crate::sidecar::shutdown(&app)?;
+    {
+        let write_lock = Arc::clone(&app.state::<AppState>().python_write_lock);
+        let _write_guard = write_lock.lock().await;
+        tauri::async_runtime::spawn_blocking(move || crate::sidecar::shutdown(&app))
+            .await
+            .map_err(|error| error.to_string())?
+    }
 
     #[cfg(not(desktop))]
-    let _ = app;
-
-    Ok(())
+    {
+        let _ = app;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -197,8 +229,11 @@ pub fn restart_app<R: Runtime>(app: AppHandle<R>) {
     app.restart();
 }
 
-fn write_to_python(state: State<'_, AppState>, payload: &[u8]) -> Result<(), String> {
-    let mut process_lock = state.python_process.lock().unwrap();
+fn write_to_python(
+    python_process: &Mutex<Option<CommandChild>>,
+    payload: &[u8],
+) -> Result<(), String> {
+    let mut process_lock = python_process.lock().unwrap();
     if let Some(child) = process_lock.as_mut() {
         child.write(payload).map_err(|e| e.to_string())?;
         Ok(())
@@ -424,6 +459,160 @@ mod tests {
 
         assert!(!remove_history_entry(&mut entries, 0, &missing));
         assert_eq!(entries.len(), 1);
+    }
+}
+
+#[cfg(all(test, desktop))]
+mod ipc_tests {
+    use std::{
+        path::PathBuf,
+        sync::{
+            atomic::AtomicBool,
+            mpsc::{self, Receiver},
+            Arc, Mutex, RwLock,
+        },
+        thread,
+        time::Duration,
+    };
+
+    use tauri::{
+        ipc::{CallbackFn, InvokeBody, InvokeResponse},
+        test::{self, MockRuntime},
+        webview::InvokeRequest,
+        WebviewWindow, WebviewWindowBuilder,
+    };
+
+    use super::{send_to_python, shutdown_python, stop_python};
+    use crate::state::{AppState, AppStats, HotkeyConfig};
+
+    fn request(command: &str, body: serde_json::Value) -> InvokeRequest {
+        InvokeRequest {
+            cmd: command.to_string(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: "http://tauri.localhost".parse().unwrap(),
+            body: InvokeBody::Json(body),
+            headers: Default::default(),
+            invoke_key: test::INVOKE_KEY.to_string(),
+        }
+    }
+
+    #[tauri::command]
+    fn ping() -> &'static str {
+        "pong"
+    }
+
+    fn test_app(
+        python_process: Arc<Mutex<Option<tauri_plugin_shell::process::CommandChild>>>,
+        python_process_exited: bool,
+    ) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) {
+        let state = AppState {
+            stats: Mutex::new(AppStats::default()),
+            stats_write_lock: Mutex::new(()),
+            python_process,
+            python_write_lock: Arc::new(tauri::async_runtime::Mutex::new(())),
+            settings_path: PathBuf::new(),
+            stats_path: PathBuf::new(),
+            history_path: PathBuf::new(),
+            history_lock: Mutex::new(()),
+            groq_usage_path: PathBuf::new(),
+            hotkey_config: Arc::new(RwLock::new(Vec::<HotkeyConfig>::new())),
+            keep_clipboard_result: AtomicBool::new(true),
+            is_shutting_down: AtomicBool::new(false),
+            python_process_exited: AtomicBool::new(python_process_exited),
+        };
+        let app = test::mock_builder()
+            .manage(state)
+            .invoke_handler(tauri::generate_handler![
+                send_to_python,
+                stop_python,
+                shutdown_python,
+                ping
+            ])
+            .build(test::mock_context(test::noop_assets()))
+            .unwrap();
+        let window = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        (app, window)
+    }
+
+    fn dispatch_without_blocking(
+        window: &WebviewWindow<MockRuntime>,
+        command: &str,
+        body: serde_json::Value,
+    ) -> Receiver<InvokeResponse> {
+        let (dispatched_tx, dispatched_rx) = mpsc::sync_channel(1);
+        let (response_tx, response_rx) = mpsc::sync_channel(1);
+        let webview = window.as_ref().clone();
+        let command = command.to_string();
+        thread::spawn(move || {
+            webview.on_message(
+                request(&command, body),
+                Box::new(move |_webview, _command, response, _callback, _error| {
+                    let _ = response_tx.send(response);
+                }),
+            );
+            let _ = dispatched_tx.send(());
+        });
+        dispatched_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("IPC dispatch blocked while the sidecar worker was stalled");
+        response_rx
+    }
+
+    #[test]
+    fn stalled_sidecar_writes_do_not_block_other_window_ipc() {
+        let python_process = Arc::new(Mutex::new(None));
+        let process_guard = python_process.lock().unwrap();
+        let (_app, window) = test_app(Arc::clone(&python_process), true);
+
+        let send_response = dispatch_without_blocking(
+            &window,
+            "send_to_python",
+            serde_json::json!({"message": "{\"command\":\"get_status\"}"}),
+        );
+        let stop_response =
+            dispatch_without_blocking(&window, "stop_python", serde_json::json!({}));
+
+        test::assert_ipc_response(&window, request("ping", serde_json::json!({})), Ok("pong"));
+
+        drop(process_guard);
+        for response in [send_response, stop_response] {
+            match response.recv_timeout(Duration::from_secs(1)).unwrap() {
+                InvokeResponse::Err(error) => assert_eq!(
+                    error.0,
+                    serde_json::Value::String("Motore Python non avviato".to_string())
+                ),
+                response => panic!("expected IPC error response, got {response:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn sidecar_shutdown_does_not_block_other_window_ipc() {
+        let (_app, window) = test_app(Arc::new(Mutex::new(None)), false);
+
+        let shutdown_response =
+            dispatch_without_blocking(&window, "shutdown_python", serde_json::json!({}));
+        assert!(matches!(
+            shutdown_response.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        test::assert_ipc_response(&window, request("ping", serde_json::json!({})), Ok("pong"));
+
+        match shutdown_response
+            .recv_timeout(Duration::from_secs(4))
+            .unwrap()
+        {
+            InvokeResponse::Err(error) => assert_eq!(
+                error.0,
+                serde_json::Value::String(
+                    "Il motore Python non si è arrestato: aggiornamento annullato".to_string()
+                )
+            ),
+            response => panic!("expected IPC error response, got {response:?}"),
+        }
     }
 }
 
