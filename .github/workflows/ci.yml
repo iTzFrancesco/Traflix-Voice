@@ -59,7 +59,7 @@ jobs:
             src-tauri/target
           key: rust-${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
           restore-keys: rust-${{ runner.os }}-cargo-
-      - run: cargo test
+      - run: pwsh -File ..\scripts\test-rust.ps1
 
   lint-python:
     name: Lint Python
