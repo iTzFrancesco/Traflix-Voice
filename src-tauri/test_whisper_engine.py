@@ -839,6 +839,162 @@ class TestGroqClientLifecycle(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Model path construction
 # ---------------------------------------------------------------------------
+class TestGroqCaptureKeepwarm(unittest.TestCase):
+    class ManualTimer:
+        created = []
+
+        def __init__(self, interval, function):
+            self.interval = interval
+            self.function = function
+            self.daemon = False
+            self.cancelled = False
+            self.started = False
+            self.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def fire(self):
+            self.function()
+
+    def setUp(self):
+        self.ManualTimer.created = []
+        self.engine = WhisperEngine()
+        self.engine.provider = "cloud"
+        self.engine.groq_api_key = "synthetic-key"
+        self.engine.log = MagicMock()
+
+    def tearDown(self):
+        session = self.engine._active_session
+        if session is not None:
+            session.stop(drain_seconds=0)
+        self.engine.close_transcription_worker()
+        transcriber_module.close_groq_client()
+
+    def start_cloud_capture(self):
+        with patch.object(self.engine, "transcribe", return_value=None):
+            self.engine.start_transcription(None, "parakeet").result(timeout=1)
+        return self.engine._active_session
+
+    def recurring_timer(self):
+        timers = [timer for timer in self.ManualTimer.created if timer.interval == 60.0]
+        self.assertTrue(timers, "A long cloud capture must renew idle connections")
+        return timers[-1]
+
+    def test_long_capture_renews_connection_before_idle_expiry(self):
+        clock = [180.0]
+        requests = []
+
+        def send(request):
+            requests.append((clock[0], request.method, request.url.path))
+            return transcriber_module.httpx.Response(200, json={"data": []}, request=request)
+
+        client = transcriber_module.httpx.Client(
+            headers={"Authorization": "Bearer synthetic-key"},
+            transport=transcriber_module.httpx.MockTransport(send),
+        )
+        transcriber_module.close_groq_client()
+        real_prewarm = transcriber_module.prewarm_groq_connection
+
+        def prewarm(key, shutting_down):
+            worker = real_prewarm(key, shutting_down)
+            if worker is not None:
+                worker.join(timeout=1)
+                self.assertFalse(worker.is_alive())
+            return worker
+
+        with patch("whisper_engine.engine.threading.Timer", self.ManualTimer), \
+             patch.object(transcriber_module.time, "monotonic", side_effect=lambda: clock[0]), \
+             patch.object(transcriber_module, "create_groq_client", return_value=client), \
+             patch.object(transcriber_module, "prewarm_groq_connection", side_effect=prewarm):
+            transcriber_module.get_groq_client("synthetic-key")
+            transcriber_module._GROQ_CONNECTION_ACTIVITY[id(client)] = 0.0
+            session = self.start_cloud_capture()
+            self.assertEqual(requests, [])
+            for timestamp in (240.0, 300.0, 360.0, 420.0, 480.0):
+                clock[0] = timestamp
+                self.recurring_timer().fire()
+            self.assertEqual(requests, [
+                (240.0, "GET", "/openai/v1/models"),
+                (480.0, "GET", "/openai/v1/models"),
+            ])
+            timer = self.recurring_timer()
+            session.stop(drain_seconds=0)
+            self.assertTrue(timer.cancelled)
+            clock[0] = 720.0
+            timer.fire()
+            self.assertEqual(len(requests), 2)
+
+    def test_local_capture_does_not_start_cloud_timer(self):
+        self.engine.provider = "local"
+        with patch("whisper_engine.engine.threading.Timer", self.ManualTimer), \
+             patch.object(transcriber_module, "prewarm_groq_connection") as prewarm:
+            self.start_cloud_capture()
+            self.assertEqual(self.ManualTimer.created, [])
+            prewarm.assert_not_called()
+
+    def test_renewal_uses_current_key_and_stopped_session_guard(self):
+        with patch("whisper_engine.engine.threading.Timer", self.ManualTimer), \
+             patch.object(transcriber_module, "prewarm_groq_connection") as prewarm:
+            session = self.start_cloud_capture()
+            initial_guard = prewarm.call_args.args[1]
+            self.assertFalse(initial_guard())
+            self.engine.groq_api_key = "rotated-synthetic-key"
+            self.assertTrue(initial_guard())
+            self.recurring_timer().fire()
+            self.assertEqual(prewarm.call_args.args[0], "rotated-synthetic-key")
+            renewal_guard = prewarm.call_args.args[1]
+            self.assertFalse(renewal_guard())
+            timer = self.recurring_timer()
+            session.stop(drain_seconds=0)
+            self.assertTrue(renewal_guard())
+            timer.fire()
+            self.assertEqual(prewarm.call_count, 2)
+
+    def test_shutdown_during_capture_does_not_probe(self):
+        with patch("whisper_engine.engine.threading.Timer", self.ManualTimer), \
+             patch.object(transcriber_module, "prewarm_groq_connection") as prewarm:
+            self.start_cloud_capture()
+            self.engine._shutting_down = True
+            self.recurring_timer().fire()
+            self.assertEqual(prewarm.call_count, 1)
+
+    def test_old_timer_cannot_probe_after_next_capture_starts(self):
+        with patch("whisper_engine.engine.threading.Timer", self.ManualTimer), \
+             patch.object(transcriber_module, "prewarm_groq_connection") as prewarm:
+            first = self.start_cloud_capture()
+            first_timer = self.recurring_timer()
+            first_guard = prewarm.call_args.args[1]
+            second = self.start_cloud_capture()
+            self.assertIsNot(first, second)
+            self.assertTrue(first_timer.cancelled)
+            self.assertTrue(first_guard())
+            first_timer.fire()
+            self.assertEqual(prewarm.call_count, 2)
+            self.recurring_timer().fire()
+            self.assertEqual(prewarm.call_count, 3)
+            self.assertFalse(prewarm.call_args.args[1]())
+
+    def test_capture_failure_cancels_timer_even_if_startup_races(self):
+        import sounddevice as sd
+
+        class BrokenInputStream:
+            def __init__(self, **_kwargs):
+                raise RuntimeError("Synthetic capture failure")
+
+        with patch("whisper_engine.engine.threading.Timer", self.ManualTimer), \
+             patch.object(sd, "InputStream", BrokenInputStream), \
+             patch.object(transcriber_module, "prewarm_groq_connection") as prewarm:
+            self.engine.start_transcription(None, "parakeet").result(timeout=1)
+            for timer in list(self.ManualTimer.created):
+                timer.fire()
+            self.assertLessEqual(prewarm.call_count, 1)
+            self.assertTrue(all(timer.cancelled for timer in self.ManualTimer.created))
+
+
 class TestModelPath(unittest.TestCase):
     """Parakeet-only dispatcher: every id resolves to the Parakeet backend."""
 

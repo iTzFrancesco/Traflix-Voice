@@ -53,9 +53,52 @@ class _RecordingSession:
         self._stop_lock = threading.Lock()
         self._stop_sent = False
         self._drain_timer = None
+        self._cloud_keepwarm_timer = None
+        self._cloud_keepwarm_cancelled = False
+
+    def maintain_groq_connection(self, prepare_connection):
+        """Refresh idle transport while this cloud capture remains active."""
+        def renew():
+            with self._stop_lock:
+                self._cloud_keepwarm_timer = None
+                if self._cloud_keepwarm_cancelled or not self.active.is_set():
+                    return
+                try:
+                    if prepare_connection() is False:
+                        return
+                except Exception:
+                    pass
+                schedule()
+
+        def schedule():
+            timer = threading.Timer(60.0, renew)
+            timer.daemon = True
+            self._cloud_keepwarm_timer = timer
+            timer.start()
+
+        with self._stop_lock:
+            if (
+                self.provider != "cloud"
+                or self._cloud_keepwarm_cancelled
+                or not self.active.is_set()
+                or self._cloud_keepwarm_timer is not None
+            ):
+                return
+            schedule()
+
+    def cancel_groq_keepwarm(self):
+        with self._stop_lock:
+            self._cloud_keepwarm_cancelled = True
+            timer, self._cloud_keepwarm_timer = self._cloud_keepwarm_timer, None
+            if timer is not None:
+                timer.cancel()
 
     def stop(self, drain_seconds=CLOUD_TAIL_DRAIN_SECONDS):
         with self._stop_lock:
+            self._cloud_keepwarm_cancelled = True
+            timer, self._cloud_keepwarm_timer = self._cloud_keepwarm_timer, None
+            if timer is not None:
+                timer.cancel()
             if self._stop_sent:
                 return
             self._stop_sent = True
@@ -278,11 +321,20 @@ class WhisperEngine:
         if session.provider == "cloud":
             if self.cloud_speech_filter:
                 threading.Thread(target=self.prepare_speech_gate, daemon=True).start()
-            key = self.groq_api_key
-            transcriber.prewarm_groq_connection(
-                key,
-                lambda: self._shutting_down or key != self.groq_api_key,
-            )
+
+            def prepare_connection():
+                if self._shutting_down or not session.active.is_set():
+                    return False
+                key = self.groq_api_key
+                transcriber.prewarm_groq_connection(
+                    key,
+                    lambda: self._shutting_down or key != self.groq_api_key
+                    or not session.active.is_set(),
+                )
+                return True
+
+            prepare_connection()
+            session.maintain_groq_connection(prepare_connection)
         return capture
 
     def close_transcription_worker(self):
@@ -548,6 +600,7 @@ class WhisperEngine:
                 self.log({"status": "ready", "message": "Motore Whisper pronto."})
         finally:
             if session is not None:
+                session.cancel_groq_keepwarm()
                 with self._recording_lock:
                     if self._active_session is session:
                         self._active_session = None
