@@ -1689,6 +1689,7 @@ class TestParakeetBackend(unittest.TestCase):
         waveform = stream.accept_waveform.call_args.kwargs["waveform"]
         self.assertEqual(waveform.dtype, np.float32)
         self.assertEqual(waveform.ndim, 1)
+        np.testing.assert_array_equal(waveform, recording)
         recognizer.decode_stream.assert_called_once_with(stream)
 
     @patch("sys.stdout", new_callable=io.StringIO)
@@ -1721,6 +1722,146 @@ class TestParakeetBackend(unittest.TestCase):
 # Local speed rounds: trim, silence gate, inference threads (cloud untouched)
 # ---------------------------------------------------------------------------
 class TestLocalSpeedRounds(unittest.TestCase):
+    def _long_recording(self, amplitude=0.1):
+        recording = np.full(SAMPLE_RATE * 70 + 37, amplitude, dtype=np.float32)
+        for second in (20, 40, 60):
+            recording[second * SAMPLE_RATE:second * SAMPLE_RATE + 4800] = 0
+        return recording
+
+    def test_parakeet_splits_at_pauses_without_losing_samples(self):
+        from whisper_engine.parakeet import _split_at_pauses
+        recording = self._long_recording()
+        chunks = _split_at_pauses(recording)
+        self.assertEqual(len(chunks), 4)
+        np.testing.assert_array_equal(np.concatenate(chunks), recording)
+        for chunk in chunks:
+            self.assertTrue(np.shares_memory(chunk, recording))
+        for left, right in zip(chunks, chunks[1:]):
+            self.assertEqual(left[-1], 0)
+            self.assertEqual(right[0], 0)
+
+    def test_parakeet_keeps_short_recording_in_one_stream(self):
+        from whisper_engine.parakeet import _split_at_pauses
+        recording = self._long_recording()[:SAMPLE_RATE * 25]
+        chunks = _split_at_pauses(recording)
+        self.assertEqual(len(chunks), 1)
+        self.assertIs(chunks[0], recording)
+
+    def test_parakeet_does_not_force_a_cut_in_continuous_speech(self):
+        from whisper_engine.parakeet import _split_at_pauses
+        recording = np.full(SAMPLE_RATE * 70, 0.1, dtype=np.float32)
+        recording[20 * SAMPLE_RATE:20 * SAMPLE_RATE + 1280] = 0
+        chunks = _split_at_pauses(recording)
+        self.assertEqual(len(chunks), 1)
+        self.assertIs(chunks[0], recording)
+
+    def test_parakeet_pause_detection_scales_to_weak_speech_and_ignores_click(self):
+        from whisper_engine.parakeet import _split_at_pauses
+        recording = self._long_recording(amplitude=0.0002)
+        recording[0] = 1
+        chunks = _split_at_pauses(recording)
+        self.assertEqual(len(chunks), 4)
+        np.testing.assert_array_equal(np.concatenate(chunks), recording)
+        for left, right in zip(chunks, chunks[1:]):
+            self.assertEqual(left[-1], 0)
+            self.assertEqual(right[0], 0)
+
+    def test_parakeet_preserves_uncertain_noisy_pauses(self):
+        from whisper_engine.parakeet import _split_at_pauses
+        recording = self._long_recording(amplitude=0.05)
+        recording[recording == 0] = 0.003
+        chunks = _split_at_pauses(recording)
+        self.assertEqual(len(chunks), 1)
+        self.assertIs(chunks[0], recording)
+
+    def test_parakeet_retains_speech_before_a_late_first_pause(self):
+        from whisper_engine.parakeet import _split_at_pauses
+        recording = np.full(SAMPLE_RATE * 100, 0.1, dtype=np.float32)
+        recording[65 * SAMPLE_RATE:65 * SAMPLE_RATE + 4800] = 0
+        chunks = _split_at_pauses(recording)
+        self.assertEqual(len(chunks), 2)
+        np.testing.assert_array_equal(np.concatenate(chunks), recording)
+        self.assertGreater(chunks[0].size, 60 * SAMPLE_RATE)
+
+    def test_parakeet_long_adapter_keeps_order_repetitions_and_last_word(self):
+        from whisper_engine.parakeet import ParakeetRecognizer
+        streams = [MagicMock() for _ in range(4)]
+        for stream, text in zip(streams, ("prima parola", "parola ripetuta", "terza parte", "ultima")):
+            stream.result.text = text
+        recognizer = MagicMock()
+        recognizer.create_stream.side_effect = streams
+        events = []
+        recording = self._long_recording()
+        transcriber_module.transcribe_local(
+            ParakeetRecognizer(recognizer), recording, "it", 70.0, False, events.append,
+        )
+        self.assertEqual(recognizer.decode_stream.call_count, 4)
+        self.assertEqual(events, [{
+            "status": "result", "text": "prima parola parola ripetuta terza parte ultima",
+            "duration": 70.0,
+        }])
+        padding = int(CLOUD_EDGE_PAD_SECONDS * SAMPLE_RATE)
+        originals = []
+        for index, stream in enumerate(streams):
+            waveform = stream.accept_waveform.call_args.kwargs["waveform"]
+            leading = padding if index else 0
+            end = -padding if index < len(streams) - 1 else None
+            if leading:
+                self.assertTrue(np.all(waveform[:leading] == 0))
+            if end:
+                self.assertTrue(np.all(waveform[end:] == 0))
+            originals.append(waveform[leading:end])
+        heard = np.concatenate(originals)
+        np.testing.assert_array_equal(heard[padding:-padding], recording)
+
+    def test_parakeet_active_chunks_keep_native_handle_when_model_is_unloaded(self):
+        from whisper_engine.parakeet import ParakeetRecognizer
+        recognizer = MagicMock()
+        recognizer.create_stream.side_effect = [MagicMock() for _ in range(4)]
+        adapter = ParakeetRecognizer(recognizer)
+        recognizer.decode_stream.side_effect = lambda stream: adapter.close()
+        segments = adapter.transcribe(self._long_recording())
+        self.assertEqual(len(segments), 4)
+        self.assertEqual(recognizer.decode_stream.call_count, 4)
+        self.assertIsNone(adapter._recognizer)
+
+    def test_parakeet_compacts_only_long_digital_silence(self):
+        from whisper_engine.parakeet import _compact_digital_pauses
+        recording = self._long_recording(amplitude=0.0002)
+        recording[25 * SAMPLE_RATE:37 * SAMPLE_RATE] = 0
+        before = recording.copy()
+        compacted = _compact_digital_pauses(recording)
+        self.assertLess(compacted.size, recording.size)
+        np.testing.assert_array_equal(compacted[compacted != 0], recording[recording != 0])
+        np.testing.assert_array_equal(recording, before)
+        self.assertEqual(recording.size - compacted.size, 12 * SAMPLE_RATE - int(0.64 * SAMPLE_RATE))
+
+    def test_parakeet_preserves_very_weak_sound_inside_a_long_pause(self):
+        from whisper_engine.parakeet import _compact_digital_pauses
+        recording = self._long_recording()
+        recording[25 * SAMPLE_RATE:37 * SAMPLE_RATE] = np.float32(1e-8)
+        compacted = _compact_digital_pauses(recording)
+        self.assertIs(compacted, recording)
+
+    def test_parakeet_compacted_inference_keeps_original_result_duration_and_weak_samples(self):
+        from whisper_engine.parakeet import ParakeetRecognizer
+        recording = self._long_recording(amplitude=0.0002)
+        recording[25 * SAMPLE_RATE:37 * SAMPLE_RATE] = 0
+        recognizer = MagicMock()
+        recognizer.create_stream.return_value.result.text = "voce"
+        events = []
+        duration = recording.size / SAMPLE_RATE
+        transcriber_module.transcribe_local(
+            ParakeetRecognizer(recognizer), recording, "it", duration, False, events.append,
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["status"], "result")
+        self.assertEqual(events[0]["duration"], duration)
+        accepted = recognizer.create_stream.return_value.accept_waveform.call_args_list
+        heard = np.concatenate([call.kwargs["waveform"] for call in accepted])
+        np.testing.assert_array_equal(heard[heard != 0], recording[recording != 0])
+        self.assertLess(heard.size, recording.size)
+
     def _engine(self):
         engine = WhisperEngine()
         engine.models_dir = "/models"

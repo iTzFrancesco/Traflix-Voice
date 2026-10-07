@@ -8,10 +8,22 @@ import os
 import numpy as np
 from huggingface_hub import hf_hub_download
 
-from whisper_engine.constants import PARAKEET_MODEL_ID, SAMPLE_RATE
+from whisper_engine.constants import (
+    CLOUD_EDGE_PAD_SECONDS,
+    CLOUD_SILENCE_PADDING_SECONDS,
+    PARAKEET_MODEL_ID,
+    SAMPLE_RATE,
+)
 
 REPO_ID = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
+_PAUSE_FRAME_SAMPLES = SAMPLE_RATE // 50
+_MIN_PAUSE_FRAMES = 8
+_CHUNK_TARGET_SAMPLES = 20 * SAMPLE_RATE
+_CHUNK_SEARCH_SAMPLES = 8 * SAMPLE_RATE
+_MIN_CHUNK_SAMPLES = _CHUNK_TARGET_SAMPLES - _CHUNK_SEARCH_SAMPLES
+_CHUNK_CONTEXT_SAMPLES = int(CLOUD_EDGE_PAD_SECONDS * SAMPLE_RATE)
+_PAUSE_PADDING_SAMPLES = int(CLOUD_SILENCE_PADDING_SECONDS * SAMPLE_RATE)
 _MISSING_DEP_MESSAGE = (
     "Backend Parakeet non disponibile: pacchetto 'sherpa-onnx' non installato. "
     "Installalo con: py -m pip install sherpa-onnx (Windows) oppure "
@@ -74,6 +86,74 @@ def _worker_threads():
     return max(1, min(cap, count))
 
 
+def _compact_digital_pauses(audio):
+    """Shorten zero-only pauses over one second, keeping both edge contexts."""
+    if audio.size <= _CHUNK_TARGET_SAMPLES + _CHUNK_SEARCH_SAMPLES:
+        return audio
+    transitions = np.diff(np.concatenate(([False], audio == 0, [False])).astype(np.int8))
+    starts = np.flatnonzero(transitions == 1)
+    ends = np.flatnonzero(transitions == -1)
+    long = ends - starts > SAMPLE_RATE
+    if not long.any():
+        return audio
+    pieces = []
+    cursor = 0
+    for start, end in zip(starts[long], ends[long]):
+        pieces.append(audio[cursor:start + _PAUSE_PADDING_SAMPLES])
+        cursor = end - _PAUSE_PADDING_SAMPLES
+    pieces.append(audio[cursor:])
+    return np.concatenate(pieces)
+
+
+def _split_at_pauses(audio):
+    """Bound long inference inputs at quiet pauses, retaining every sample.
+
+    Full-clip inference grows disproportionately on long dictations. A cut
+    needs at least 160 ms of quiet audio; continuous or noisy speech stays
+    together rather than forcing a word boundary. Scale the quiet threshold
+    to the upper speech level so low-volume words and isolated clicks do not
+    make the entire recording look silent.
+    """
+    if audio.size <= _CHUNK_TARGET_SAMPLES + _CHUNK_SEARCH_SAMPLES:
+        return [audio]
+
+    frame_count = audio.size // _PAUSE_FRAME_SAMPLES
+    frames = audio[:frame_count * _PAUSE_FRAME_SAMPLES].reshape(
+        frame_count, _PAUSE_FRAME_SAMPLES,
+    )
+    peaks = np.max(np.abs(frames), axis=1)
+    quiet_threshold = min(0.001, float(np.percentile(peaks, 90)) * 0.01)
+    quiet = peaks <= quiet_threshold
+    if quiet.all():
+        return [audio]
+    transitions = np.diff(np.concatenate(([False], quiet, [False])).astype(np.int8))
+    starts = np.flatnonzero(transitions == 1)
+    ends = np.flatnonzero(transitions == -1)
+    cuts = [
+        int((start + end) * _PAUSE_FRAME_SAMPLES // 2)
+        for start, end in zip(starts, ends)
+        if end - start >= _MIN_PAUSE_FRAMES and start > 0 and end < frame_count
+    ]
+
+    chunks = []
+    start = 0
+    while audio.size - start > _CHUNK_TARGET_SAMPLES + _CHUNK_SEARCH_SAMPLES:
+        eligible = [
+            cut for cut in cuts
+            if start + _MIN_CHUNK_SAMPLES <= cut <= audio.size - 2 * SAMPLE_RATE
+        ]
+        if not eligible:
+            break
+        target = start + _CHUNK_TARGET_SAMPLES
+        cut = min(eligible, key=lambda point: abs(point - target))
+        chunks.append(audio[start:cut])
+        start = cut
+    if not chunks:
+        return [audio]
+    chunks.append(audio[start:])
+    return chunks
+
+
 class _Segment:
     __slots__ = ("text",)
 
@@ -99,7 +179,8 @@ class ParakeetRecognizer:
         sherpa-onnx holds ONNX sessions (~1 GB) behind this handle. Clearing
         the reference plus gc.collect() in the engine is what actually frees
         the RAM; without it `model = None` alone can leave the memory mapped
-        until the next collection cycle.
+        until the next collection cycle. An active transcription keeps its
+        own reference until its last chunk has completed.
         """
         try:
             self._recognizer = None
@@ -107,11 +188,23 @@ class ParakeetRecognizer:
             pass
 
     def transcribe(self, recording, language=""):
+        recognizer = self._recognizer
         audio = np.ascontiguousarray(recording, dtype=np.float32).reshape(-1)
-        stream = self._recognizer.create_stream()
-        stream.accept_waveform(sample_rate=SAMPLE_RATE, waveform=audio)
-        self._recognizer.decode_stream(stream)
-        return [_Segment(stream.result.text.strip())]
+        audio = _compact_digital_pauses(audio)
+        chunks = _split_at_pauses(audio)
+        segments = []
+        for index, chunk in enumerate(chunks):
+            # New boundaries need onset/tail context so TDT retains short
+            # words beside the cut, even when the natural pause is brief.
+            leading = _CHUNK_CONTEXT_SAMPLES if index else 0
+            trailing = _CHUNK_CONTEXT_SAMPLES if index < len(chunks) - 1 else 0
+            if leading or trailing:
+                chunk = np.pad(chunk, (leading, trailing))
+            stream = recognizer.create_stream()
+            stream.accept_waveform(sample_rate=SAMPLE_RATE, waveform=chunk)
+            recognizer.decode_stream(stream)
+            segments.append(_Segment(stream.result.text.strip()))
+        return segments
 
 
 def load(models_dir, log_func, num_threads=None):
