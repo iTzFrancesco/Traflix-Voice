@@ -113,20 +113,22 @@ function Overlay() {
     style.textContent = `
       * { margin:0; padding:0; box-sizing:border-box; }
       html,body { width:100%; height:100%; background:transparent; overflow:hidden; user-select:none; -webkit-user-select:none; }
-      #overlay-root { width:100%; height:100%; display:flex; align-items:center; justify-content:flex-start; }
+      #overlay-root { width:100%; height:100%; display:flex; align-items:center; justify-content:flex-start; padding:0 4px; }
+      #overlay-root > div { max-width:100%; }
       :root { --voice-gradient:linear-gradient(180deg,#ff8c00 0%,#ffd27a 50%,#ff8c00 100%); --separator-gradient:linear-gradient(180deg,rgba(255,98,107,0) 0%,rgba(255,98,107,.95) 50%,rgba(255,98,107,0) 100%); }
       @keyframes spin { to { transform:rotate(360deg); } }
       @keyframes widget-enter { 0% { opacity:0; transform:translate3d(0,8px,0) scale(.92); filter:blur(2px); } 58% { opacity:1; transform:translate3d(0,-1px,0) scale(1.018); filter:blur(0); } 100% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } }
       @keyframes widget-exit { 0% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } 100% { opacity:0; transform:translate3d(0,-5px,0) scale(.94); filter:blur(1.5px); } }
-      .ow { height:38px; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; outline:none; transition:border-color 0.3s cubic-bezier(0.4,0,0.2,1),box-shadow 0.3s cubic-bezier(0.4,0,0.2,1); }
+      .ow { height:38px; max-width:100%; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; outline:none; transform-origin:left center; transition:border-color 0.3s cubic-bezier(0.4,0,0.2,1),box-shadow 0.3s cubic-bezier(0.4,0,0.2,1); }
       .ow:focus-visible { outline:2px solid rgba(255,157,36,0.8); outline-offset:2px; }
       .ow.widget-enter { animation:widget-enter .42s cubic-bezier(.22,1,.36,1) both; }
+      .ow.widget-enter .lbl, .ow.widget-enter .spw, .ow.widget-enter .vw, .ow.widget-enter .sep { transition:none; }
       .ow.widget-exit { animation:widget-exit .22s cubic-bezier(.4,0,1,1) both; pointer-events:none; }
       .ow:active { cursor:grabbing; }
       .ow:hover { border-color:rgba(255,140,0,0.5); box-shadow:0 0 10px rgba(255,140,0,0.1); }
       .ow.rec { border-color:rgba(255,140,0,0.5); box-shadow:0 0 12px rgba(255,140,0,0.12); }
       .ow.proc { border-color:rgba(255,140,0,0.3); }
-      .lbl { font-size:0.82rem; font-weight:800; white-space:nowrap; letter-spacing:0.3px; background:var(--voice-gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; max-width:90px; transition:opacity 0.25s ease,max-width 0.3s cubic-bezier(0.4,0,0.2,1),margin 0.3s ease; overflow:hidden; flex-shrink:0; }
+      .lbl { font-size:0.82rem; font-weight:800; white-space:nowrap; letter-spacing:0.3px; background:var(--voice-gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; max-width:90px; transition:opacity 0.25s ease,max-width 0.3s cubic-bezier(0.4,0,0.2,1),margin 0.3s ease; overflow:hidden; flex-shrink:1; }
       .ow.rec .lbl, .ow.proc .lbl { opacity:0; max-width:0; margin:0; }
       .spw { display:flex; align-items:center; justify-content:center; width:0px; overflow:hidden; opacity:0; transition:width 0.3s cubic-bezier(0.4,0,0.2,1),opacity 0.25s ease; }
       .ow.proc .spw { width:20px; opacity:1; }
@@ -248,6 +250,7 @@ function Overlay() {
       const win = window.__TAURI__.window.getCurrentWindow();
 
       if (shouldShow) {
+        const shouldEnter = requestedVisibility !== true || widgetMotion === "exit";
         // Always show when active, in ANY mode. In "always" mode this is a
         // harmless no-op (Rust already shows it); in "recording" mode it is
         // essential. No dedup on show: a native X-close hides the window
@@ -256,7 +259,7 @@ function Overlay() {
         requestedVisibility = true;
         // Immediate show for responsiveness (recovers from X-close instantly).
         win.show().catch(() => {});
-        playWidgetEntry();
+        if (shouldEnter) playWidgetEntry();
         // Queued show preserves correct final ordering for fast cycles
         // (show -> hide -> show must end visible, never stuck hidden).
         visibilityQueue = visibilityQueue
