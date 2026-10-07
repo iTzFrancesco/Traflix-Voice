@@ -87,6 +87,6 @@ timings and do not include reference or recognized text. The benchmark's
 whole-clip mode reproduces the adapter used in Windows 1.7.6.
 
 The native `decode_stream` profile includes both encoder inference and token
-decoding, as shown by the [Sherpa-ONNX implementation](https://github.com/k2-fsa/sherpa-onnx/blob/master/sherpa-onnx/csrc/offline-recognizer-transducer-impl.h).
+decoding, as shown by the [Sherpa-ONNX Nemo implementation](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.7/sherpa-onnx/csrc/offline-recognizer-transducer-nemo-impl.h).
 The profiling evidence identifies the native inference call as the dominant
 cost; it does not independently time the encoder and token decoder.
