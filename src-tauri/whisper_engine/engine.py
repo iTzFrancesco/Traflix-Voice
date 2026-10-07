@@ -169,12 +169,12 @@ class WhisperEngine:
     def load_model(self, size):
         with self._model_lock:
             if self.model is not None and self.current_model_size == size:
-                return
+                return model_module.retain_model(self.model)
 
             self._loading_in_progress = True
             try:
-                # Free a previously loaded backend before allocating the new
-                # one so peak RSS never holds two ~1 GB recognizers at once.
+                # Release engine ownership before allocating the next backend.
+                # Active captures retain their handle until processing ends.
                 if self.model is not None:
                     model_module.release_model(self.model)
                     self.model = None
@@ -187,6 +187,7 @@ class WhisperEngine:
                 self.model = model_module.load_model(self.models_dir, size, self.log)
                 self.current_model_size = size
                 self._loading_in_progress = False
+                return model_module.retain_model(self.model)
             except:
                 self._loading_in_progress = False
                 raise
@@ -299,8 +300,7 @@ class WhisperEngine:
     ):
         """Dispatch recording without paying per-session thread startup."""
         audio_module.reset_volume_state()
-        cloud_options = ((self.cloud_correct_uncertain, self.cloud_vocabulary, self.cloud_speech_filter)
-                         if self.cloud_correct_uncertain or self.cloud_vocabulary or self.cloud_speech_filter else None)
+        cloud_options = self._capture_cloud_options()
         session = _RecordingSession(provider=self.provider, cloud_options=cloud_options)
         with self._recording_lock:
             previous = self._active_session
@@ -336,6 +336,11 @@ class WhisperEngine:
             prepare_connection()
             session.maintain_groq_connection(prepare_connection)
         return capture
+
+    def _capture_cloud_options(self):
+        if self.provider == "cloud":
+            return self.cloud_correct_uncertain, self.cloud_vocabulary, self.cloud_speech_filter
+        return None
 
     def close_transcription_worker(self):
         # Let the capture worker consume the stop sentinel before closing the
@@ -411,17 +416,20 @@ class WhisperEngine:
                                      correct_uncertain=correct_uncertain, vocabulary=vocabulary,
                                      speech_filter=speech_filter, speech_detector=self._detect_cloud_speech)
 
-    def _transcribe_local(self, recording, model_size, language, recording_duration, log_func=None):
+    def _transcribe_local(self, recording, model_size, language, recording_duration, log_func=None,
+                          local_model=None):
         log = log_func or self.log
-        with self._model_lock:
-            model = self.model
-            if model is None:
-                log({"status": "error", "message": "Modello scaricato durante la trascrizione."})
-                if not self._shutting_down:
-                    log({"status": "ready", "message": "Motore Whisper pronto."})
-                return
+        model = local_model
+        if model is None:
+            with self._model_lock:
+                model = model_module.retain_model(self.model)
+        if model is None:
+            log({"status": "error", "message": "Modello scaricato durante la trascrizione."})
+            if not self._shutting_down:
+                log({"status": "ready", "message": "Motore Whisper pronto."})
+            return
         transcriber.transcribe_local(model, recording, language, recording_duration,
-                                     self._shutting_down, log)
+                                     lambda: self._shutting_down, log)
 
     def _process_recording(
         self,
@@ -432,6 +440,7 @@ class WhisperEngine:
         provider,
         cloud_options=None,
         capture_latency_ms=None,
+        local_model=None,
     ):
         def tagged_log(data):
             # Tag every result with the backend that produced it so a dictation
@@ -455,7 +464,11 @@ class WhisperEngine:
                     self._transcribe_cloud(recording, language, recording_duration, tagged_log,
                                            cloud_options=cloud_options)
             else:
-                self._transcribe_local(recording, model_size, language, recording_duration, tagged_log)
+                if local_model is None:
+                    self._transcribe_local(recording, model_size, language, recording_duration, tagged_log)
+                else:
+                    self._transcribe_local(recording, model_size, language, recording_duration, tagged_log,
+                                           local_model=local_model)
         except Exception as e:
             self.log({"status": "error", "message": str(e)})
             if not self._shutting_down:
@@ -479,7 +492,8 @@ class WhisperEngine:
 
         try:
             if session is None:
-                session = _RecordingSession(capture_queue, provider=self.provider)
+                session = _RecordingSession(capture_queue, provider=self.provider,
+                                            cloud_options=self._capture_cloud_options())
                 with self._recording_lock:
                     self._active_session = session
                     self.audio_queue = session.queue
@@ -492,8 +506,9 @@ class WhisperEngine:
             # Keep provider and model choices from the session start so a
             # settings change during capture cannot reroute this recording.
             provider = session.provider if session.provider is not None else self.provider
+            local_model = None
             if provider == "local":
-                self.load_model(model_size)
+                local_model = self.load_model(model_size)
 
             if not session.active.is_set():
                 notify_cancelled_start()
@@ -566,10 +581,13 @@ class WhisperEngine:
             # unprocessed level.
             audio_module.apply_automatic_gain(recording)
 
-            process = (
-                partial(self._process_recording, cloud_options=session.cloud_options)
-                if session.cloud_options is not None else self._process_recording
-            )
+            process_options = {}
+            if session.cloud_options is not None:
+                process_options["cloud_options"] = session.cloud_options
+            if local_model is not None:
+                process_options["local_model"] = local_model
+            process = (partial(self._process_recording, **process_options)
+                       if process_options else self._process_recording)
             if session.first_block_at is not None:
                 capture_latency_ms = int((session.first_block_at - session.created_at) * 1000)
             else:

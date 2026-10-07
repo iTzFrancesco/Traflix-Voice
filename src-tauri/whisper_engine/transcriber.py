@@ -577,7 +577,7 @@ def trim_cloud_silence(recording):
 
 
 def transcribe_local(model, recording, language, recording_duration, shutting_down, log_func):
-    if shutting_down:
+    if _shutdown_requested(shutting_down):
         return
 
     # Use the same conservative edge trim as cloud. Quiet speech must reach
@@ -587,7 +587,8 @@ def transcribe_local(model, recording, language, recording_duration, shutting_do
         # Pure silence: skip seconds of inference (R20) and keep the local
         # contract of always ending with a result event. The frontend guards
         # empty text (no paste, UI back to ready).
-        log_func({"status": "result", "text": "", "duration": recording_duration})
+        if not _shutdown_requested(shutting_down):
+            log_func({"status": "result", "text": "", "duration": recording_duration})
         return
     # A dictation that starts/ends mid-word has no natural edge silence;
     # give the transducer the same onset context the cloud path receives.
@@ -609,6 +610,8 @@ def transcribe_local(model, recording, language, recording_duration, shutting_do
             log_func({"status": "ready", "message": "Motore Whisper pronto."})
             return
 
+    if _shutdown_requested(shutting_down):
+        return
     if _TRAF_DEBUG:
         import sys as _sys
         _sys.stderr.write(f"[PY-DEBUG] transcribe_local result len={len(text)} duration={recording_duration}\n")

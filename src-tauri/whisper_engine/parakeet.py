@@ -173,6 +173,10 @@ class ParakeetRecognizer:
     def __init__(self, recognizer):
         self._recognizer = recognizer
 
+    def snapshot(self):
+        """Pin native sessions independently of the engine's unloadable adapter."""
+        return ParakeetRecognizer(self._recognizer)
+
     def close(self):
         """Drop the native recognizer so RSS is released on unload.
 

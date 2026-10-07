@@ -28,6 +28,11 @@ def release_model(model):
         pass
 
 
+def retain_model(model):
+    """Pin the native handle for a capture or inference already in progress."""
+    return model.snapshot() if isinstance(model, parakeet_backend.ParakeetRecognizer) else model
+
+
 def verify_model(models_dir, size):
     return parakeet_backend.verify(models_dir)
 

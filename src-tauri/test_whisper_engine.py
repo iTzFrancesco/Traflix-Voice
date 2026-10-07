@@ -1184,7 +1184,7 @@ class TestTranscriptionFlow(unittest.TestCase):
 
         self._mock_input_stream(engine, [fake_audio])
 
-        with patch.object(engine, "load_model"):
+        with patch.object(engine, "load_model", return_value=engine.model):
             engine.transcribe(0, "small")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
@@ -1200,7 +1200,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine = self._setup_engine()
         self._mock_input_stream(engine, [])
 
-        with patch.object(engine, "load_model"):
+        with patch.object(engine, "load_model", return_value=engine.model):
             engine.transcribe(0, "small")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
@@ -1222,7 +1222,7 @@ class TestTranscriptionFlow(unittest.TestCase):
 
         self._mock_input_stream(engine, [block1, block2])
 
-        with patch.object(engine, "load_model"):
+        with patch.object(engine, "load_model", return_value=engine.model):
             engine.transcribe(0, "small")
 
         call_args = engine.model.transcribe.call_args
@@ -1251,7 +1251,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine.model.transcribe.return_value = [mock_segment]
 
         self._mock_input_stream(engine, [np.full((BLOCK_SIZE, 1), 0.1, dtype=np.float32)])
-        with patch.object(engine, "load_model"):
+        with patch.object(engine, "load_model", return_value=engine.model):
             engine.transcribe(0, "small")
 
         results = [e for e in events if e.get("status") == "result"]
@@ -1270,7 +1270,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         fake_audio = np.full((BLOCK_SIZE, 1), 0.5, dtype=np.float32)
         self._mock_input_stream(engine, [fake_audio])
 
-        with patch.object(engine, "load_model"):
+        with patch.object(engine, "load_model", return_value=engine.model):
             engine.transcribe(0, "small")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
@@ -1296,7 +1296,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         sd.InputStream.return_value.__enter__ = fake_enter
         sd.InputStream.return_value.__exit__ = MagicMock(return_value=False)
 
-        def dispatch_cloud(*_args):
+        def dispatch_cloud(*_args, **_kwargs):
             engine.provider = "local"
 
         with patch.object(engine, "_transcribe_cloud", side_effect=dispatch_cloud) as cloud, \
@@ -1342,7 +1342,7 @@ class TestTranscriptionFlow(unittest.TestCase):
                 elif listening_count == 2:
                     second_listening.set()
 
-        def fake_cloud(*_args):
+        def fake_cloud(*_args, **_kwargs):
             cloud_request_started.set()
             release_cloud_request.wait(timeout=2)
 
