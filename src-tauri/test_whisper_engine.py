@@ -1730,7 +1730,7 @@ class TestLocalSpeedRounds(unittest.TestCase):
         from whisper_engine.parakeet import _worker_threads
         threads = _worker_threads()
         self.assertGreaterEqual(threads, 1)
-        self.assertLessEqual(threads, 4)
+        self.assertLessEqual(threads, 6)
 
     def test_parakeet_load_forwards_num_threads(self):
         from whisper_engine import parakeet as parakeet_module

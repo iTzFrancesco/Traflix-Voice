@@ -67,9 +67,11 @@ def _worker_threads():
         count = os.cpu_count() or 1
     except Exception:
         count = 1
-    # Four threads saturate the transducer on a 6-core CPU while leaving
-    # headroom for the rest of the desktop during dictation.
-    return max(1, min(4, count))
+    # Six threads improved long-clip decoding on a 6-core/12-thread Windows
+    # host without changing short-clip latency. Preserve the four-thread cap
+    # on smaller CPUs so longer dictations do not crowd out the desktop.
+    cap = 6 if count >= 12 else 4
+    return max(1, min(cap, count))
 
 
 class _Segment:
