@@ -1,7 +1,7 @@
 {
   "name": "traflix-voice",
   "private": true,
-  "version": "1.7.8",
+  "version": "1.7.9",
   "type": "module",
   "description": "Privacy-focused desktop voice dictation for Windows, built with Tauri, Rust, React, and Whisper.",
   "scripts": {
