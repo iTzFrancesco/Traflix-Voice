@@ -119,14 +119,13 @@ function Overlay() {
       @keyframes spin { to { transform:rotate(360deg); } }
       @keyframes widget-enter { 0% { opacity:0; transform:translate3d(0,8px,0) scale(.92); filter:blur(2px); } 58% { opacity:1; transform:translate3d(0,-1px,0) scale(1.018); filter:blur(0); } 100% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } }
       @keyframes widget-exit { 0% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } 100% { opacity:0; transform:translate3d(0,-5px,0) scale(.94); filter:blur(1.5px); } }
-      .ow { height:38px; max-width:100%; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; outline:none; transform-origin:left center; transition:border-color 0.3s cubic-bezier(0.4,0,0.2,1),box-shadow 0.3s cubic-bezier(0.4,0,0.2,1); }
-      .ow:focus-visible { outline:2px solid rgba(255,157,36,0.8); outline-offset:2px; }
+      .ow { height:38px; max-width:100%; background:rgba(18,19,17,0.96); border:1px solid rgba(255,157,36,0.4); border-radius:12px; display:inline-flex; align-items:center; gap:4px; padding:0 10px 0 8px; cursor:grab; position:relative; outline:none; transform-origin:left center; transition:border-color 0.3s cubic-bezier(0.4,0,0.2,1),box-shadow 0.12s ease-out; }
       .ow.widget-enter { animation:widget-enter .42s cubic-bezier(.22,1,.36,1) both; }
       .ow.widget-enter .lbl, .ow.widget-enter .spw, .ow.widget-enter .vw, .ow.widget-enter .sep { transition:none; }
       .ow.widget-exit { animation:widget-exit .22s cubic-bezier(.4,0,1,1) both; pointer-events:none; }
-      .ow:active { cursor:grabbing; }
-      .ow:hover { border-color:rgba(255,140,0,0.5); box-shadow:0 0 10px rgba(255,140,0,0.1); }
-      .ow.rec { border-color:rgba(255,140,0,0.5); box-shadow:0 0 12px rgba(255,140,0,0.12); }
+      .ow:active { cursor:grabbing; box-shadow:0 0 0 2px rgba(255,140,0,0.48),0 0 14px rgba(255,140,0,0.4); }
+      .ow:hover { border-color:rgba(255,140,0,0.5); }
+      .ow.rec { border-color:rgba(255,140,0,0.5); }
       .ow.proc { border-color:rgba(255,140,0,0.3); }
       .lbl { font-size:0.82rem; font-weight:800; white-space:nowrap; letter-spacing:0.3px; background:var(--voice-gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; max-width:90px; transition:opacity 0.25s ease,max-width 0.3s cubic-bezier(0.4,0,0.2,1),margin 0.3s ease; overflow:hidden; flex-shrink:1; }
       .ow.rec .lbl, .ow.proc .lbl { opacity:0; max-width:0; margin:0; }
