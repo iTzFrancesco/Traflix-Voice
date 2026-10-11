@@ -513,7 +513,7 @@ body { display:block !important; }
 .dragwrap.dragging .gi { border-color:rgba(255,157,36,.7); box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 0 0 3px rgba(255,157,36,.18), 0 14px 34px rgba(255,140,0,.25); transform:translateY(-1px); }
 
 /* ===== liquid glass widget ===== */
-.gi { position:relative; height:42px; display:inline-flex; align-items:center; gap:8px; padding:0 14px 0 8px; border-radius:99px; cursor:grab;
+.gi { position:relative; height:42px; display:inline-flex; align-items:center; gap:0; padding:0 14px 0 8px; border-radius:99px; cursor:grab;
   background:linear-gradient(145deg,rgba(40,38,32,.72),rgba(16,17,15,.78)); backdrop-filter:blur(18px) saturate(1.3); -webkit-backdrop-filter:blur(18px) saturate(1.3);
   border:1px solid rgba(255,255,255,.14); box-shadow:inset 0 1px 0 rgba(255,255,255,.14), 0 10px 30px rgba(0,0,0,.45); transition:border-color .25s, transform .25s; }
 .gi:hover { transform:translateY(-1px); border-color:rgba(255,157,36,.55); }
@@ -525,16 +525,16 @@ body { display:block !important; }
 @keyframes grot { to { --ga:360deg; } }
 .gi-logo { position:relative; width:28px; height:28px; }
 .gi-logo img { width:28px; height:28px; border-radius:50%; display:block; }
-.gi-label { font-size:.84rem; font-weight:800; line-height:1; letter-spacing:.3px; background:${ORANGE_GRADIENT}; -webkit-background-clip:text; background-clip:text; color:transparent; max-width:110px; overflow:hidden; white-space:nowrap; transition:max-width .35s cubic-bezier(.22,1,.36,1),opacity .25s; }
+.gi-label { font-size:.84rem; font-weight:800; line-height:1; letter-spacing:.3px; margin-left:12px; background:${ORANGE_GRADIENT}; -webkit-background-clip:text; background-clip:text; color:transparent; max-width:110px; overflow:hidden; white-space:nowrap; transition:max-width .35s cubic-bezier(.22,1,.36,1),opacity .25s,margin-left .3s; }
 .gi.is-rec .gi-label, .gi.is-proc .gi-label { max-width:0; opacity:0; margin:0; }
-.gi-spinner-wrap { display:flex; gap:7px; align-items:center; max-width:0; opacity:0; overflow:hidden; white-space:nowrap; transition:max-width .35s,opacity .25s; }
-.gi-spinner-wrap.show { max-width:150px; opacity:1; }
+.gi-spinner-wrap { display:flex; gap:7px; align-items:center; max-width:0; margin-left:0; opacity:0; overflow:hidden; white-space:nowrap; transition:max-width .35s,opacity .25s,margin-left .3s; }
+.gi-spinner-wrap.show { max-width:150px; margin-left:8px; opacity:1; }
 .gi-spinner { width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,210,122,.25); border-top-color:#ffd27a; animation:spin .8s linear infinite; }
 .gi-proc-label { font-size:.84rem; font-weight:800; line-height:1; letter-spacing:.3px; background:linear-gradient(180deg,#ff8c00 0%,#ffd27a 50%,#ff8c00 100%); -webkit-background-clip:text; background-clip:text; color:transparent; }
-.gi-sep { width:0; height:18px; border-radius:99px; background:linear-gradient(180deg,transparent,rgba(255,98,107,.9),transparent); opacity:0; transition:width .3s,opacity .25s; }
-.gi-sep.show { width:2px; opacity:1; }
-.gi-viz { display:flex; align-items:center; max-width:0; opacity:0; overflow:hidden; transition:max-width .35s cubic-bezier(.22,1,.36,1),opacity .25s; }
-.gi-viz.show { max-width:130px; opacity:1; }
+.gi-sep { width:0; height:18px; margin-left:0; border-radius:99px; background:linear-gradient(180deg,transparent,rgba(255,98,107,.9),transparent); opacity:0; transition:width .3s,opacity .25s,margin-left .3s; }
+.gi-sep.show { width:2px; margin-left:8px; opacity:1; }
+.gi-viz { display:flex; align-items:center; max-width:0; margin-left:0; opacity:0; overflow:hidden; transition:max-width .35s cubic-bezier(.22,1,.36,1),opacity .25s,margin-left .3s; }
+.gi-viz.show { max-width:130px; margin-left:8px; opacity:1; }
 .gi-bar { width:3px; border-radius:99px; background:${ORANGE_GRADIENT}; transform:scaleY(.1); transform-origin:center; box-shadow:0 0 8px rgba(255,170,60,.6); }
 .gi-hint { position:absolute; top:calc(100% + 7px); left:0; color:rgba(245,243,239,.72); font:600 10px/1 "Segoe UI",sans-serif; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .18s; text-shadow:0 1px 5px #000; }
 .gi:hover .gi-hint { opacity:1; }
