@@ -142,7 +142,9 @@ function GlassIslandWidget({
       key={enterKey}
       role="button"
       tabIndex={0}
-      onMouseDown={() => {
+      onMouseDown={(e) => {
+        const wrap = (e.currentTarget as HTMLElement).closest(".dragwrap") as HTMLElement | null;
+        if (Date.now() - Number(wrap?.dataset.dragEnd || 0) < 350) return;
         const now = Date.now();
         if (now - lastClick.current < 300) {
           lastClick.current = 0;
@@ -277,15 +279,21 @@ function TimelinePlayer({
 
 function Draggable({ children, showCoords }: { children: ReactNode; showCoords?: boolean }) {
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const movedRef = useRef(false);
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
 
   return (
     <div className="dcol">
       <div
-        className="dragwrap"
+        ref={wrapRef}
+        className={dragging ? "dragwrap dragging" : "dragwrap"}
         style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
+          movedRef.current = false;
+          setDragging(true);
           drag.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y };
         }}
         onPointerMove={(e) => {
@@ -294,13 +302,19 @@ function Draggable({ children, showCoords }: { children: ReactNode; showCoords?:
           const dx = e.clientX - d.sx;
           const dy = e.clientY - d.sy;
           if (Math.hypot(dx, dy) < 5) return;
+          movedRef.current = true;
           setPos({ x: Math.round(d.ox + dx), y: Math.round(d.oy + dy) });
         }}
         onPointerUp={() => {
+          if (movedRef.current && wrapRef.current) wrapRef.current.dataset.dragEnd = String(Date.now());
+          movedRef.current = false;
           drag.current = null;
+          setDragging(false);
         }}
         onPointerCancel={() => {
+          movedRef.current = false;
           drag.current = null;
+          setDragging(false);
         }}
       >
         {children}
@@ -496,6 +510,7 @@ body { display:block !important; }
 .dragbar { display:flex; gap:10px; align-items:center; color:#8f8c87; font-size:.8rem; }
 .dragbar code { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); padding:3px 10px; border-radius:8px; font-variant-numeric:tabular-nums; }
 .btn.mini { padding:6px 12px; font-size:.78rem; border-radius:8px; }
+.dragwrap.dragging .gi { border-color:rgba(255,157,36,.7); box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 0 0 3px rgba(255,157,36,.18), 0 14px 34px rgba(255,140,0,.25); transform:translateY(-1px); }
 
 /* ===== liquid glass widget ===== */
 .gi { position:relative; height:42px; display:inline-flex; align-items:center; gap:8px; padding:0 14px 0 8px; border-radius:99px; cursor:grab;
