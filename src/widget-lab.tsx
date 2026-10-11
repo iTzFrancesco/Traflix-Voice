@@ -135,11 +135,27 @@ function GlassIslandWidget({
   onDoubleClick: () => void;
 }) {
   const lastClick = useRef(0);
+  const [leaving, setLeaving] = useState(false);
+  const [cycle, setCycle] = useState(0);
   const rec = state === "recording";
   const proc = state === "processing";
+
+  // Apertura console come nel widget vero: exit 220ms → evento → rientro con enter.
+  const handleOpen = useCallback(() => {
+    if (leaving) return;
+    setLeaving(true);
+    window.setTimeout(() => {
+      onDoubleClick();
+      window.setTimeout(() => {
+        setLeaving(false);
+        setCycle((c) => c + 1);
+      }, 550);
+    }, 220);
+  }, [leaving, onDoubleClick]);
+
   return (
     <div
-      key={enterKey}
+      key={`${enterKey}-${cycle}`}
       role="button"
       tabIndex={0}
       onMouseDown={(e) => {
@@ -148,7 +164,7 @@ function GlassIslandWidget({
         const now = Date.now();
         if (now - lastClick.current < 300) {
           lastClick.current = 0;
-          onDoubleClick();
+          handleOpen();
           return;
         }
         lastClick.current = now;
@@ -156,10 +172,10 @@ function GlassIslandWidget({
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onDoubleClick();
+          handleOpen();
         }
       }}
-      className={`gi widget-enter ${rec ? "is-rec" : ""} ${proc ? "is-proc" : ""}`}
+      className={`gi ${leaving ? "widget-exit" : "widget-enter"} ${rec ? "is-rec" : ""} ${proc ? "is-proc" : ""}`}
       aria-label={rec ? "Registrazione in corso" : proc ? "Elaborazione trascrizione" : "Traflix Voice pronta"}
       title="Doppio clic per aprire la console"
     >
@@ -340,6 +356,7 @@ function WidgetLab() {
   const [sounds, setSounds] = useState(true);
   const [enterKey, setEnterKey] = useState(0);
   const [lastEvent, setLastEvent] = useState("Premi “Registra” per iniziare.");
+  const [dashOpen, setDashOpen] = useState(false);
   const [tlState, setTlState] = useState<WidgetState>("idle");
   const [tlVol, setTlVol] = useState(0);
   const [tlIdx, setTlIdx] = useState(0);
@@ -375,7 +392,12 @@ function WidgetLab() {
   }, []);
 
   const openMain = useCallback(() => {
-    setLastEvent("⤢ Doppio clic — si aprirebbe la console.");
+    setLastEvent("⤢ Uscita 220ms → apro la console…");
+    window.setTimeout(() => setDashOpen(true), 200);
+    window.setTimeout(() => {
+      setDashOpen(false);
+      setLastEvent("⤢ Console chiusa — il widget rientra.");
+    }, 1500);
   }, []);
 
   const onScrub = useCallback((s: WidgetState, v: number, i: number) => {
@@ -450,6 +472,16 @@ function WidgetLab() {
         </div>
       </section>
 
+      {dashOpen && (
+        <div className="dashveil">
+          <div className="dashcard">
+            <div className="dashcard-bar"><i /><i /><i /><span>Console Traflix Voice</span></div>
+            <div className="dashcard-tabs"><b>Home</b><span>IA</span><span>Tasti</span><span>Cronologia</span><span>Sistema</span></div>
+            <p>Anteprima simulata — si chiude da sola e il widget rientra.</p>
+          </div>
+        </div>
+      )}
+
       <footer className="lab-foot">Widget Lab · Liquid Glass · http://localhost:1420/widget-lab.html</footer>
     </div>
   );
@@ -501,6 +533,18 @@ body { display:block !important; }
 .tl-steps b { color:#ffd9a3; }
 .tl-steps button span { margin-left:auto; color:#8f8c87; font-size:.78rem; }
 .lab-foot { max-width:1100px; margin:26px auto 0; color:#74716c; font-size:.78rem; text-align:center; }
+.dashveil { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; background:rgba(5,6,5,.6); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); animation:dashveil-in .25s ease both; }
+.dashcard { width:min(430px,86vw); background:linear-gradient(145deg,#20211e,#141511); border:1px solid rgba(255,157,36,.4); border-radius:18px; padding:16px 18px 18px; box-shadow:0 30px 80px rgba(0,0,0,.6); animation:dashcard-in .38s cubic-bezier(.22,1,.36,1) both; }
+.dashcard-bar { display:flex; gap:6px; align-items:center; margin-bottom:12px; color:#ffd9a3; font-weight:800; }
+.dashcard-bar i { width:10px; height:10px; border-radius:50%; background:rgba(255,255,255,.15); }
+.dashcard-bar i:first-child { background:rgba(255,98,107,.8); }
+.dashcard-bar span { margin-left:6px; font-size:.9rem; }
+.dashcard-tabs { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+.dashcard-tabs b, .dashcard-tabs span { font-size:.78rem; padding:6px 12px; border-radius:99px; border:1px solid rgba(255,255,255,.12); color:#b9b6b0; }
+.dashcard-tabs b { background:rgba(255,157,36,.16); border-color:#ff9d24; color:#ffd9a3; }
+.dashcard p { margin:0; color:#8f8c87; font-size:.82rem; }
+@keyframes dashveil-in { from { opacity:0; } }
+@keyframes dashcard-in { 0% { opacity:0; transform:translateY(14px) scale(.94); } 60% { opacity:1; transform:translateY(-2px) scale(1.01); } 100% { opacity:1; transform:none; } }
 .eyebrow { color:#ff9d24; font-size:.7rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
 
 /* ===== drag & drop test ===== */
@@ -525,16 +569,16 @@ body { display:block !important; }
 @keyframes grot { to { --ga:360deg; } }
 .gi-logo { position:relative; width:28px; height:28px; }
 .gi-logo img { width:28px; height:28px; border-radius:50%; display:block; }
-.gi-label { font-size:.84rem; font-weight:800; line-height:1; letter-spacing:.3px; margin-left:12px; background:${ORANGE_GRADIENT}; -webkit-background-clip:text; background-clip:text; color:transparent; max-width:110px; overflow:hidden; white-space:nowrap; transition:max-width .35s cubic-bezier(.22,1,.36,1),opacity .25s,margin-left .3s; }
+.gi-label { font-size:.84rem; font-weight:800; line-height:1; letter-spacing:.3px; margin-left:12px; background:${ORANGE_GRADIENT}; -webkit-background-clip:text; background-clip:text; color:transparent; max-width:110px; overflow:hidden; white-space:nowrap; transition:max-width .38s cubic-bezier(.22,1,.36,1),margin-left .38s cubic-bezier(.22,1,.36,1),opacity .22s ease; }
 .gi.is-rec .gi-label, .gi.is-proc .gi-label { max-width:0; opacity:0; margin:0; }
-.gi-spinner-wrap { display:flex; gap:7px; align-items:center; max-width:0; margin-left:0; opacity:0; overflow:hidden; white-space:nowrap; transition:max-width .35s,opacity .25s,margin-left .3s; }
-.gi-spinner-wrap.show { max-width:150px; margin-left:8px; opacity:1; }
+.gi-spinner-wrap { display:flex; gap:7px; align-items:center; max-width:0; margin-left:0; opacity:0; overflow:hidden; white-space:nowrap; transition:max-width .38s cubic-bezier(.22,1,.36,1),margin-left .38s cubic-bezier(.22,1,.36,1),opacity .22s ease; }
+.gi-spinner-wrap.show { max-width:150px; margin-left:8px; opacity:1; transition-delay:.08s; }
 .gi-spinner { width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,210,122,.25); border-top-color:#ffd27a; animation:spin .8s linear infinite; }
 .gi-proc-label { font-size:.84rem; font-weight:800; line-height:1; letter-spacing:.3px; background:linear-gradient(180deg,#ff8c00 0%,#ffd27a 50%,#ff8c00 100%); -webkit-background-clip:text; background-clip:text; color:transparent; }
-.gi-sep { width:0; height:18px; margin-left:0; border-radius:99px; background:linear-gradient(180deg,transparent,rgba(255,98,107,.9),transparent); opacity:0; transition:width .3s,opacity .25s,margin-left .3s; }
-.gi-sep.show { width:2px; margin-left:8px; opacity:1; }
-.gi-viz { display:flex; align-items:center; max-width:0; margin-left:0; opacity:0; overflow:hidden; transition:max-width .35s cubic-bezier(.22,1,.36,1),opacity .25s,margin-left .3s; }
-.gi-viz.show { max-width:130px; margin-left:8px; opacity:1; }
+.gi-sep { width:0; height:18px; margin-left:0; border-radius:99px; background:linear-gradient(180deg,transparent,rgba(255,98,107,.9),transparent); opacity:0; transition:width .38s cubic-bezier(.22,1,.36,1),margin-left .38s cubic-bezier(.22,1,.36,1),opacity .22s ease; }
+.gi-sep.show { width:2px; margin-left:8px; opacity:1; transition-delay:.06s; }
+.gi-viz { display:flex; align-items:center; max-width:0; margin-left:0; opacity:0; overflow:hidden; transition:max-width .38s cubic-bezier(.22,1,.36,1),margin-left .38s cubic-bezier(.22,1,.36,1),opacity .22s ease; }
+.gi-viz.show { max-width:130px; margin-left:8px; opacity:1; transition-delay:.1s; }
 .gi-bar { width:3px; border-radius:99px; background:${ORANGE_GRADIENT}; transform:scaleY(.1); transform-origin:center; box-shadow:0 0 8px rgba(255,170,60,.6); }
 .gi-hint { position:absolute; top:calc(100% + 7px); left:0; color:rgba(245,243,239,.72); font:600 10px/1 "Segoe UI",sans-serif; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .18s; text-shadow:0 1px 5px #000; }
 .gi:hover .gi-hint { opacity:1; }
