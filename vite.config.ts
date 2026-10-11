@@ -13,7 +13,6 @@ export default defineConfig({
       input: {
         main: "index.html",
         overlay: "overlay.html",
-        lab: "widget-lab.html",
       },
     },
   },
