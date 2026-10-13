@@ -72,6 +72,47 @@ class TestCloudQuality(unittest.TestCase):
                            quality.CloudTranscript("Grazie per aver guardato questo video.", True, True)):
             self.assertFalse(quality.should_correct(transcript, "it"))
 
+    def test_rejects_semantic_changes_with_similar_spelling(self):
+        examples = [
+            ("Vorrei ordinare il materiale per domani.", "Vorrei ordinato il materiale per domani."),
+            ("Devo trasmettere queste informazioni al gruppo.", "Devo trasmetterle queste informazioni al gruppo."),
+            ("Il nome indicato nel documento è francesco.", "Il nome indicato nel documento è francesca."),
+            ("La formula rimane x + y = z.", "La formula rimane x - y = z."),
+            ("La formula rimane x + y = z.", "La formula rimane x y + = z."),
+            ("Il direttore dice, Maria lavora bene, oggi.", "Il direttore, dice Maria, lavora bene oggi."),
+            ("La riunione è confermata per domani.", "La riunione è confermata per domani?"),
+        ]
+        for original, changed in examples:
+            with self.subTest(original=original):
+                self.assertFalse(quality.acceptable_correction(original, changed))
+
+    def test_no_speech_metadata_alone_does_not_discard_corrector_input(self):
+        with httpx.Client(transport=httpx.MockTransport(lambda _: self.fail("Unexpected correction"))) as client:
+            result = quality.correct_cloud_transcript(client,
+                quality.CloudTranscript("Grazie", no_speech=True), "it", lambda: False)
+        self.assertEqual(result.text, "Grazie")
+
+    def test_correction_does_not_enable_speech_filter(self):
+        for correction in (False, True):
+            for speech_filter in (False, True):
+                with self.subTest(correction=correction, speech_filter=speech_filter):
+                    calls, events = [], []
+                    def handler(request):
+                        calls.append(request)
+                        if correction or speech_filter:
+                            return httpx.Response(200, json={"text": "Grazie", "segments": [
+                                {"text": "Grazie", "avg_logprob": -1.2, "no_speech_prob": 0.9}]})
+                        return httpx.Response(200, text="Grazie")
+                    with httpx.Client(transport=httpx.MockTransport(handler)) as client, \
+                         patch.object(transcriber, "acquire_groq_client", return_value=client), \
+                         patch.object(transcriber, "release_groq_client"):
+                        transcriber.transcribe_cloud(np.full(512, 0.01, dtype=np.float32),
+                            "it", 1.0, "synthetic-test-key", False, events.append, None,
+                            correct_uncertain=correction, speech_filter=speech_filter)
+                    results = [event["text"] for event in events if event["status"] == "result"]
+                    self.assertEqual(results, [] if speech_filter else ["Grazie"])
+                    self.assertEqual(len(calls), 1)
+
     def test_invalid_metadata_keeps_valid_transcript(self):
         for invalid in (None, "bad", float("nan"), float("inf"), 10**400, True):
             with self.subTest(metadata=str(type(invalid))):

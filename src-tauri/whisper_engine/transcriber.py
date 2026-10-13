@@ -689,12 +689,13 @@ def transcribe_cloud(
             response.content, correct_uncertain or speech_filter, recording_duration)
         if speech_present is True and transcript.no_speech:
             transcript = cloud_quality.CloudTranscript(transcript.text, transcript.uncertain)
-        correction = (
-            cloud_quality.correct_cloud_transcript(
+        if speech_filter and transcript.no_speech:
+            correction = cloud_quality.CorrectionResult("")
+        elif correct_uncertain:
+            correction = cloud_quality.correct_cloud_transcript(
                 client, transcript, cloud_language, lambda: _shutdown_requested(shutting_down))
-            if correct_uncertain else cloud_quality.CorrectionResult(
-                "" if speech_filter and transcript.no_speech else transcript.text)
-        )
+        else:
+            correction = cloud_quality.CorrectionResult(transcript.text)
         text = correction.text
 
         if _TRAF_DEBUG:

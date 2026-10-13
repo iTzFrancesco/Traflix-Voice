@@ -144,23 +144,8 @@ def should_correct(transcript, language):
 
 
 def _small_spelling_change(before, after):
-    if before == after:
-        return True
-    known_typos = {("erori", "errori")}
-    if (before, after) in known_typos:
-        return True
-    if len(before) < 6 or len(after) < 6 or before[:4] != after[:4]:
-        return False
-    # Accept minor spelling/inflection edits, not a replacement of a word by
-    # an unrelated guess. A low ASR confidence is not proof of what was said.
-    previous = list(range(len(after) + 1))
-    for index, character in enumerate(before, 1):
-        current = [index]
-        for column, other in enumerate(after, 1):
-            current.append(min(current[-1] + 1, previous[column] + 1,
-                               previous[column - 1] + (character != other)))
-        previous = current
-    return previous[-1] <= 2
+    # Edit distance cannot distinguish a typo from a different word or name.
+    return before == after or (before, after) in {("erori", "errori")}
 
 
 def acceptable_correction(original, candidate):
@@ -170,6 +155,9 @@ def acceptable_correction(original, candidate):
     before, after = _WORDS.findall(original), _WORDS.findall(candidate)
     lower_before, lower_after = [w.casefold() for w in before], [w.casefold() for w in after]
     if len(before) != len(after) or _NUMBERS.findall(original) != _NUMBERS.findall(candidate):
+        return False
+    if ([re.sub(r"\s+", "", gap) for gap in _WORDS.split(original)]
+            != [re.sub(r"\s+", "", gap) for gap in _WORDS.split(candidate)]):
         return False
     def protected_word(word):
         return (word in _NEGATIONS or word in _NUMBER_WORDS or word in _ENGLISH_NUMBER
@@ -194,6 +182,12 @@ def acceptable_correction(original, candidate):
                             and word_spans[index].start() in agreement_verbs)
         agreement_change |= (old in _PARTICIPLES and new in _PARTICIPLES
                              and index > 0 and word_spans[index - 1].start() in agreement_verbs)
+        participle_context = (index > 0 and word_spans[index - 1].start() in agreement_verbs)
+        participle_context |= (index > 1 and lower_before[index - 1] in _PARTICIPLES
+                               and word_spans[index - 2].start() in agreement_verbs)
+        agreement_change |= (participle_context and old[:-1] == new[:-1]
+                             and old.endswith(("ato", "ata", "ati", "ate", "uto", "uta", "uti", "ute", "ito", "ita", "iti", "ite"))
+                             and new.endswith(("ato", "ata", "ati", "ate", "uto", "uta", "uti", "ute", "ito", "ita", "iti", "ite")))
         if not agreement_change and not _small_spelling_change(old, new):
             return False
         changes += 1
@@ -235,8 +229,6 @@ def _quota_cooldown(client, response):
 
 
 def correct_cloud_transcript(client, transcript, language, shutting_down):
-    if transcript.no_speech:
-        return CorrectionResult("")
     original = local_cleanup(transcript.text, language)
     fallback = CorrectionResult(original)
     if shutting_down() or not should_correct(transcript, language) or not _correction_allowed(client):
