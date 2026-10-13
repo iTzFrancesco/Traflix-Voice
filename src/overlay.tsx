@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 const IS_DEV = import.meta.env.DEV || ["localhost", "127.0.0.1"].includes(window.location.hostname);
 const WIDGET_EXIT_MS = 220;
+const BAR_MAX_HEIGHT = 28;
 
 const RESPONSIVE_VOLUME_LUT = Array.from({ length: 101 }, (_, index) => {
   const normalized = index / 100;
@@ -114,16 +115,15 @@ function Overlay() {
       * { margin:0; padding:0; box-sizing:border-box; }
       html,body { width:100%; height:100%; background:transparent; overflow:hidden; user-select:none; -webkit-user-select:none; }
       #overlay-root { width:100%; height:100%; display:flex; align-items:center; justify-content:flex-start; padding:0 4px; }
-      #overlay-root > div { max-width:100%; }
+      #overlay-root > div { max-width:100%; transform:scale(.9); transform-origin:left center; }
       :root { --voice-gradient:linear-gradient(180deg,#ff8c00 0%,#ffd27a 50%,#ff8c00 100%); --separator-gradient:linear-gradient(180deg,rgba(255,98,107,0) 0%,rgba(255,98,107,.95) 50%,rgba(255,98,107,0) 100%); }
       @property --ga { syntax:'<angle>'; initial-value:0deg; inherits:false; }
       @keyframes grot { to { --ga:360deg; } }
       @keyframes spin { to { transform:rotate(360deg); } }
-      @keyframes widget-enter { 0% { opacity:0; transform:translate3d(0,8px,0) scale(.92); filter:blur(2px); } 58% { opacity:1; transform:translate3d(0,-1px,0) scale(1.018); filter:blur(0); } 100% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } }
+      @keyframes widget-enter { 0% { opacity:0; transform:translate3d(0,3px,0) scale(.985); } 100% { opacity:1; transform:translate3d(0,0,0) scale(1); } }
       @keyframes widget-exit { 0% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } 100% { opacity:0; transform:translate3d(0,-5px,0) scale(.94); filter:blur(1.5px); } }
-      .ow { height:42px; max-width:100%; background:linear-gradient(145deg,rgba(42,40,34,.9),rgba(18,19,17,.9)); border:1px solid rgba(255,255,255,.14); border-radius:99px; box-shadow:inset 0 1px 0 rgba(255,255,255,.14); display:inline-flex; align-items:center; gap:0; padding:0 14px 0 8px; cursor:grab; position:relative; outline:none; transform-origin:left center; transition:border-color 0.25s ease,box-shadow 0.25s ease,transform 0.25s ease; }
-      .ow.widget-enter { animation:widget-enter .42s cubic-bezier(.22,1,.36,1) both; }
-      .ow.widget-enter .lbl, .ow.widget-enter .spw, .ow.widget-enter .vw, .ow.widget-enter .sep { transition:none; }
+      .ow { height:40px; max-width:100%; background:linear-gradient(145deg,rgba(42,40,34,.9),rgba(18,19,17,.9)); border:1px solid rgba(255,255,255,.14); border-radius:99px; box-shadow:inset 0 1px 0 rgba(255,255,255,.14); display:inline-flex; align-items:center; gap:0; padding:0 12px 0 7px; cursor:grab; position:relative; outline:none; transform-origin:left center; transition:border-color 0.25s ease,box-shadow 0.25s ease,transform 0.25s ease; }
+      .ow.widget-enter { animation:widget-enter .28s cubic-bezier(.22,1,.36,1) both; }
       .ow.widget-exit { animation:widget-exit .22s cubic-bezier(.4,0,1,1) both; pointer-events:none; }
       .ow:active { cursor:grabbing; border-color:rgba(255,140,0,.65); }
       .ow:hover { border-color:rgba(255,157,36,.55); transform:translateY(-1px); }
@@ -134,39 +134,36 @@ function Overlay() {
       .lbl { font-size:0.82rem; font-weight:800; white-space:nowrap; letter-spacing:0.3px; line-height:1; background:var(--voice-gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; max-width:90px; margin-left:12px; transform:translateX(0); transition:max-width 0.22s ease-out,margin-left 0.22s ease-out,opacity 0.15s ease,transform 0.22s ease-out; overflow:hidden; flex-shrink:1; }
       .ow.rec .lbl, .ow.proc .lbl { opacity:0; max-width:0; margin:0; transform:translateX(-6px); }
       .spw { display:flex; align-items:center; gap:7px; width:0px; margin-left:0; overflow:hidden; opacity:0; white-space:nowrap; transition:width 0.38s cubic-bezier(.22,1,.36,1),margin-left 0.38s cubic-bezier(.22,1,.36,1),opacity 0.22s ease; }
-      .ow.proc .spw { width:106px; margin-left:8px; opacity:1; transition-delay:.08s; }
+      .ow.proc .spw { width:102px; margin-left:7px; opacity:1; transition-delay:.08s; }
       .spr { width:16px; height:16px; border:2px solid rgba(255,210,122,.25); border-top-color:#ffd27a; border-radius:50%; animation:spin 0.8s linear infinite; flex-shrink:0; }
       .proc-label { font-size:0.82rem; font-weight:800; letter-spacing:0.3px; line-height:1; background:var(--voice-gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; white-space:nowrap; }
       .vw { display:flex; align-items:center; justify-content:center; gap:2px; width:0px; margin-left:0; overflow:hidden; opacity:0; transition:width 0.38s cubic-bezier(.22,1,.36,1),margin-left 0.38s cubic-bezier(.22,1,.36,1),opacity 0.22s ease; }
-      .ow.rec .vw { width:86px; margin-left:8px; opacity:1; transition-delay:.1s; }
-      .bar { width:3px; background:var(--voice-gradient); border-radius:99px; height:30px; transform:scaleY(.1); transform-origin:center; box-shadow:0 0 8px rgba(255,170,60,.6); flex-shrink:0; will-change:transform; }
-      .sep { width:0px; height:18px; margin-left:0; flex-shrink:0; background:var(--separator-gradient); border-radius:99px; box-shadow:0 0 6px rgba(255,98,107,0.42); opacity:0; visibility:hidden; transition:width 0.38s cubic-bezier(.22,1,.36,1),margin-left 0.38s cubic-bezier(.22,1,.36,1),opacity 0.22s ease; }
-      .ow.rec .sep { width:2px; margin-left:8px; opacity:1; visibility:visible; transition-delay:.06s; }
-      .hint { position:absolute; top:calc(100% + 7px); left:0; display:flex; align-items:center; gap:6px; color:rgba(245,243,239,.72); font:600 10px/1 "Segoe UI",sans-serif; letter-spacing:.03em; white-space:nowrap; opacity:0; transform:translateY(-2px); pointer-events:none; transition:opacity .18s ease,transform .18s ease; text-shadow:0 1px 5px #000; }
-      .ow:hover .hint { opacity:1; transform:translateY(0); }
+      .ow.rec .vw { width:80px; margin-left:7px; opacity:1; transition-delay:.1s; }
+      .bar { width:3px; background:var(--voice-gradient); border-radius:99px; height:${BAR_MAX_HEIGHT}px; transform:scaleY(.1); transform-origin:center; box-shadow:0 0 8px rgba(255,170,60,.6); flex-shrink:0; will-change:transform; }
+      .sep { width:0px; height:16px; margin-left:0; flex-shrink:0; background:var(--separator-gradient); border-radius:99px; box-shadow:0 0 6px rgba(255,98,107,0.42); opacity:0; visibility:hidden; transition:width 0.38s cubic-bezier(.22,1,.36,1),margin-left 0.38s cubic-bezier(.22,1,.36,1),opacity 0.22s ease; }
+      .ow.rec .sep { width:2px; margin-left:7px; opacity:1; visibility:visible; transition-delay:.06s; }
       .devbadge { color:#ff626b; background:rgba(255,98,107,.15); border-radius:4px; padding:3px 5px; font-weight:800; letter-spacing:.12em; box-shadow:0 0 10px rgba(255,98,107,.16); }
       .dev-slot { display:inline-flex; align-items:center; justify-content:center; height:100%; margin-left:6px; }
+      .ow.proc .dev-slot { display:none; }
       .widget-devbadge { background:transparent; color:#ff7b83; font:800 9px/1 "Segoe UI",sans-serif; letter-spacing:.1em; padding:0 1px; text-shadow:0 0 6px rgba(255,98,107,.45); }
-      @media (prefers-reduced-motion: reduce) { .ow.widget-enter, .ow.widget-exit { animation-duration:.001ms !important; } }
+      @media (prefers-reduced-motion: reduce) { .ow.widget-enter, .ow.widget-exit { animation-duration:.001ms !important; } .lbl, .spw, .vw, .sep { transition-duration:.001ms !important; transition-delay:0s !important; } }
     `;
     document.head.appendChild(style);
 
     root.innerHTML = `
       <div class="ow" id="w" role="button" aria-label="Traflix Voice. Doppio clic per aprire la console" tabindex="0">
         <span class="glow" aria-hidden="true"></span>
-        <button id="vocabulary-button" aria-label="Modifica vocabolario" title="Modifica vocabolario" style="width:26px;height:26px;flex-shrink:0;background:transparent;border:0;cursor:pointer"><img src="/assets/logo.png" alt="" draggable="false" style="width:26px;height:26px;border-radius:6px" /></button>
+        <button id="vocabulary-button" aria-label="Modifica vocabolario" title="Modifica vocabolario" style="width:24px;height:24px;flex-shrink:0;background:transparent;border:0;cursor:pointer"><img src="/assets/logo.png" alt="" draggable="false" style="width:24px;height:24px;border-radius:6px" /></button>
         <span class="lbl">Traflix Voice</span>
         <span class="dev-slot">${IS_DEV ? '<span class="devbadge widget-devbadge">DEV</span>' : ""}</span>
         <div class="spw"><div class="spr"></div><span class="proc-label">Trascrivo…</span></div>
         <div class="sep" id="sep"></div>
         <div class="vw" id="vw"></div>
-        <span class="hint"><span id="version-meta">v…</span><span>· Doppio clic per aprire</span></span>
       </div>
     `;
 
     const widget = root.firstElementChild as HTMLDivElement;
     const vizWrap = widget.querySelector(".vw") as HTMLDivElement;
-    const versionMeta = widget.querySelector("#version-meta") as HTMLSpanElement;
     const vocabularyElement = widget.querySelector("#vocabulary-button");
     if (!(vocabularyElement instanceof HTMLButtonElement)) return;
     const vocabularyButton: HTMLButtonElement = vocabularyElement;
@@ -200,12 +197,6 @@ function Overlay() {
         badge.className = "devbadge widget-devbadge";
         badge.textContent = "DEV";
         slot.appendChild(badge);
-      }).catch(() => {});
-    }
-
-    if (window.__TAURI__?.app?.getVersion) {
-      window.__TAURI__.app.getVersion().then((version: string) => {
-        versionMeta.textContent = `v${version}`;
       }).catch(() => {});
     }
 
@@ -255,7 +246,8 @@ function Overlay() {
       const win = window.__TAURI__.window.getCurrentWindow();
 
       if (shouldShow) {
-        const shouldEnter = requestedVisibility !== true || widgetMotion === "exit";
+        const shouldEnter = (widgetMode === "recording" && requestedVisibility !== true)
+          || widgetMotion === "exit";
         // Always show when active, in ANY mode. In "always" mode this is a
         // harmless no-op (Rust already shows it); in "recording" mode it is
         // essential. No dedup on show: a native X-close hides the window
@@ -504,7 +496,7 @@ function Overlay() {
       );
       volHistory[volHistIdx] = animatedVolume;
       volHistIdx = (volHistIdx + 1) % volHistory.length;
-      const maxH = 30;
+      const maxH = BAR_MAX_HEIGHT;
       const minH = 3;
 
       for (let i = 0; i < BAR_COUNT; i++) {
