@@ -7,6 +7,81 @@ from whisper_engine import transcriber
 from whisper_engine.constants import BLOCK_SIZE, SAMPLE_RATE
 
 
+@pytest.mark.parametrize("provider", ["cloud", "local"])
+@pytest.mark.parametrize("preceding_block", [False, True])
+def test_stream_close_retains_inflight_block_and_next_session_is_isolated(provider, preceding_block):
+    from whisper_engine import engine as engine_module
+    from whisper_engine.engine import WhisperEngine
+
+    engine = WhisperEngine()
+    engine.provider = provider
+    callback_started = engine_module.threading.Event()
+    release_callback = engine_module.threading.Event()
+    callback_workers = []
+    streams = []
+    events = []
+
+    class InflightBlock(np.ndarray):
+        def copy(self, *args, **kwargs):
+            callback_started.set()
+            assert release_callback.wait(timeout=2)
+            return np.asarray(self).copy(*args, **kwargs)
+
+    def log(event):
+        events.append(event)
+        if event["status"] == "listening":
+            if len(streams) == 1:
+                assert callback_started.wait(timeout=1)
+            engine._active_session.stop(drain_seconds=0)
+
+    engine.log = log
+
+    class InputStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+            streams.append(self)
+
+        def __enter__(self):
+            value = 0.2 if len(streams) == 1 else 0.3
+            if preceding_block or len(streams) > 1:
+                self.callback(np.full((BLOCK_SIZE, 1), value, dtype=np.float32), BLOCK_SIZE, None, None)
+            if len(streams) == 1:
+                worker = engine_module.threading.Thread(target=self.callback, args=(
+                    np.full((BLOCK_SIZE, 1), 0.4, dtype=np.float32).view(InflightBlock),
+                    BLOCK_SIZE, None, None))
+                callback_workers.append(worker)
+                worker.start()
+            return self
+
+        def __exit__(self, *_args):
+            release_callback.set()
+            for worker in callback_workers:
+                worker.join(timeout=1)
+                assert not worker.is_alive()
+
+    try:
+        with patch.object(engine_module.sd, "InputStream", InputStream), \
+             patch.object(engine, "load_model", return_value=object()), \
+             patch.object(engine, "_process_recording") as process:
+            engine.transcribe(None, "parakeet")
+            assert process.called, events
+            first = process.call_args.args[0]
+            expected = np.full(BLOCK_SIZE, 0.4, dtype=np.float32)
+            if preceding_block:
+                expected = np.concatenate([np.full(BLOCK_SIZE, 0.2, dtype=np.float32), expected])
+            np.testing.assert_array_equal(first, expected)
+            assert process.call_args.args[3] == expected.size / SAMPLE_RATE
+            engine.transcribe(None, "parakeet")
+            np.testing.assert_array_equal(process.call_args.args[0],
+                                          np.full(BLOCK_SIZE, 0.3, dtype=np.float32))
+            assert process.call_count == 2
+    finally:
+        release_callback.set()
+        for worker in callback_workers:
+            worker.join(timeout=2)
+        engine.close_transcription_worker()
+
+
 def local_engine():
     from whisper_engine.engine import WhisperEngine
     from whisper_engine.parakeet import ParakeetRecognizer

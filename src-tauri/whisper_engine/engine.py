@@ -552,6 +552,18 @@ class WhisperEngine:
                         session.first_block_at = time.monotonic()
                     audio_data.append(data)
 
+            # Stream closure waits for callbacks already copying a block. The
+            # stop sentinel can precede that block, so drain only after close.
+            while True:
+                try:
+                    data = session.queue.get_nowait()
+                except queue.Empty:
+                    break
+                if data is not None:
+                    if session.first_block_at is None:
+                        session.first_block_at = time.monotonic()
+                    audio_data.append(data)
+
             # Early `processing` from stop_recording() already notified the UI;
             # skip the duplicate so sounds/logs fire once. The captured
             # samples remain untouched until the transcription buffer below.
