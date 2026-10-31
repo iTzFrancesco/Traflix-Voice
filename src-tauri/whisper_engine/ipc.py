@@ -40,6 +40,7 @@ def log(data):
 def handle_command(cmd, data, engine):
     if cmd == "init":
         engine.models_dir = data.get("models_dir")
+        engine.configure_microphone(data.get("microphone_keep_ready", True), data.get("selected_device"))
         engine.groq_api_key = data.get("groq_api_key")
         engine.provider = data.get("provider", "local")
         engine.cloud_correct_uncertain = data.get("cloud_correct_uncertain") is True
@@ -115,6 +116,8 @@ def handle_command(cmd, data, engine):
         )
     elif cmd == "stop":
         engine.stop_recording()
+    elif cmd == "configure_microphone":
+        engine.configure_microphone(data.get("enabled", True), data.get("device"))
     elif cmd == "set_device":
         engine.compute_device = data.get("device", "cpu")
         engine.log({"status": "info", "message": f"Dispositivo di calcolo impostato a: {engine.compute_device}"})

@@ -18,6 +18,7 @@ from whisper_engine.constants import (
 from whisper_engine import model as model_module
 from whisper_engine import audio as audio_module
 from whisper_engine import transcriber, ipc
+from whisper_engine.ready_microphone import ReadyMicrophone
 
 
 class _RecordingSession:
@@ -133,6 +134,10 @@ class WhisperEngine:
         # bookkeeping that Queue adds to this hot path.
         self.audio_queue = queue.SimpleQueue()
         self.is_recording = False
+        self.keep_ready = False
+        self.capture_device = None
+        self._microphone = ReadyMicrophone(lambda **options: sd.InputStream(**options))
+        self._microphone_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="microphone")
         self._recording_lock = threading.Lock()
         self._active_session = None
         self.models_dir = None
@@ -228,6 +233,9 @@ class WhisperEngine:
                 self.models_dir, model_size, self.log
             )
             if loaded_model is None:
+                return
+            if self._shutting_down or self.provider != "local":
+                model_module.release_model(loaded_model)
                 return
             if self.model is not None:
                 # Retain the defensive cleanup for mocked/legacy backends
@@ -342,12 +350,27 @@ class WhisperEngine:
             return self.cloud_correct_uncertain, self.cloud_vocabulary, self.cloud_speech_filter
         return None
 
+    def configure_microphone(self, enabled, device=None):
+        self.keep_ready = enabled is True
+        self.capture_device = None if device in (None, "default", "") else device
+        self._microphone_executor.submit(self._prepare_microphone)
+
+    def _prepare_microphone(self):
+        try:
+            self._microphone.prepare(self.keep_ready and not self._shutting_down, self.capture_device)
+        except Exception:
+            if not self._shutting_down:
+                self.log({"status": "warning", "message": "Microfono non pronto. Verrà riconnesso al prossimo dettato."})
+
     def close_transcription_worker(self):
+        self._shutting_down = True
         # Let the capture worker consume the stop sentinel before closing the
         # processing executor; otherwise a final capture could race its
         # deferred submit during sidecar shutdown.
         self.stop_recording()
         self._capture_executor.shutdown(wait=True, cancel_futures=True)
+        self._microphone_executor.shutdown(wait=True, cancel_futures=True)
+        self._microphone.close()
         self._transcription_executor.shutdown(wait=False, cancel_futures=True)
         gate = self._speech_gate
         if gate is not None:
@@ -507,14 +530,14 @@ class WhisperEngine:
             # settings change during capture cannot reroute this recording.
             provider = session.provider if session.provider is not None else self.provider
             local_model = None
-            if provider == "local":
+            keep_ready = self.keep_ready
+            if provider == "local" and not keep_ready:
                 local_model = self.load_model(model_size)
 
             if not session.active.is_set():
                 notify_cancelled_start()
                 return
-            # The microphone is opened per session. There is no idle pre-roll:
-            # late callbacks from a closed stream must never enter another clip.
+            # The capture context fences callbacks before draining final blocks.
             audio_data = []
 
             def session_log(data):
@@ -538,12 +561,24 @@ class WhisperEngine:
                     session_log,
                 )
 
-            with sd.InputStream(device=device_id, channels=1, callback=session_audio_callback,
-                                samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE,
-                                dtype="float32"):
+            capture = (
+                self._microphone.capture(device_id, session, session_audio_callback)
+                if keep_ready else sd.InputStream(
+                    device=device_id, channels=1, callback=session_audio_callback,
+                    samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE, dtype="float32",
+                )
+            )
+            with capture:
+                if keep_ready and not session.active.is_set():
+                    notify_cancelled_start()
+                    return
                 if session.active.is_set():
                     session.listening_notified = True
                     self.log({"status": "listening", "message": "In ascolto... parla ora."})
+                # Capture already owns pre-roll and incoming audio while a cold
+                # model loads, so speaking immediately never loses its onset.
+                if provider == "local" and keep_ready:
+                    local_model = self.load_model(model_size)
                 while True:
                     data = session.queue.get()
                     if data is None:
@@ -631,6 +666,8 @@ class WhisperEngine:
         finally:
             if session is not None:
                 session.cancel_groq_keepwarm()
+                if self.keep_ready or self._microphone.stream is not None:
+                    self._microphone_executor.submit(self._prepare_microphone)
                 with self._recording_lock:
                     if self._active_session is session:
                         self._active_session = None

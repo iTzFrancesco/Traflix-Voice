@@ -24,7 +24,7 @@ import numpy as np
 # This avoids ImportError when faster_whisper / sounddevice are not installed
 # in the test environment and also keeps tests fast.
 sys.modules["faster_whisper"] = MagicMock()
-sys.modules["sounddevice"] = MagicMock()
+sys.modules.setdefault("sounddevice", MagicMock())
 sys.modules["huggingface_hub"] = MagicMock()
 
 from whisper_engine.engine import WhisperEngine, _RecordingSession
