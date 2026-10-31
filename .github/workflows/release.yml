@@ -99,6 +99,8 @@ jobs:
             throw "GitHub Actions secret TAURI_SIGNING_PRIVATE_KEY is required to sign desktop updates."
           }
           npm run tauri -- build --config src-tauri/tauri.updater.conf.json
+      - name: Verify relocated native runtime
+        run: python scripts/smoke_native_transcriber.py --executable src-tauri/python-backend/whisper_engine/traflix-transcriber.exe
       - name: Generate Windows update manifest
         run: node scripts/generate-updater-manifest.mjs
       - uses: softprops/action-gh-release@v2

@@ -123,6 +123,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src-tauri/requirements.txt -r src-tauri/requirements-build.txt
       - run: npm run tauri build
+      - name: Verify relocated native runtime
+        run: python scripts/smoke_native_transcriber.py --executable src-tauri/python-backend/whisper_engine/traflix-transcriber.exe
       - uses: actions/upload-artifact@v4
         with:
           name: traflix-voice-windows
