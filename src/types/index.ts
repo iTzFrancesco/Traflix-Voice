@@ -6,6 +6,7 @@ export interface AppSettings {
   keepClipboardResult?: boolean;
   minimizeTray: boolean;
   selectedDevice: string;
+  microphoneKeepReady?: boolean;
   selectedLanguage: string;
   computeDevice: string;
   holdToSpeak: boolean;

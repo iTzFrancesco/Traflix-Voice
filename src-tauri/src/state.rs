@@ -24,6 +24,11 @@ pub struct AppSettings {
     pub minimize_tray: bool,
     #[serde(rename = "selectedDevice")]
     pub selected_device: String,
+    #[serde(
+        rename = "microphoneKeepReady",
+        default = "default_keep_microphone_ready"
+    )]
+    pub microphone_keep_ready: bool,
     #[serde(rename = "selectedLanguage", default = "default_language")]
     pub selected_language: String,
     #[serde(rename = "computeDevice", default = "default_compute_device")]
@@ -45,6 +50,10 @@ pub struct AppSettings {
     pub cloud_vocabulary: String,
     #[serde(rename = "cloudSpeechFilter", default = "default_cloud_speech_filter")]
     pub cloud_speech_filter: bool,
+}
+
+fn default_keep_microphone_ready() -> bool {
+    true
 }
 
 fn default_language() -> String {
@@ -96,6 +105,7 @@ impl Default for AppSettings {
             keep_clipboard_result: true,
             minimize_tray: true,
             selected_device: "default".to_string(),
+            microphone_keep_ready: true,
             selected_language: "it".to_string(),
             compute_device: "cpu".to_string(),
             hold_to_speak: false,

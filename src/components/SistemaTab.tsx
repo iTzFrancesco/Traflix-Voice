@@ -44,6 +44,23 @@ export default function SistemaTab({
         </div>
 
         <div className="mb-6 flex flex-col gap-2">
+          <label className="text-[0.9rem] font-bold text-[#ccc]" htmlFor="microphone-keep-ready">
+            Modalità microfono
+          </label>
+          <select id="microphone-keep-ready" className="field-control"
+            value={(settings?.microphoneKeepReady ?? true) ? "ready" : "release"}
+            onChange={(e) => onSettingChange("microphoneKeepReady", e.target.value === "ready")}>
+            <option value="ready">Keep ready — avvio rapido</option>
+            <option value="release">Chiudi quando inattivo</option>
+          </select>
+          <p className="m-0 text-[0.76rem] leading-5 text-[var(--muted)]">
+            Keep ready mantiene il microfono aperto anche tra i dettati, per cloud e locale.
+            Conserva solo gli ultimi 450 ms in memoria per proteggere le prime sillabe;
+            l'audio inattivo non viene salvato né inviato.
+          </p>
+        </div>
+
+        <div className="mb-6 flex flex-col gap-2">
           <label className="text-[0.9rem] font-bold text-[#ccc]">
             Livello microfono automatico
           </label>

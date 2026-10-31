@@ -556,6 +556,17 @@ export default function App() {
       const updated = { ...settings, [key]: value };
       setSettings(updated);
 
+      if (key === "microphoneKeepReady" || key === "selectedDevice") {
+        try {
+          await window.__TAURI__.core.invoke("send_to_python", {
+            message: JSON.stringify({ command: "configure_microphone",
+              enabled: updated.microphoneKeepReady ?? true, device: updated.selectedDevice }),
+          });
+        } catch (err) {
+          console.warn("[audio] microphone configuration failed:", err);
+          showToast("Impossibile aggiornare il microfono. Riprova.", "error");
+        }
+      }
       // Handle special cases that need immediate side effects
       if (key === "selectedLanguage") {
         if (typeof value === "string") setSelectedLanguage(value);

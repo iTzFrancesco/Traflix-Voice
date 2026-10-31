@@ -86,6 +86,8 @@ pub fn spawn<R: Runtime>(app_handle: AppHandle<R>, script_path: PathBuf, models_
                 "command": "init",
                 "models_dir": models_dir_str,
                 "compute_device": settings.compute_device,
+                "microphone_keep_ready": settings.microphone_keep_ready,
+                "selected_device": settings.selected_device,
                 "model": settings.model,
                 "groq_api_key": settings.groq_api_key,
                 "provider": settings.provider,

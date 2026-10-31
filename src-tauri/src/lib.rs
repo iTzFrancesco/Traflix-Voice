@@ -275,6 +275,21 @@ mod tests {
     }
 
     #[test]
+    fn microphone_ready_defaults_and_opt_out_roundtrip() {
+        let mut data = serde_json::to_value(AppSettings::default()).unwrap();
+        data.as_object_mut().unwrap().remove("microphoneKeepReady");
+        let legacy: AppSettings = serde_json::from_value(data.clone()).unwrap();
+        assert!(legacy.microphone_keep_ready);
+        data["microphoneKeepReady"] = serde_json::json!(false);
+        let opted_out: AppSettings = serde_json::from_value(data).unwrap();
+        assert!(!opted_out.microphone_keep_ready);
+        assert_eq!(
+            serde_json::to_value(opted_out).unwrap()["microphoneKeepReady"],
+            false
+        );
+    }
+
+    #[test]
     fn test_settings_json_roundtrip() {
         let dir = std::env::temp_dir().join("traflix_test_settings");
         let _ = std::fs::create_dir_all(&dir);
@@ -289,6 +304,7 @@ mod tests {
             keep_clipboard_result: true,
             minimize_tray: true,
             selected_device: "default".to_string(),
+            microphone_keep_ready: true,
             selected_language: "it".to_string(),
             compute_device: "cpu".to_string(),
             hold_to_speak: false,
