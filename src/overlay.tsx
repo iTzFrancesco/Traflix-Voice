@@ -390,6 +390,12 @@ function Overlay() {
       if (overlayCancelled) fn(); else unlistenFns.push(fn);
     });
 
+    window.__TAURI__.event.listen("main_window_hidden", () => {
+      syncOverlayVisibility();
+    }).then((fn) => {
+      if (overlayCancelled) fn(); else unlistenFns.push(fn);
+    });
+
     window.__TAURI__.event
       .listen("overlay_appearing", () => {
         playWidgetEntry();

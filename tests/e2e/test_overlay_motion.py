@@ -33,7 +33,11 @@ TAURI_MOCK = r"""
         listeners.set(name, callbacks);
         return () => listeners.set(name, callbacks.filter(item => item !== callback));
       },
-      async emit(name, payload) { state.emit(name, payload); },
+      async emit(name, payload) {
+        calls.push({command: "emit", name, payload});
+        if (name === "show_main_window") state.visible = false;
+        state.emit(name, payload);
+      },
     },
   };
 })();
@@ -120,6 +124,33 @@ def test_duplicate_status_reasserts_visibility_without_restarting_entry(e2e_base
                 sounds: state.calls.filter(call => call.command === "sound").length};
             }""")
             assert result == {"same": True, "time": 100, "visible": True, "sounds": 1}
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize("status", ["listening", "processing", "ready"])
+def test_closing_main_window_restores_active_widget_in_recording_mode(e2e_base_url, status):
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = open_overlay(browser, e2e_base_url)
+            page.evaluate("window.__overlayE2e.emit('python_output', '{\"status\":\"listening\"}')")
+            page.locator("#w").dblclick()
+            page.wait_for_function("window.__overlayE2e.calls.some(call => call.name === 'show_main_window')")
+            page.wait_for_function("window.__overlayE2e.visible === false")
+            if status != "listening":
+                page.evaluate("status => window.__overlayE2e.emit('python_output', JSON.stringify({status}))", status)
+                # The main window may hide the native overlay after a status event.
+                page.evaluate("window.__overlayE2e.visible = false")
+            page.evaluate("window.__overlayE2e.emit('main_window_hidden')")
+            active = status in ("listening", "processing")
+            page.wait_for_function("expected => window.__overlayE2e.visible === expected", arg=active, timeout=3000)
+            if active:
+                page.wait_for_function("Number(getComputedStyle(document.querySelector('#w')).opacity) === 1")
+                assert page.locator("#w").evaluate("widget => getComputedStyle(widget).pointerEvents") != "none"
+                assert page.locator("#w").evaluate("widget => widget.classList.contains('rec') || widget.classList.contains('proc')")
+                page.evaluate("window.__overlayE2e.emit('python_output', '{\"status\":\"ready\"}')")
+                page.wait_for_function("window.__overlayE2e.visible === false")
         finally:
             browser.close()
 

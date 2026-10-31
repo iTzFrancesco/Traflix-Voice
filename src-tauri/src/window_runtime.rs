@@ -354,23 +354,23 @@ pub fn handle_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) 
             let app_handle = window.app_handle();
             let app_state = app_handle.state::<AppState>();
             let settings = load_settings_from_file(&app_state.settings_path);
-            if settings.widget_mode == "always" {
-                let restore = take_widget_open();
-                if let Ok(position) = window.outer_position() {
-                    let main_position = (position.x, position.y);
-                    let (restore_x, restore_y) = overlay_restore_position(restore, main_position);
-                    sync_overlay_position(app_handle, PhysicalPosition::new(restore_x, restore_y));
-                } else if let Some(open) = restore {
-                    sync_overlay_position(
-                        app_handle,
-                        PhysicalPosition::new(open.widget.0, open.widget.1),
-                    );
-                }
-                show_overlay_with_animation(app_handle);
-            } else {
-                // Nessun widget da ripristinare in modalità recording.
-                let _ = take_widget_open();
+            let restore = take_widget_open();
+            if let Ok(position) = window.outer_position() {
+                let main_position = (position.x, position.y);
+                let (restore_x, restore_y) = overlay_restore_position(restore, main_position);
+                sync_overlay_position(app_handle, PhysicalPosition::new(restore_x, restore_y));
+            } else if let Some(open) = restore {
+                sync_overlay_position(
+                    app_handle,
+                    PhysicalPosition::new(open.widget.0, open.widget.1),
+                );
             }
+            if settings.widget_mode == "always" {
+                show_overlay_with_animation(app_handle);
+            }
+            // The overlay owns the current recording/processing state, which
+            // may not change while the main window is opened and closed.
+            let _ = app_handle.emit_to("overlay", "main_window_hidden", ());
         } else if window.label() == "overlay" {
             api.prevent_close();
             let _ = window.hide();
