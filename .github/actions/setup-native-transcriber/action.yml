@@ -1,0 +1,28 @@
+name: Setup native transcription build
+description: Install the Vulkan toolchain used by the Windows x64 helper
+runs:
+  using: composite
+  steps:
+    - name: Install Vulkan SDK
+      uses: humbletim/install-vulkan-sdk@30ba978f977e81b72d091fc8888feb1fb26f9aff
+      with:
+        version: 1.4.309.0
+        cache: true
+    - name: Install SPIRV headers
+      shell: pwsh
+      run: |
+        vcpkg install spirv-headers:x64-windows
+        if ($LASTEXITCODE -ne 0) { throw "SPIRV headers installation failed" }
+        $prefix = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" -replace '\\','/'
+        $combined = if ($env:CMAKE_PREFIX_PATH) { "$prefix;$env:CMAKE_PREFIX_PATH" } else { $prefix }
+        Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$combined"
+    - name: Check native helper
+      shell: pwsh
+      working-directory: src-tauri/native-transcriber
+      run: |
+        cargo fmt --check
+        if ($LASTEXITCODE -ne 0) { throw "Native formatting failed" }
+        cargo clippy --locked --release -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw "Native Clippy failed" }
+        cargo test --locked --release
+        if ($LASTEXITCODE -ne 0) { throw "Native tests failed" }

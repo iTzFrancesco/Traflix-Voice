@@ -4,9 +4,11 @@
 from pathlib import Path
 import hashlib
 import subprocess
+import shutil
 import sys
 import venv
 from prepare_speech_model import prepare_speech_model
+from build_native_transcriber import build_native_transcriber
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +57,7 @@ def main() -> int:
         print("Skipping bundled Python backend: MSI packaging is Windows-only.")
         return 0
 
+    native_executable = build_native_transcriber()
     isolated_python = build_python()
     speech_model_dir = prepare_speech_model()
     entry_point = TAURI_DIR / "whisper_engine.py"
@@ -89,6 +92,8 @@ def main() -> int:
     if not executable.is_file():
         raise FileNotFoundError(f"PyInstaller did not produce {executable}")
 
+    shutil.copy2(native_executable, executable.parent / native_executable.name)
+    shutil.copy2(REPO_ROOT / "THIRD_PARTY_NOTICES.md", executable.parent / "THIRD_PARTY_NOTICES.md")
     print(f"Bundled Python sidecar: {executable}")
     return 0
 
