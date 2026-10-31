@@ -28,24 +28,40 @@ its own release channel.
 
 | Platform | Version files | Release tag | Published artifact |
 | --- | --- | --- | --- |
-| Windows | `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` | `vX.Y.Z` | Signed MSI and `latest.json` |
+| Windows | `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` | `vX.Y.Z` | Signed MSI and `latest.json` |
 | Android | `src-tauri/tauri.android.conf.json` (`version` and `bundle.android.versionCode`) | `android-vX.Y.Z` | Signed `app-universal-release.apk` |
 
-Use semantic versioning for each platform's `X.Y.Z` version. Increase the major
-number for an incompatible release, the minor number for compatible features,
-and the patch number for compatible fixes. Keep Android's `versionCode`
-strictly higher than the code in every previously published APK. The Android
-release workflow checks that the APK's `versionName` matches its tag, but it
-does not check that `versionCode` increased.
+Determine the base from the latest **published release in the platform's own
+channel**. For Windows, read GitHub's published stable release (`gh api
+repos/{owner}/{repo}/releases/latest --jq .tag_name`). For Android, use the latest
+published `android-vX.Y.Z` prerelease that contains the signed APK. Local files,
+commit titles, bare tags, drafts, cancelled workflows and unpublished attempts
+do not consume a release number.
+
+Stay on the current Windows `major.minor` series by default. Increment only the
+patch, exactly once, for compatible fixes and features. The user's current
+instruction is to remain on **1.8**: published stable **1.8.1 → 1.8.2** for this
+release. Do not automatically advance to 1.9 or 1.10 because features were added.
+A minor or major series change requires an explicit user request. Even then,
+advance exactly one level from the published base; never skip an intermediate
+series because a version appeared in an internal commit or an aborted attempt.
+
+Android has its own published sequence. Keep its `versionCode` strictly higher
+than every published APK. A cancelled, unpublished attempt does not require an
+extra increment: the still-unpublished 0.1.34/code 1006032 can be used again after
+cancelling and removing its unreleased tag as described below.
 
 For a Windows version bump, run the repository script with the new version:
 
 ```powershell
-npm run bump -- 1.7.1
+npm run bump -- 1.8.2
 ```
 
-The script updates the Windows version files in the table and refreshes
-`package-lock.json`. Review all of those changes before committing them. Do
+The script requires authenticated GitHub CLI access, reads the latest published
+stable release and rejects skipped versions before editing files. Patch is the
+default. Only after an explicit user request may `--minor` or `--major` be added.
+It updates Windows version files and both `package-lock.json` and
+`src-tauri/Cargo.lock` without changing dependency versions. Review all of those changes before committing them. Do
 not use this script to bump Android; it does not update the Android version or
 `versionCode`.
 
@@ -104,7 +120,9 @@ different times.
 2. Finish the changes on the approved release target. Keep each commit focused
    so reviewers can see the work in small steps. Do not combine unrelated work
    into a single commit or squash the release history into one commit.
-3. Update the Windows and Android versions. Increase Android's `versionCode`.
+3. Read the latest published release in each channel and update each version
+   exactly once using the rules above. Increase Android's `versionCode` only
+   relative to published APKs.
 4. Push the commits to the existing target branch. Do not create a secondary
    branch unless the user asks for one.
 5. Confirm that the release source is the approved commit on `main` and that
@@ -113,9 +131,9 @@ different times.
    versions with the versions in the configuration files:
 
    ```powershell
-   git tag -a v1.7.1 -m "Traflix Voice 1.7.1"
-   git tag -a android-v0.1.21 -m "Traflix Voice Android 0.1.21"
-   git push origin v1.7.1 android-v0.1.21
+   git tag -a v1.8.2 -m "Traflix Voice 1.8.2"
+   git tag -a android-v0.1.34 -m "Traflix Voice Android 0.1.34"
+   git push origin v1.8.2 android-v0.1.34
    ```
 
 7. Follow both tagged workflows in GitHub Actions. Resolve failures before
@@ -128,6 +146,25 @@ different times.
 If the user asks for only one platform, update and tag only that platform. Do
 not move or reuse a published tag. Choose a new version for corrected release
 contents.
+
+## Correct an unpublished release attempt
+
+Published releases and their tags are immutable: use a new patch for changed
+published contents. An internal or cancelled attempt never justifies skipping
+versions on the published channel.
+
+When the user explicitly corrects an unpublished version or its source commit:
+
+1. Cancel every workflow for the incorrect release attempt and confirm it stopped.
+2. Verify that neither a Release/prerelease nor installable release assets were
+   published for those tags. If assets were published, do not reuse their versions.
+3. Remove the erroneous unreleased tags, retaining the commit history.
+4. Correct the files from the published channel baseline. Retain the selected
+   unpublished Android version/code when no APK was published.
+5. Create fresh release tags at the corrected main commit and run both workflows.
+
+This exception requires that explicit correction request; it is not permission
+to retag an already published release or replace an installer users received.
 
 ## Preserve the update contracts
 
