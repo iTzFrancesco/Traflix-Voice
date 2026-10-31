@@ -89,6 +89,7 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -r src-tauri/requirements.txt -r src-tauri/requirements-build.txt
+      - run: node --test scripts/release-version-policy.test.mjs
       - name: Build signed updater artifacts
         shell: pwsh
         env:

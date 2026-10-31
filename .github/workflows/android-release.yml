@@ -65,6 +65,7 @@ jobs:
           restore-keys: |
             android-rust-${{ runner.os }}-
 
+      - run: node --test scripts/release-version-policy.test.mjs
       - run: npm ci
 
       - name: Initialize Android project
