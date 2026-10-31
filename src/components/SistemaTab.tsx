@@ -111,20 +111,12 @@ export default function SistemaTab({
 
         {/* Compute Device */}
         <div className="mb-6 flex flex-col gap-2">
-          <label className="text-[0.9rem] font-bold text-[#ccc]" htmlFor="compute-device">
+          <p className="text-[0.9rem] font-bold text-[#ccc] m-0">
             Dispositivo di Calcolo
-          </label>
-          <select
-            id="compute-device"
-            className="field-control bg-[rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.08)] px-3.5 py-3 rounded-xl text-white outline-none font-inherit"
-            aria-label="Seleziona dispositivo di calcolo"
-            value={settings?.computeDevice || "cpu"}
-            onChange={(e) => onSettingChange("computeDevice", e.target.value)}
-          >
-            <option value="cpu">CPU (Predefinito)</option>
-            <option value="cuda">GPU (CUDA)</option>
-            <option value="auto">Auto-detect</option>
-          </select>
+          </p>
+          <p className="text-[0.82rem] text-[var(--muted)] m-0 leading-5">
+            Automatico: usa la GPU quando disponibile, altrimenti la CPU.
+          </p>
           <p id="gpu-status" className="text-[0.82rem] text-[var(--muted)] m-0 leading-5">
             {gpuStatus}
           </p>

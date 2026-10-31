@@ -44,11 +44,11 @@ Windows application.
   click-to-toggle or hold-to-speak; a secondary shortcut, model, language,
   and microphone are configurable in the app.
 - **Two transcription providers**: local Parakeet TDT 0.6B v3 (private,
-  on-device, via `sherpa-onnx` int8 on CPU) or Groq Cloud
+  on-device, via native `transcribe.cpp` GGUF Q8 with automatic GPU selection) or Groq Cloud
   (`whisper-large-v3-turbo`, needs an API key in System settings).
   The Home tab always shows which engine produced the last dictation.
 - **Local model management** (AI tab): one-click Parakeet download
-  (~670 MB), instant dictation while loaded (~1.5 GB RAM), and
+  (~740 MB), a resident model for rapid dictation, and
   **Libera RAM** to unload it from memory without deleting files.
   Switching to Cloud unloads the model automatically.
 - **Delivery**: automatic paste (Ctrl+V) into the focused application, with
@@ -84,7 +84,7 @@ Android requires a signed APK for direct installation.
 
 ## Features
 
-- Local Parakeet TDT 0.6B v3 transcription through `sherpa-onnx` (int8 ONNX, CPU) — the only local model, ~30x faster than the retired Whisper backend.
+- Local Parakeet TDT 0.6B v3 through `transcribe.cpp` (GGUF Q8), with Vulkan acceleration on Windows x64 and automatic CPU fallback. Development environments without the native helper can still use the legacy `sherpa-onnx` backend.
 - Optional Groq transcription using `whisper-large-v3-turbo`.
 - Configurable global hotkeys, click-to-toggle, and hold-to-speak recording.
 - Automatic paste into the focused application, keeping the transcript on the
@@ -112,7 +112,7 @@ Android requires a signed APK for direct installation.
    application and saved to history with word count and timing. It also stays
    on the clipboard, so if you miss it you can paste it again with Ctrl+V.
 5. Check **Home** to confirm which engine (Locale/Cloud) ran last; use
-   **Libera RAM** in **AI** whenever you want the ~1.5 GB back.
+   **Libera RAM** in **AI** to release the loaded model.
 
 ### Android
 
@@ -143,7 +143,7 @@ python -m pip install -r src-tauri/requirements.txt
 npm run tauri dev
 ```
 
-On first use, open **AI** and download the Parakeet TDT 0.6B v3 model (~670 MB download, ~1.5 GB RAM while loaded). Local transcription also needs the Python requirements installed (they include `sherpa-onnx`). The model stays loaded for instant dictation; use **Libera RAM** in the AI tab to unload it without deleting files.
+On first use, open **AI** and download Parakeet TDT 0.6B v3 (~740 MB GGUF). Windows packages include the native inference helper. Existing ONNX installations download the pinned GGUF on first local load after upgrading; old files remain available for development fallback. RAM and GPU memory depend on the backend and clip length. Use **Libera RAM** to unload the model without deleting files. See [native transcription](docs/native-transcription.md) for build instructions and memory measurement.
 
 ### Android preview
 
@@ -216,7 +216,7 @@ only as documentation.
 - **Rust/Tauri** owns the desktop shell, hotkeys, clipboard, tray, settings,
   and Python process supervision.
 - **React/TypeScript/Vite** provides the main interface and overlay.
-- **Python** captures audio, manages the local Parakeet model, performs local inference,
+- **Python** captures audio, manages model downloads and delegates native local inference,
   and optionally calls Groq.
 - **Android/Kotlin** owns the IME, microphone capture, native indicator,
   Android Keystore secret storage, `InputConnection` text insertion, and the
@@ -230,7 +230,7 @@ silently alter the other runtime.
 
 ## Third-party components
 
-Traflix Voice uses Parakeet (NVIDIA, CC-BY-4.0) via `sherpa-onnx`, Hugging Face model
+Traflix Voice uses Parakeet (NVIDIA, CC-BY-4.0) via `transcribe.cpp` (and the legacy `sherpa-onnx` fallback), Hugging Face model
 hosting, and the optional Groq API. These components remain subject to their
 own licenses and terms. Traflix Voice is independent and is not affiliated
 with OpenAI, Groq, or Hugging Face.

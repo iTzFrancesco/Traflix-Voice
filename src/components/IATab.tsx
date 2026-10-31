@@ -231,11 +231,11 @@ export default function IATab({
         </div>
       )}
 
-      {/* Manual RAM release: frees the ~1.5 GB recognizer without deleting files */}
+      {/* Model weights stay resident between dictations. */}
       {selectedProvider !== "cloud" && onUnloadModel && (
         <div className="panel-subtle p-3 mt-3 flex flex-col gap-2">
           <p className="m-0 text-[.76rem] leading-5 text-[var(--muted)]">
-            Il modello resta caricato in RAM (~1.5 GB) per dettati istantanei. Se la RAM resta alta, scaricalo dalla memoria: i file restano su disco e verrà ricaricato al prossimo dettato.
+            Il modello resta caricato per dettati rapidi. Il consumo di RAM e memoria GPU dipende dal dispositivo e dalla durata del dettato. Se la RAM resta alta, scaricalo dalla memoria: i file restano su disco e verrà ricaricato al prossimo dettato.
           </p>
           <button
             className="w-full text-center py-2 px-4 rounded-xl border font-bold text-[0.78rem] bg-transparent text-[var(--muted)] border-[rgba(255,255,255,0.12)] cursor-pointer hover:text-[var(--ink)] hover:border-[rgba(255,255,255,0.25)] transition-colors"

@@ -89,11 +89,11 @@ export const WHISPER_MODELS: WhisperModel[] = [
   {
     id: "parakeet-tdt-0.6b-v3-int8",
     name: "Parakeet TDT 0.6B V3",
-    size: "~670 MB",
-    ram: "~1.5 GB",
+    size: "~740 MB",
+    ram: "Variabile (CPU/GPU)",
     speed: 5,
     quality: 4,
     tag: "Consigliato",
-    description: "Modello NVIDIA rapidissimo su CPU con ottimo italiano. Richiede il pacchetto extra sherpa-onnx (py -m pip install sherpa-onnx, poi riavvia).",
+    description: "Parakeet locale con motore nativo e accelerazione GPU automatica quando disponibile. Supporta italiano e altre 24 lingue.",
   },
 ];

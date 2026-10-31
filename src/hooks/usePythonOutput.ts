@@ -93,7 +93,7 @@ export function usePythonOutput({
   const [downloadInfo, setDownloadInfo] = useState<DownloadInfo | null>(null);
   const [transcriptionText, setTranscriptionText] = useState("");
   const [lastResultProvider, setLastResultProvider] = useState<string | null>(null);
-  const [gpuStatus, setGpuStatus] = useState("Dispositivo in uso: CPU");
+  const [gpuStatus, setGpuStatus] = useState("Il dispositivo viene rilevato al caricamento del modello locale.");
 
   const selectedProviderRef = useRef(selectedProvider);
   selectedProviderRef.current = selectedProvider;
@@ -276,6 +276,7 @@ export function usePythonOutput({
           }
 
           if (data.status === "unloaded") {
+            setGpuStatus("Modello locale scaricato dalla memoria.");
             setModelStatus(clearLoading);
             showToast(data.message || "Modello rimosso dalla memoria.", "info");
           }
@@ -301,7 +302,7 @@ export function usePythonOutput({
             const cudaLabel = data.cuda_available
               ? `CUDA disponibile (${data.device_name})`
               : "CUDA non disponibile";
-            setGpuStatus(`Dispositivo in uso: ${deviceLabel} | ${cudaLabel}`);
+            setGpuStatus(data.message || `Dispositivo in uso: ${deviceLabel} | ${cudaLabel}`);
           }
 
           if (data.status === "info" && data.message) {
