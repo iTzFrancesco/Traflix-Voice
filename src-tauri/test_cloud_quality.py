@@ -16,7 +16,7 @@ def jimmy_response(text, **stats):
 class TestCloudQuality(unittest.TestCase):
     def test_personal_vocabulary_corrects_names_without_relaxing_meaning_checks(self):
         vocabulary = "Traflix Voice\nGroq"
-        self.assertTrue(quality.should_correct(quality.CloudTranscript("Apri traffic vice"), "it", vocabulary))
+        self.assertFalse(quality.should_correct(quality.CloudTranscript("Apri traffic vice"), "it"))
         self.assertTrue(quality.acceptable_correction(
             "Uso traffic vice con grock per dettare.",
             "Uso Traflix Voice con Groq per dettare.", vocabulary))
@@ -64,6 +64,22 @@ class TestCloudQuality(unittest.TestCase):
         self.assertEqual(quality.local_cleanup(text, "it"), "Aspetta un po', qual è la cartella corretta?")
         self.assertEqual(quality.local_cleanup("Il nome è Pò e il codice è `un pò`.", "it"),
                          "Il nome è Pò e il codice è `un pò`.")
+
+    def test_clear_plural_agreement_is_fixed_before_the_model(self):
+        examples = [
+            ("Queste impostazioni è stato salvato nella cartella giusta.",
+             "Queste impostazioni sono state salvate nella cartella giusta."),
+            ("I documenti viene aggiornato oggi.", "I documenti vengono aggiornati oggi."),
+            ("Le modifiche deve essere salvate.", "Le modifiche devono essere salvate."),
+            ("Uso Traflix Voice, le impostazioni è corrette.",
+             "Uso Traflix Voice, le impostazioni sono corrette."),
+            ("Tra le informazioni è presente anche il codice.",
+             "Tra le informazioni è presente anche il codice."),
+            ("Queste informazioni è di Marco.", "Queste informazioni sono di Marco."),
+        ]
+        for original, expected in examples:
+            with self.subTest(original=original):
+                self.assertEqual(quality.local_cleanup(original, "it"), expected)
 
     def test_rejects_changes_to_meaning_names_numbers_units_and_negations(self):
         examples = [
@@ -174,7 +190,7 @@ class TestCloudQuality(unittest.TestCase):
                          detailed.split(b"Content-Type: audio/wav\r\n\r\n")[1])
 
     def test_jimmy_request_excludes_groq_credentials_and_usage(self):
-        transcript = quality.CloudTranscript("Queste impostazioni è stato salvato nella cartella giusta.")
+        transcript = quality.CloudTranscript("Queste impostazioni sono state salvate nella cartella giusta.", True)
         seen = []
         def handler(request):
             seen.append(request)
@@ -182,7 +198,8 @@ class TestCloudQuality(unittest.TestCase):
             self.assertEqual(str(request.url), "https://chatjimmy.ai/api/chat")
             self.assertEqual(body["chatOptions"]["selectedModel"], "llama3.1-8B")
             self.assertEqual(body["chatOptions"]["topK"], 1)
-            self.assertIn("Preferred spellings: Traflix Voice.", body["messages"][0]["content"])
+            self.assertEqual(body["messages"][0]["content"], transcript.text)
+            self.assertNotIn("vocabulary", body["messages"][0]["content"])
             self.assertEqual(request.headers["Content-Type"], "application/json")
             self.assertNotIn("Authorization", request.headers)
             self.assertNotIn("Cookie", request.headers)
@@ -200,7 +217,7 @@ class TestCloudQuality(unittest.TestCase):
         self.assertEqual(len(seen), 1)
 
     def test_failure_falls_back_and_rate_limit_suppresses_following_requests(self):
-        transcript = quality.CloudTranscript("Queste impostazioni è stato salvato nella cartella giusta.")
+        transcript = quality.CloudTranscript("Queste impostazioni sono state salvate nella cartella giusta.", True)
         for failure in (429, 500, 403, 302, "timeout", "bad_json", "length", "unsafe", "missing_stats", "bad_stats"):
             with self.subTest(failure=failure):
                 calls = []
@@ -287,6 +304,22 @@ class TestCloudQuality(unittest.TestCase):
                 speech_filter=True, speech_detector=lambda _: True)
         self.assertEqual(len(calls), 1)
         self.assertIn("è stato", events[0]["text"])
+
+    def test_vocabulary_is_applied_with_jimmy_disabled(self):
+        calls, events = [], []
+        def handler(request):
+            calls.append(request)
+            self.assertEqual(request.url.host, "api.groq.com")
+            return httpx.Response(200, text="Apri traffic vice.")
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client, \
+             patch.object(transcriber, "acquire_groq_client", return_value=client), \
+             patch.object(transcriber, "release_groq_client"):
+            transcriber.transcribe_cloud(np.ones(512, dtype=np.float32) * 0.01, "it", 1.0,
+                "synthetic-test-key", False, events.append, None, correct_uncertain=False,
+                speech_filter=False, vocabulary="Traflix Voice")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([event["text"] for event in events if event["status"] == "result"], ["Apri Traflix Voice."])
 
 
 if __name__ == "__main__":

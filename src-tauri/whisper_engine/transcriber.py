@@ -696,7 +696,8 @@ def transcribe_cloud(
                 client, transcript, cloud_language, lambda: _shutdown_requested(shutting_down),
                 vocabulary=_ensure_default_prompt(cloud_quality.normalize_vocabulary(vocabulary)))
         else:
-            correction = cloud_quality.CorrectionResult(transcript.text)
+            correction = cloud_quality.CorrectionResult(cloud_quality.apply_personal_vocabulary(
+                transcript.text, _ensure_default_prompt(cloud_quality.normalize_vocabulary(vocabulary))))
         text = correction.text
 
         if _TRAF_DEBUG:

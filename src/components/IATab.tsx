@@ -162,7 +162,7 @@ export default function IATab({
       {/* Local models */}
       {selectedProvider === "cloud" && (
         <div className="panel p-4 mb-3 flex flex-col gap-4">
-          <label className="flex items-start gap-3 cursor-pointer" title="ChatJimmy corregge i passaggi dubbi e usa il vocabolario personale per riconoscere i nomi. Se la correzione fallisce, viene conservata la trascrizione originale.">
+          <label className="flex items-start gap-3 cursor-pointer" title="I nomi del vocabolario vengono sistemati automaticamente. ChatJimmy verifica solo il testo incerto; le correzioni che cambiano il significato vengono scartate.">
             <input
               type="checkbox"
               checked={cloudCorrectionEnabled}
@@ -171,7 +171,7 @@ export default function IATab({
             />
             <span>
               <span className="block text-[0.85rem] font-bold text-[var(--ink)]">Correzione con ChatJimmy (sperimentale)</span>
-              <span className="block text-[0.7rem] leading-4 text-[var(--muted)] mt-1">Invia testo e vocabolario a ChatJimmy, senza audio né chiave Groq. La demo è attualmente gratuita; disponibilità e limiti possono cambiare.</span>
+              <span className="block text-[0.7rem] leading-4 text-[var(--muted)] mt-1">Invia solo il testo incerto a ChatJimmy, senza audio né chiave Groq. La demo è attualmente gratuita; disponibilità e limiti possono cambiare.</span>
             </span>
           </label>
           <label className="flex items-start gap-3 cursor-pointer" title="Rileva la voce sul PC prima di inviare l'audio a Groq. Disattivalo solo se i dettati brevi o sussurrati vengono scartati come silenzio.">
@@ -208,7 +208,7 @@ export default function IATab({
                 if (vocabulary !== vocabularyEntries(cloudVocabulary).join("\n")) onCloudVocabularyChange(vocabulary);
               }}
             />
-            <p className="text-[0.7rem] leading-4 text-[var(--muted)] mt-2 mb-0">Invio per aggiungere una voce.</p>
+            <p className="text-[0.7rem] leading-4 text-[var(--muted)] mt-2 mb-0">Scrivi solo la forma finale corretta, una voce per riga: le varianti vengono riconosciute automaticamente. Funziona anche con ChatJimmy disattivato. Invio per aggiungere una voce.</p>
           </div>
         </div>
       )}

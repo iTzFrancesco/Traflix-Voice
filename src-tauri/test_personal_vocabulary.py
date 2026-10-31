@@ -53,6 +53,27 @@ class TestPersonalVocabulary(unittest.TestCase):
                 "it", lambda: False, "Traflix Voice")
         self.assertEqual(result.text, "Uso Traflix Voice per dettare oggi.")
 
+    def test_confident_vocabulary_correction_does_not_call_llm(self):
+        with httpx.Client(transport=httpx.MockTransport(lambda _: self.fail("Unnecessary request"))) as client:
+            result = quality.correct_cloud_transcript(
+                client, quality.CloudTranscript("Uso traffic vice per dettare oggi."),
+                "it", lambda: False, "Traflix Voice\nUnused Name")
+        self.assertEqual(result.text, "Uso Traflix Voice per dettare oggi.")
+
+    def test_cooldown_still_corrects_vocabulary(self):
+        calls = []
+        def limited(request):
+            calls.append(request)
+            return httpx.Response(429, headers={"retry-after": "120"})
+
+        with httpx.Client(transport=httpx.MockTransport(limited)) as client:
+            for _ in range(2):
+                result = quality.correct_cloud_transcript(
+                    client, quality.CloudTranscript("Uso traffic vice per dettare oggi.", True),
+                    "it", lambda: False, "Traflix Voice")
+                self.assertEqual(result.text, "Uso Traflix Voice per dettare oggi.")
+        self.assertEqual(len(calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
