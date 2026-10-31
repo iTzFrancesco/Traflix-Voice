@@ -37,3 +37,17 @@ ChatJimmy is a public demo, currently reachable without authentication, with no
 guarantee of continued free access or a stable API. The official Taalas API is a
 separate authenticated service. Review [Taalas terms](https://taalas.com/terms-conditions/)
 before distributing an integration that relies on the demo.
+
+## Live synthetic probe
+
+Run `py -3 scripts/benchmark_chatjimmy.py --output <path-outside-repository.json>`
+to exercise the actual cleanup function with eight invented Italian phrases.
+It uses no audio, user transcripts, or credentials. The default is five rounds
+with a 3.5-second interval; `--rounds` and `--interval` can adjust this. It stops
+on HTTP 429 instead of retrying or bypassing the service limit.
+
+The report separates successful HTTP responses, errors, skipped calls, rejected
+edits, and exact expected output. Timing includes the HTTP round trip and local
+validation, excluding audio transcription and paste. The first request uses a
+new connection; subsequent requests can reuse it. Count a fallback as successful
+cleanup only if its output actually matches the expected text.
