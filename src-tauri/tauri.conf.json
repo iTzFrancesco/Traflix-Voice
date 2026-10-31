@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build && py -3 scripts/build_python_backend.py"
+    "beforeBuildCommand": "npm run build && python scripts/build_python_backend.py"
   },
   "app": {
     "withGlobalTauri": true,
