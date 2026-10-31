@@ -4,6 +4,7 @@ import argparse
 from array import array
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -55,17 +56,26 @@ def main():
         if sys.byteorder != "little":
             samples.byteswap()
         header = lambda value: (json.dumps(value) + "\n").encode("utf-8")
-        payload = header({"command": "init", "model": str(model)})
-        payload += header({"command": "transcribe", "samples": len(samples)}) + samples.tobytes()
-        payload += header({"command": "quit"})
-        result = subprocess.run([str(runtime / args.executable.name)], input=payload,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=root,
-                                timeout=240, check=True)
-        replies = [json.loads(line) for line in result.stdout.splitlines()]
-        assert [r["status"] for r in replies] == ["ready", "result", "bye"], "Native protocol failed"
-        assert "country" in replies[1]["text"].lower(), "Public speech fixture was not recognized"
-        print(json.dumps({"native_smoke": "passed", "backend": replies[0]["backend"],
-                          "relocated_runtime": True, "unicode_path": True, "speech_result": True}))
+        environment = os.environ.copy()
+        sdk = environment.get("VULKAN_SDK", "")
+        if sdk:
+            environment["PATH"] = os.pathsep.join(
+                part for part in environment.get("PATH", "").split(os.pathsep)
+                if not part.lower().replace("\\", "/").startswith(sdk.lower().replace("\\", "/"))
+            )
+        for cpu_only in (False, True):
+            payload = header({"command": "init", "model": str(model), "cpu_only": cpu_only})
+            payload += header({"command": "transcribe", "samples": len(samples)}) + samples.tobytes()
+            payload += header({"command": "quit"})
+            result = subprocess.run([str(runtime / args.executable.name)], input=payload,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=root,
+                                    env=environment, timeout=240, check=True)
+            replies = [json.loads(line) for line in result.stdout.splitlines()]
+            assert [r["status"] for r in replies] == ["ready", "result", "bye"], "Native protocol failed"
+            assert "country" in replies[1]["text"].lower(), "Public speech fixture was not recognized"
+            print(json.dumps({"native_smoke": "passed", "backend": replies[0]["backend"],
+                              "cpu_only": cpu_only, "relocated_runtime": True,
+                              "unicode_path": True, "speech_result": True}))
 
 
 if __name__ == "__main__":

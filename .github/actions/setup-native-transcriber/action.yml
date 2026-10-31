@@ -16,6 +16,12 @@ runs:
         $prefix = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" -replace '\\','/'
         $combined = if ($env:CMAKE_PREFIX_PATH) { "$prefix;$env:CMAKE_PREFIX_PATH" } else { $prefix }
         Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$combined"
+    - name: Cache native runtime
+      uses: actions/cache@v4
+      with:
+        path: src-tauri/native-transcriber/target
+        key: native-${{ runner.os }}-${{ hashFiles('src-tauri/native-transcriber/Cargo.lock', 'src-tauri/native-transcriber/Cargo.toml', 'src-tauri/native-transcriber/.cargo/config.toml') }}
+        restore-keys: native-${{ runner.os }}-
     - name: Check native helper
       shell: pwsh
       working-directory: src-tauri/native-transcriber
