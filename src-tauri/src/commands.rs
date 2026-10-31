@@ -172,6 +172,13 @@ pub async fn check_model_exists(app: AppHandle, model_id: String) -> bool {
 fn model_exists(app: AppHandle, model_id: String) -> bool {
     let app_dir = app.path().app_data_dir().unwrap_or_default();
     let dir = app_dir.join("models").join(&model_id);
+    if dir
+        .join("parakeet-tdt-0.6b-v3-Q8_0.gguf")
+        .metadata()
+        .is_ok_and(|m| m.len() == 739_508_576)
+    {
+        return true;
+    }
     [
         "encoder.int8.onnx",
         "decoder.int8.onnx",

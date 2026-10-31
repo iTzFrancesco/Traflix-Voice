@@ -43,6 +43,17 @@ from whisper_engine.transcriber import (
 from whisper_engine import groq_tracker, ipc as ipc_module, transcriber as transcriber_module
 
 
+# Legacy fixtures must not select a real native helper built on the host.
+def setUpModule():
+    global _native_helper_patch
+    _native_helper_patch = patch("whisper_engine.native_parakeet.helper_path", return_value=None)
+    _native_helper_patch.start()
+
+
+def tearDownModule():
+    _native_helper_patch.stop()
+
+
 class TestIpcSerialization(unittest.TestCase):
     def test_non_volume_events_use_compact_json(self):
         output = io.StringIO()

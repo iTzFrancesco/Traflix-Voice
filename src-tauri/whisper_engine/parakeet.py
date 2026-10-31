@@ -1,4 +1,4 @@
-"""Parakeet TDT 0.6B v3 local backend (sherpa-onnx, int8 ONNX).
+"""Parakeet v3 local dispatch: native GGUF, with a legacy INT8 ONNX fallback.
 
 Kept in its own module on purpose: model.py only dispatches to it, and the
 Groq/cloud flow in transcriber.py stays untouched.
@@ -34,6 +34,9 @@ _MISSING_DEP_MESSAGE = (
 
 def is_backend_available():
     """True when the sherpa-onnx wheel can be imported in this interpreter."""
+    from whisper_engine import native_parakeet
+    if native_parakeet.helper_path() is not None:
+        return True
     try:
         import sherpa_onnx  # noqa: F401
         return True
@@ -45,6 +48,9 @@ def is_backend_available():
 
 def backend_status():
     """Machine-readable backend probe used by the `check_backend` IPC command."""
+    from whisper_engine import native_parakeet
+    if native_parakeet.helper_path() is not None:
+        return {"available": True, "message": "Motore nativo transcribe.cpp disponibile (GGUF Q8)."}
     if is_backend_available():
         return {"available": True, "message": "Backend sherpa-onnx disponibile."}
     return {"available": False, "message": _MISSING_DEP_MESSAGE}
@@ -62,6 +68,9 @@ def model_dir(models_dir):
 
 def verify(models_dir):
     directory = model_dir(models_dir)
+    from whisper_engine import native_parakeet
+    if native_parakeet.helper_path() is not None and native_parakeet.verify(directory):
+        return True, "OK"
     for filename in FILES:
         path = os.path.join(directory, filename)
         if not os.path.exists(path):
@@ -212,6 +221,20 @@ class ParakeetRecognizer:
 
 
 def load(models_dir, log_func, num_threads=None):
+    from whisper_engine import native_parakeet
+    if native_parakeet.helper_path() is not None:
+        directory = model_dir(models_dir)
+        # Migrate existing ONNX installations once; keep their files as fallback.
+        if not native_parakeet.verify(directory) and all(
+            os.path.isfile(os.path.join(directory, f)) for f in FILES
+        ):
+            log_func({"status": "downloading", "model": PARAKEET_MODEL_ID,
+                      "message": "Aggiornamento Parakeet al motore nativo GGUF (~740 MB)..."})
+            native_parakeet.download(directory)
+            log_func({"status": "download_complete", "model": PARAKEET_MODEL_ID,
+                      "message": "Modello GGUF scaricato."})
+        log_func({"status": "loading_model", "message": "Preparazione Parakeet nativo..."})
+        return native_parakeet.load(directory, log_func)
     is_valid, msg = verify(models_dir)
     if not is_valid:
         log_func({"status": "error", "message": f"Modello Parakeet non valido: {msg}"})
@@ -253,6 +276,15 @@ def _remove_partial_files(directory):
 
 
 def download(models_dir, log_func):
+    from whisper_engine import native_parakeet
+    if native_parakeet.helper_path() is not None:
+        try:
+            log_func({"status": "downloading", "message": "Download Parakeet GGUF Q8 (~740 MB)...", "model": PARAKEET_MODEL_ID})
+            native_parakeet.download(model_dir(models_dir))
+            log_func({"status": "download_complete", "message": "Modello Parakeet GGUF scaricato.", "model": PARAKEET_MODEL_ID})
+        except Exception as error:
+            log_func({"status": "download_error", "message": f"Download fallito: {error}", "model": PARAKEET_MODEL_ID})
+        return
     directory = model_dir(models_dir)
     try:
         os.makedirs(directory, exist_ok=True)

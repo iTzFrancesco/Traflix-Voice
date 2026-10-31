@@ -1,11 +1,13 @@
-"""Local model backend (Parakeet-only).
+"""Local Parakeet dispatch: native GGUF by default, legacy ONNX in development.
 
-The whisper.cpp path was removed: on CPU-only hardware Parakeet decodes ~30x
-faster at equal transcription quality (docs/local-optimization-report.md).
+The retired whisper.cpp path was compared against the legacy ONNX backend
+in docs/local-optimization-report.md. Native GGUF verification and memory
+measurements are documented in docs/native-transcription.md.
 Model ids from older settings are accepted and resolve to Parakeet instead of
 failing, so existing installs keep working after the switch.
 """
 from whisper_engine import parakeet as parakeet_backend
+from whisper_engine.native_parakeet import NativeRecognizer
 
 
 def is_backend_available():
@@ -30,7 +32,7 @@ def release_model(model):
 
 def retain_model(model):
     """Pin the native handle for a capture or inference already in progress."""
-    return model.snapshot() if isinstance(model, parakeet_backend.ParakeetRecognizer) else model
+    return model.snapshot() if isinstance(model, (parakeet_backend.ParakeetRecognizer, NativeRecognizer)) else model
 
 
 def verify_model(models_dir, size):
