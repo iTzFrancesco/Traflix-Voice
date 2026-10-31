@@ -12,8 +12,14 @@ const MAX_SAMPLES: usize = 16_000 * 600;
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 enum Command {
-    Init { model: String },
-    Transcribe { samples: usize },
+    Init {
+        model: String,
+        #[serde(default)]
+        cpu_only: bool,
+    },
+    Transcribe {
+        samples: usize,
+    },
     Quit,
 }
 
@@ -85,13 +91,33 @@ fn main() {
         let result: Result<serde_json::Value, String> = (|| {
             match serde_json::from_str::<Command>(&line).map_err(|_| "invalid command")? {
                 Command::Quit => Ok(json!({"status":"bye"})),
-                Command::Init { model: path } => {
+                Command::Init {
+                    model: path,
+                    cpu_only,
+                } => {
                     model = None;
-                    transcribe_cpp::init_backends_default().map_err(|e| e.to_string())?;
+                    let directory = std::env::current_exe()
+                        .map_err(|e| e.to_string())?
+                        .parent()
+                        .ok_or("helper directory missing")?
+                        .to_owned();
+                    transcribe_cpp::init_backends_with(
+                        Some(&directory),
+                        if cpu_only {
+                            transcribe_cpp::BackendMask::for_backend(Backend::Cpu)
+                        } else {
+                            transcribe_cpp::BackendMask::ALL
+                        },
+                    )
+                    .map_err(|e| e.to_string())?;
                     let loaded = Model::load_with(
                         path,
                         &ModelOptions {
-                            backend: Backend::Auto,
+                            backend: if cpu_only {
+                                Backend::Cpu
+                            } else {
+                                Backend::Auto
+                            },
                             ..Default::default()
                         },
                     )

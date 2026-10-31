@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import hashlib
+import json
 import subprocess
 import shutil
 import sys
@@ -93,6 +94,8 @@ def main() -> int:
         raise FileNotFoundError(f"PyInstaller did not produce {executable}")
 
     shutil.copy2(native_executable, executable.parent / native_executable.name)
+    for name in json.loads((native_executable.parent / "native-libraries.json").read_text(encoding="utf-8")):
+        shutil.copy2(native_executable.parent / name, executable.parent / name)
     shutil.copy2(REPO_ROOT / "THIRD_PARTY_NOTICES.md", executable.parent / "THIRD_PARTY_NOTICES.md")
     print(f"Bundled Python sidecar: {executable}")
     return 0

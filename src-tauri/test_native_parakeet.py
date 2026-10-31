@@ -80,3 +80,10 @@ class NativeBackendTests(unittest.TestCase):
             self.assertEqual(info["current_device"], "vulkan")
             self.assertIn("Test GPU", info["message"])
             recognizer.close()
+
+    def test_driver_failure_retries_with_cpu_modules_only(self):
+        session = native.NativeSession.__new__(native.NativeSession)
+        session.process = None
+        with patch.object(session, "_start_backend", side_effect=[RuntimeError("driver"), {"backend":"cpu"}]) as start:
+            self.assertEqual(session._start(), {"backend":"cpu"})
+            self.assertEqual([call.args[0] for call in start.call_args_list], [False, True])

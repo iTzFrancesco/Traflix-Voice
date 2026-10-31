@@ -24,5 +24,8 @@ runs:
         if ($LASTEXITCODE -ne 0) { throw "Native formatting failed" }
         cargo clippy --locked --release -- -D warnings
         if ($LASTEXITCODE -ne 0) { throw "Native Clippy failed" }
+        python ../../scripts/build_native_transcriber.py
+        if ($LASTEXITCODE -ne 0) { throw "Native build failed" }
+        $env:PATH = "$(Get-Location)/target/release;$env:PATH"
         cargo test --locked --release
         if ($LASTEXITCODE -ne 0) { throw "Native tests failed" }

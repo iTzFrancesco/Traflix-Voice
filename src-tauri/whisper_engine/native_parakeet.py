@@ -65,8 +65,17 @@ class NativeSession:
         self.metadata = self._start()
 
     def _start(self):
+        try:
+            return self._start_backend(False)
+        except (RuntimeError, OSError):
+            # A driver can fail during Vulkan initialization. Retry in a fresh
+            # process with only CPU modules registered.
+            return self._start_backend(True)
+
+    def _start_backend(self, cpu_only):
         self.process = subprocess.Popen(
-            [self.executable], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            [self.executable], cwd=str(Path(self.executable).parent),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -83,7 +92,7 @@ class NativeSession:
                 replies.put(None)
 
         threading.Thread(target=read_replies, name="native-asr-output", daemon=True).start()
-        return self._exchange({"command": "init", "model": self.model_path}, timeout=180)
+        return self._exchange({"command": "init", "model": self.model_path, "cpu_only": cpu_only}, timeout=180)
 
     def _exchange(self, command, audio=None, timeout=60):
         try:
