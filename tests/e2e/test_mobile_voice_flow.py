@@ -74,6 +74,10 @@ def test_mobile_dashboard_does_not_wait_for_optional_bridge(e2e_base_url):
             ").length"
         )
         assert runtime_calls <= 2
+        page.get_by_role("button", name="Impostazioni", exact=True).click()
+        expect(page.get_by_role("heading", name="Impostazioni", exact=True)).to_be_visible()
+        expect(page.get_by_label("Vocabolario personale")).to_have_count(0)
+        expect(page.get_by_text("Correzione con ChatJimmy (sperimentale)", exact=True)).to_have_count(0)
         browser.close()
 
 
