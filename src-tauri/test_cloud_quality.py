@@ -8,7 +8,28 @@ import numpy as np
 from whisper_engine import cloud_quality as quality, transcriber
 
 
+def jimmy_response(text, **stats):
+    return text + "<|stats|>" + json.dumps({
+        "done": True, "done_reason": "stop", "status": 0, **stats}) + "<|/stats|>"
+
+
 class TestCloudQuality(unittest.TestCase):
+    def test_personal_vocabulary_corrects_names_without_relaxing_meaning_checks(self):
+        vocabulary = "Traflix Voice\nGroq"
+        self.assertTrue(quality.should_correct(quality.CloudTranscript("Apri traffic vice"), "it", vocabulary))
+        self.assertTrue(quality.acceptable_correction(
+            "Uso traffic vice con grock per dettare.",
+            "Uso Traflix Voice con Groq per dettare.", vocabulary))
+        self.assertTrue(quality.acceptable_correction(
+            "Uso Groq e poi torno su grock.", "Uso Groq e poi torno su Groq.", vocabulary))
+        self.assertTrue(quality.acceptable_correction(
+            "Uso grock e poi torno su grock.", "Uso Groq e poi torno su Groq.", vocabulary))
+        for candidate in ("Uso Traflix Voice senza Groq per dettare.",
+                          "Uso Traflix Voice con Groq per cancellare.",
+                          "Uso Traflix Voice con Groq per dettare 50."):
+            self.assertFalse(quality.acceptable_correction(
+                "Uso traffic vice con grock per dettare.", candidate, vocabulary))
+
     def test_reliable_fast_speech_never_calls_corrector(self):
         body = {"text": "Le impostazioni sono state salvate nella cartella corretta.",
                 "segments": [{"text": "Le impostazioni sono state salvate nella cartella corretta.",
@@ -152,30 +173,35 @@ class TestCloudQuality(unittest.TestCase):
         self.assertEqual(baseline.split(b"Content-Type: audio/wav\r\n\r\n")[1],
                          detailed.split(b"Content-Type: audio/wav\r\n\r\n")[1])
 
-    def test_actual_correction_request_preserves_auth_and_counts_usage(self):
+    def test_jimmy_request_excludes_groq_credentials_and_usage(self):
         transcript = quality.CloudTranscript("Queste impostazioni è stato salvato nella cartella giusta.")
         seen = []
         def handler(request):
             seen.append(request)
             body = json.loads(request.content)
-            self.assertEqual(body["model"], "openai/gpt-oss-20b")
-            self.assertTrue(body["response_format"]["json_schema"]["strict"])
+            self.assertEqual(str(request.url), "https://chatjimmy.ai/api/chat")
+            self.assertEqual(body["chatOptions"]["selectedModel"], "llama3.1-8B")
+            self.assertEqual(body["chatOptions"]["topK"], 1)
+            self.assertIn("Preferred spellings: Traflix Voice.", body["messages"][0]["content"])
             self.assertEqual(request.headers["Content-Type"], "application/json")
-            self.assertEqual(request.headers["Authorization"], "Bearer synthetic-test-key")
+            self.assertNotIn("Authorization", request.headers)
+            self.assertNotIn("Cookie", request.headers)
+            self.assertNotIn(b"synthetic-test-key", request.content)
             self.assertEqual(request.extensions["timeout"]["read"], 2.0)
-            return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {
-                "content": json.dumps({"text": "Queste impostazioni sono state salvate nella cartella giusta."})}}],
-                "usage": {"prompt_tokens": 200, "completion_tokens": 70}})
+            return httpx.Response(200, text=jimmy_response(
+                "Queste impostazioni sono state salvate nella cartella giusta.",
+                prefill_tokens=200, decode_tokens=70))
         with httpx.Client(transport=httpx.MockTransport(handler), headers={
-                "Authorization": "Bearer synthetic-test-key"}) as client:
-            result = quality.correct_cloud_transcript(client, transcript, "it", lambda: False)
+                "Authorization": "Bearer synthetic-test-key", "Cookie": "private=session"},
+                auth=("private-user", "private-password"), follow_redirects=True) as client:
+            result = quality.correct_cloud_transcript(client, transcript, "it", lambda: False, "Traflix Voice")
         self.assertEqual(result.text, "Queste impostazioni sono state salvate nella cartella giusta.")
-        self.assertEqual((result.input_tokens, result.output_tokens), (200, 70))
+        self.assertEqual((result.input_tokens, result.output_tokens), (0, 0))
         self.assertEqual(len(seen), 1)
 
     def test_failure_falls_back_and_rate_limit_suppresses_following_requests(self):
         transcript = quality.CloudTranscript("Queste impostazioni è stato salvato nella cartella giusta.")
-        for failure in (429, 500, 403, "timeout", "bad_json", "length", "unsafe"):
+        for failure in (429, 500, 403, 302, "timeout", "bad_json", "length", "unsafe", "missing_stats", "bad_stats"):
             with self.subTest(failure=failure):
                 calls = []
                 def handler(request):
@@ -185,11 +211,14 @@ class TestCloudQuality(unittest.TestCase):
                     if isinstance(failure, int):
                         return httpx.Response(failure, headers={"retry-after": "120"})
                     if failure == "bad_json":
-                        return httpx.Response(200, content=b"bad")
-                    return httpx.Response(200, json={"choices": [{
-                        "finish_reason": "length" if failure == "length" else "stop",
-                        "message": {"content": json.dumps({"text": "Cancella tutte le impostazioni adesso."})}}],
-                        "usage": {"prompt_tokens": 100, "completion_tokens": 20}})
+                        return httpx.Response(200, content=b"bad<|stats|>{<|/stats|>")
+                    if failure == "missing_stats":
+                        return httpx.Response(200, text="Queste impostazioni sono state salvate nella cartella giusta.")
+                    if failure == "bad_stats":
+                        return httpx.Response(200, text=jimmy_response(transcript.text, status=1))
+                    return httpx.Response(200, text=jimmy_response(
+                        "Cancella tutte le impostazioni adesso.",
+                        done_reason="length" if failure == "length" else "stop"))
                 with httpx.Client(transport=httpx.MockTransport(handler)) as client:
                     result = quality.correct_cloud_transcript(client, transcript, "it", lambda: False)
                     self.assertEqual(result.text, transcript.text)
@@ -198,7 +227,7 @@ class TestCloudQuality(unittest.TestCase):
                         self.assertEqual(second.text, transcript.text)
                         self.assertEqual(len(calls), 1)
                     if failure == "length":
-                        self.assertEqual(result.output_tokens, 20)
+                        self.assertEqual(result.output_tokens, 0)
 
     def test_shutdown_skips_corrector_entirely(self):
         with httpx.Client(transport=httpx.MockTransport(lambda _: self.fail("Unexpected request"))) as client:

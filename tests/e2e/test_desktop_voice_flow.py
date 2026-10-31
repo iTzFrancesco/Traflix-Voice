@@ -294,6 +294,9 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url, has_speech)
     def groq_handler(request):
         if request.method == "GET":
             return httpx.Response(200, json={"data": []}, request=request)
+        if request.url.host == "chatjimmy.ai":
+            captured["correction"] = request
+            return httpx.Response(200, text='trascrizione e2e completata<|stats|>{"done":true,"done_reason":"stop","status":0}<|/stats|>')
         captured["request"] = request
         groq_request_seen.set()
         return httpx.Response(200, json={"text": "trascrizione e2e completata", "segments": [{"text": "trascrizione e2e completata", "start": 0, "end": 2, "avg_logprob": -0.03, "no_speech_prob": 0.01}]}, request=request)
@@ -365,6 +368,9 @@ def test_hotkey_to_groq_to_ui_round_trip(browser_page, e2e_base_url, has_speech)
 
         request = captured["request"]
         assert str(request.url) == GROQ_TRANSCRIPTION_URL
+        correction = captured["correction"]
+        assert "authorization" not in correction.headers
+        assert "Preferred spellings: Traflix Voice" in json.loads(correction.content)["messages"][0]["content"]
         assert b"verbose_json\r\n" in request.content
         assert b"Traflix Voice, Groq Cloud\r\n" in request.content
         assert b"whisper-large-v3-turbo\r\n" in request.content
@@ -442,7 +448,7 @@ def test_widget_vocabulary_event_focus_and_settings_persistence(browser_page, e2
     vocabulary.type("TypeScript")
     vocabulary.press("Tab")
     browser_page.wait_for_function("window.__e2e.settings.cloudVocabulary === 'Traflix Voice\\nSilero\\nTypeScript'")
-    browser_page.get_by_text("Correzione solo quando serve", exact=True).click()
+    browser_page.get_by_text("Correzione con ChatJimmy (sperimentale)", exact=True).click()
     browser_page.wait_for_function("window.__e2e.settings.cloudCorrectionEnabled === false")
     browser_page.get_by_role("tab", name="Cronologia", exact=True).click()
     browser_page.get_by_role("tab", name="Motore IA").click()

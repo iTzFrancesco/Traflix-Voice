@@ -693,7 +693,8 @@ def transcribe_cloud(
             correction = cloud_quality.CorrectionResult("")
         elif correct_uncertain:
             correction = cloud_quality.correct_cloud_transcript(
-                client, transcript, cloud_language, lambda: _shutdown_requested(shutting_down))
+                client, transcript, cloud_language, lambda: _shutdown_requested(shutting_down),
+                vocabulary=_ensure_default_prompt(cloud_quality.normalize_vocabulary(vocabulary)))
         else:
             correction = cloud_quality.CorrectionResult(transcript.text)
         text = correction.text
