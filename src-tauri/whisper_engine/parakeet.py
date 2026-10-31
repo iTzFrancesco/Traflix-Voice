@@ -4,6 +4,7 @@ Kept in its own module on purpose: model.py only dispatches to it, and the
 Groq/cloud flow in transcriber.py stays untouched.
 """
 import os
+import threading
 
 import numpy as np
 from huggingface_hub import hf_hub_download
@@ -16,6 +17,7 @@ from whisper_engine.constants import (
 )
 
 REPO_ID = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+CPU_REVISION = "2bda32ec70b097a55adaa07d9a7173915b43cc78"
 FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
 _PAUSE_FRAME_SAMPLES = SAMPLE_RATE // 50
 _MIN_PAUSE_FRAMES = 8
@@ -35,22 +37,18 @@ _MISSING_DEP_MESSAGE = (
 def is_backend_available():
     """True when the sherpa-onnx wheel can be imported in this interpreter."""
     from whisper_engine import native_parakeet
-    if native_parakeet.helper_path() is not None:
-        return True
     try:
         import sherpa_onnx  # noqa: F401
         return True
-    except ImportError:
-        return False
     except Exception:
-        return False
+        return native_parakeet.gpu_available()
 
 
 def backend_status():
     """Machine-readable backend probe used by the `check_backend` IPC command."""
     from whisper_engine import native_parakeet
-    if native_parakeet.helper_path() is not None:
-        return {"available": True, "message": "Motore nativo transcribe.cpp disponibile (GGUF Q8)."}
+    if is_backend_available() and native_parakeet.helper_path() is not None:
+        return {"available": True, "message": "Selezione automatica GPU GGUF / CPU ONNX disponibile."}
     if is_backend_available():
         return {"available": True, "message": "Backend sherpa-onnx disponibile."}
     return {"available": False, "message": _MISSING_DEP_MESSAGE}
@@ -71,6 +69,10 @@ def verify(models_dir):
     from whisper_engine import native_parakeet
     if native_parakeet.helper_path() is not None and native_parakeet.verify(directory):
         return True, "OK"
+    return _verify_cpu(directory)
+
+
+def _verify_cpu(directory):
     for filename in FILES:
         path = os.path.join(directory, filename)
         if not os.path.exists(path):
@@ -220,22 +222,74 @@ class ParakeetRecognizer:
         return segments
 
 
+class _AdaptiveSession:
+    def __init__(self, model, cpu_factory, log_func):
+        self.model = model
+        self.cpu_factory = cpu_factory
+        self.log = log_func
+        self.lock = threading.Lock()
+
+    def transcribe(self, recording, language):
+        from whisper_engine import native_parakeet
+        with self.lock:
+            if self.model is None:
+                self.model = self.cpu_factory()
+            try:
+                return self.model.transcribe(recording, language=language)
+            except Exception:
+                if not isinstance(self.model, native_parakeet.NativeRecognizer):
+                    raise
+                self.model.close()
+                self.model = None
+                native_parakeet.disable_gpu()
+                self.log({"status": "warning", "message": "GPU non disponibile. Passaggio automatico alla CPU."})
+                self.model = self.cpu_factory()
+                return self.model.transcribe(recording, language=language)
+
+    def __del__(self):
+        try:
+            if self.model is not None:
+                self.model.close()
+        except Exception:
+            pass
+
+
+class AdaptiveRecognizer(ParakeetRecognizer):
+    def snapshot(self):
+        return AdaptiveRecognizer(self._recognizer)
+
+    def transcribe(self, recording, language=""):
+        return self._recognizer.transcribe(recording, language)
+
+
 def load(models_dir, log_func, num_threads=None):
     from whisper_engine import native_parakeet
-    if native_parakeet.helper_path() is not None:
+    if native_parakeet.gpu_available():
         directory = model_dir(models_dir)
-        # Migrate existing ONNX installations once; keep their files as fallback.
-        if not native_parakeet.verify(directory) and all(
-            os.path.isfile(os.path.join(directory, f)) for f in FILES
-        ):
-            log_func({"status": "downloading", "model": PARAKEET_MODEL_ID,
-                      "message": "Aggiornamento Parakeet al motore nativo GGUF (~740 MB)..."})
-            native_parakeet.download(directory)
-            log_func({"status": "download_complete", "model": PARAKEET_MODEL_ID,
-                      "message": "Modello GGUF scaricato."})
-        log_func({"status": "loading_model", "message": "Preparazione Parakeet nativo..."})
-        return native_parakeet.load(directory, log_func)
-    is_valid, msg = verify(models_dir)
+        try:
+            if not native_parakeet.verify(directory):
+                log_func({"status": "downloading", "model": PARAKEET_MODEL_ID,
+                          "message": "Preparazione Parakeet per la GPU (~740 MB)..."})
+                native_parakeet.download(directory)
+                log_func({"status": "download_complete", "model": PARAKEET_MODEL_ID,
+                          "message": "Modello GGUF scaricato."})
+            log_func({"status": "loading_model", "message": "Preparazione Parakeet GPU..."})
+            gpu_model = native_parakeet.load(directory, log_func)
+            if gpu_model._session.metadata.get("backend") != "cpu":
+                return AdaptiveRecognizer(_AdaptiveSession(gpu_model,
+                    lambda: _load_cpu(models_dir, log_func, num_threads), log_func))
+            gpu_model.close()
+        except Exception:
+            log_func({"status": "warning", "message": "Avvio GPU non riuscito. Uso automatico della CPU."})
+        native_parakeet.disable_gpu()
+    return _load_cpu(models_dir, log_func, num_threads)
+
+
+def _load_cpu(models_dir, log_func, num_threads=None):
+    directory = model_dir(models_dir)
+    if not all(os.path.isfile(os.path.join(directory, f)) and os.path.getsize(os.path.join(directory, f)) > 0 for f in FILES):
+        _download_cpu(models_dir, log_func)
+    is_valid, msg = _verify_cpu(directory)
     if not is_valid:
         log_func({"status": "error", "message": f"Modello Parakeet non valido: {msg}"})
         raise Exception(f"Modello Parakeet non valido: {msg}")
@@ -262,6 +316,7 @@ def load(models_dir, log_func, num_threads=None):
         log_func({"status": "error", "message": f"Errore caricamento modello Parakeet: {str(e)}"})
         raise
     log_func({"status": "info", "message": "Modello Parakeet caricato."})
+    log_func({"status": "gpu_info", "current_device": "cpu", "message": "Dispositivo in uso: CPU (ONNX automatico)"})
     return ParakeetRecognizer(recognizer)
 
 
@@ -277,7 +332,7 @@ def _remove_partial_files(directory):
 
 def download(models_dir, log_func):
     from whisper_engine import native_parakeet
-    if native_parakeet.helper_path() is not None:
+    if native_parakeet.gpu_available():
         try:
             log_func({"status": "downloading", "message": "Download Parakeet GGUF Q8 (~740 MB)...", "model": PARAKEET_MODEL_ID})
             native_parakeet.download(model_dir(models_dir))
@@ -285,6 +340,10 @@ def download(models_dir, log_func):
         except Exception as error:
             log_func({"status": "download_error", "message": f"Download fallito: {error}", "model": PARAKEET_MODEL_ID})
         return
+    _download_cpu(models_dir, log_func)
+
+
+def _download_cpu(models_dir, log_func):
     directory = model_dir(models_dir)
     try:
         os.makedirs(directory, exist_ok=True)
@@ -297,12 +356,12 @@ def download(models_dir, log_func):
         for filename in FILES:
             hf_hub_download(
                 repo_id=REPO_ID,
+                revision=CPU_REVISION,
                 filename=filename,
                 local_dir=directory,
-                local_dir_use_symlinks=False,
             )
 
-        is_valid, msg = verify(models_dir)
+        is_valid, msg = _verify_cpu(directory)
         if not is_valid:
             log_func({"status": "error", "message": f"Verifica fallita: {msg}"})
             _remove_partial_files(directory)

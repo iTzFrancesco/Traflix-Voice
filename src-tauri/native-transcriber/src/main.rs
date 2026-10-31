@@ -20,6 +20,7 @@ enum Command {
     Transcribe {
         samples: usize,
     },
+    Probe,
     Quit,
 }
 
@@ -90,6 +91,18 @@ fn main() {
         }
         let result: Result<serde_json::Value, String> = (|| {
             match serde_json::from_str::<Command>(&line).map_err(|_| "invalid command")? {
+                Command::Probe => {
+                    let directory = std::env::current_exe()
+                        .map_err(|e| e.to_string())?
+                        .parent()
+                        .ok_or("helper directory missing")?
+                        .to_owned();
+                    transcribe_cpp::init_backends(&directory).map_err(|e| e.to_string())?;
+                    let gpu = transcribe_cpp::devices()
+                        .iter()
+                        .any(|d| matches!(d.device_type, DeviceType::Gpu | DeviceType::Igpu));
+                    Ok(json!({"status":"probe", "gpu_available":gpu}))
+                }
                 Command::Quit => Ok(json!({"status":"bye"})),
                 Command::Init {
                     model: path,

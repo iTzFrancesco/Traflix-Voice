@@ -90,7 +90,7 @@ export const WHISPER_MODELS: WhisperModel[] = [
   {
     id: "parakeet-tdt-0.6b-v3-int8",
     name: "Parakeet TDT 0.6B V3",
-    size: "~740 MB",
+    size: "~670–740 MB",
     ram: "Variabile (CPU/GPU)",
     speed: 5,
     quality: 4,

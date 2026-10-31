@@ -6,6 +6,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 
 import numpy as np
 from huggingface_hub import hf_hub_download
@@ -16,6 +17,7 @@ REVISION = "85ac09ea12fc4b1112fa76810059364bc6adc9de"
 MODEL_BYTES = 739_508_576
 MODEL_SHA256 = "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7"
 _verified = set()
+_gpu_probe = {}
 
 
 def helper_path():
@@ -25,6 +27,34 @@ def helper_path():
     else:
         path = Path(__file__).resolve().parents[1] / "native-transcriber" / "target" / "release" / name
     return path if path.is_file() else None
+
+
+def gpu_available():
+    path = helper_path()
+    if path is None:
+        return False
+    key = (str(path), path.stat().st_mtime_ns)
+    cached = _gpu_probe.get(key)
+    if cached is not None and time.monotonic() - cached[0] < 60:
+        return cached[1]
+    try:
+        result = subprocess.run([str(path)], cwd=path.parent,
+            input=b'{"command":"probe"}\n{"command":"quit"}\n', stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=True)
+        reply = json.loads(result.stdout.splitlines()[0])
+        available = reply.get("status") == "probe" and reply.get("gpu_available") is True
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        available = False
+    _gpu_probe.clear()
+    _gpu_probe[key] = (time.monotonic(), available)
+    return available
+
+
+def disable_gpu():
+    path = helper_path()
+    if path is not None:
+        _gpu_probe[(str(path), path.stat().st_mtime_ns)] = (time.monotonic(), False)
 
 
 def verify(directory, checksum=False):

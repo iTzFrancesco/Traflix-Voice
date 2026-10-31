@@ -1019,7 +1019,7 @@ class TestModelPath(unittest.TestCase):
             engine.models_dir = temp_dir
 
             with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
-                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")), \
+                 patch("whisper_engine.parakeet._verify_cpu", return_value=(True, "OK")), \
                  patch("sys.stdout", new_callable=io.StringIO):
                 engine.download_model("parakeet-tdt-0.6b-v3-int8")
 
@@ -1036,7 +1036,7 @@ class TestModelPath(unittest.TestCase):
             engine.models_dir = temp_dir
 
             with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
-                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")), \
+                 patch("whisper_engine.parakeet._verify_cpu", return_value=(True, "OK")), \
                  patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
                 engine.download_model("small")
 
@@ -1586,7 +1586,7 @@ class TestDownloadModel(unittest.TestCase):
             engine.models_dir = temp_dir
 
             with patch("whisper_engine.parakeet.hf_hub_download"), \
-                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")):
+                 patch("whisper_engine.parakeet._verify_cpu", return_value=(True, "OK")):
                 engine.download_model("small")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
@@ -1800,7 +1800,7 @@ class TestParakeetBackend(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             engine.models_dir = temp_dir
             with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
-                 patch("whisper_engine.parakeet.verify", return_value=(True, "OK")):
+                 patch("whisper_engine.parakeet._verify_cpu", return_value=(True, "OK")):
                 engine.download_model(self.PARAKEET_MODEL_ID)
             self.assertEqual(mock_dl.call_count, 4)
             filenames = [c.kwargs["filename"] for c in mock_dl.call_args_list]
