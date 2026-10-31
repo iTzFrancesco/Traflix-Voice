@@ -7,6 +7,7 @@ import math
 import re
 import threading
 import time
+import unicodedata
 import weakref
 
 import httpx
@@ -145,33 +146,76 @@ def _protected_word(word):
             or _ITALIAN_NUMBER.fullmatch(word) is not None)
 
 
-def _apply_vocabulary(original, candidate, vocabulary):
+def _fold_word(word):
+    return "".join(c for c in unicodedata.normalize("NFKD", word.casefold())
+                   if not unicodedata.combining(c))
+
+
+def _phonetic_word(word):
+    word = re.sub(r"^wh", "w", word)
+    word = re.sub(r"ph", "f", word)
+    word = re.sub(r"ck|cq|qu|[kq]", "k", word)
+    return re.sub(r"c(?=[aou]|$)", "k", word)
+
+
+def _vocabulary_similarity(source_words, target_words):
+    source = "".join(_fold_word(word) for word in source_words)
+    target = "".join(_fold_word(word) for word in target_words)
+    if source == target:
+        return 1.0
+    if (any(c.isdigit() for c in source + target)
+            or _phonetic_word(source)[:2] != _phonetic_word(target)[:2]):
+        return 0.0
+    score = difflib.SequenceMatcher(None, source, target, autojunk=False).ratio()
+    if len(target_words) > 1 and len(target) >= 8:
+        if len(source_words) == len(target_words) and any(
+                difflib.SequenceMatcher(None, _fold_word(old), _fold_word(new), autojunk=False).ratio() < 0.65
+                for old, new in zip(source_words, target_words)):
+            return 0.0
+        return score if score >= 0.78 else 0.0
+    if len(target) >= 6:
+        return score if score >= 0.88 else 0.0
+    if len(target) >= 3 and score >= 0.65 and _phonetic_word(source) == _phonetic_word(target):
+        return score
+    return 0.0
+
+
+def apply_personal_vocabulary(text, vocabulary):
+    """Infer close variants from final spellings, without inserting new content."""
+    if not vocabulary or len(text) > 4000 or _CODE.search(text):
+        return text
+    spans = list(_WORDS.finditer(text))
+    candidates = {}
     for term in normalize_vocabulary(vocabulary).split(", "):
-        term_words = _WORDS.findall(term)
-        if not term_words:
+        if not re.fullmatch(r"\w+(?:\s+\w+)*", term):
             continue
-        pattern = re.compile(r"(?<!\w)" + re.escape(term) + r"(?!\w)")
-        missing = len(pattern.findall(candidate)) - len(pattern.findall(original))
-        target = "".join(term_words).casefold()
-        for _ in range(missing):
-            spans = list(_WORDS.finditer(original))
-            matches = []
-            for size in range(max(1, len(term_words) - 1), len(term_words) + 2):
-                for index in range(len(spans) - size + 1):
-                    group = spans[index:index + size]
-                    source = original[group[0].start():group[-1].end()]
-                    if (pattern.search(source) or re.search(r"[^\w\s]", source)
-                            or any(_protected_word(w.group().casefold()) for w in group)):
-                        continue
-                    score = difflib.SequenceMatcher(None, "".join(w.group() for w in group).casefold(),
-                                                  target, autojunk=False).ratio()
-                    if score >= 0.65:
-                        matches.append((score, group[0].start(), group[-1].end()))
-            if not matches:
-                break
-            _, start, end = max(matches)
-            original = original[:start] + term + original[end:]
-    return original
+        target_words = term.split()
+        for size in range(max(1, len(target_words) - 1), len(target_words) + 2):
+            for index in range(len(spans) - size + 1):
+                group = spans[index:index + size]
+                start, end = group[0].start(), group[-1].end()
+                if re.search(r"[^\w\s]", text[start:end]):
+                    continue
+                words = [word.group() for word in group]
+                if any(_protected_word(word.casefold()) for word in words):
+                    continue
+                score = _vocabulary_similarity(words, target_words)
+                if score:
+                    candidates.setdefault((start, end), {})[term] = score
+    ranked = []
+    for (start, end), options in candidates.items():
+        options = sorted(((score, term) for term, score in options.items()), reverse=True)
+        if len(options) > 1 and options[0][0] - options[1][0] < 0.08:
+            continue
+        score, term = options[0]
+        ranked.append((score, end - start, start, end, term))
+    replacements = []
+    for _, _, start, end, term in sorted(ranked, reverse=True):
+        if not any(start < other_end and end > other_start for other_start, other_end, _ in replacements):
+            replacements.append((start, end, term))
+    for start, end, term in sorted(replacements, reverse=True):
+        text = text[:start] + term + text[end:]
+    return text
 
 
 def acceptable_correction(original, candidate, vocabulary=""):
@@ -183,7 +227,7 @@ def acceptable_correction(original, candidate, vocabulary=""):
         protected_after = [w.casefold() for w in _WORDS.findall(candidate) if _protected_word(w.casefold())]
         if protected_before != protected_after or _NUMBERS.findall(original) != _NUMBERS.findall(candidate):
             return False
-        original = _apply_vocabulary(original, candidate, vocabulary)
+        original = apply_personal_vocabulary(original, vocabulary)
     before, after = _WORDS.findall(original), _WORDS.findall(candidate)
     lower_before, lower_after = [w.casefold() for w in before], [w.casefold() for w in after]
     if len(before) != len(after) or _NUMBERS.findall(original) != _NUMBERS.findall(candidate):
@@ -259,8 +303,10 @@ def _quota_cooldown(client, response):
 
 def correct_cloud_transcript(client, transcript, language, shutting_down, vocabulary=""):
     original = local_cleanup(transcript.text, language)
-    fallback = CorrectionResult(original)
     vocabulary = normalize_vocabulary(vocabulary)
+    if not transcript.no_speech and not shutting_down():
+        original = apply_personal_vocabulary(original, vocabulary)
+    fallback = CorrectionResult(original)
     if shutting_down() or not should_correct(transcript, language, vocabulary) or not _correction_allowed(client):
         return fallback
     response = None
