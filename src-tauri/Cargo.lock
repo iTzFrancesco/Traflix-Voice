@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Traflix-Voice"
-version = "1.8.1"
+version = "1.10.0"
 dependencies = [
  "cpal",
  "log",
