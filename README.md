@@ -44,11 +44,14 @@ Windows application.
   click-to-toggle or hold-to-speak; a secondary shortcut, model, language,
   and microphone are configurable in the app.
 - **Two transcription providers**: local Parakeet TDT 0.6B v3 (private,
-  on-device, via native `transcribe.cpp` GGUF Q8 with automatic GPU selection) or Groq Cloud
+  on-device, with automatic Vulkan/GGUF GPU acceleration or ONNX CPU inference) or Groq Cloud
   (`whisper-large-v3-turbo`, needs an API key in System settings).
   The Home tab always shows which engine produced the last dictation.
+- **Keep ready microphone** on desktop: cloud and local dictation share an open
+  microphone with 450 ms of in-memory pre-roll. Idle audio is neither saved nor
+  uploaded. Select **Chiudi quando inattivo** in System to release it between clips.
 - **Local model management** (AI tab): one-click Parakeet download
-  (~740 MB), a resident model for rapid dictation, and
+  (~670 MB on CPU, ~740 MB on GPU), a resident model for rapid dictation, and
   **Libera RAM** to unload it from memory without deleting files.
   Switching to Cloud unloads the model automatically.
 - **Delivery**: automatic paste (Ctrl+V) into the focused application, with
@@ -84,7 +87,7 @@ Android requires a signed APK for direct installation.
 
 ## Features
 
-- Local Parakeet TDT 0.6B v3 through `transcribe.cpp` (GGUF Q8), with Vulkan acceleration on Windows x64 and automatic CPU fallback. Development environments without the native helper can still use the legacy `sherpa-onnx` backend.
+- Local Parakeet TDT 0.6B v3 automatically uses `transcribe.cpp` GGUF Q8 on an available GPU, or `sherpa-onnx` INT8 ONNX on CPU. Model downloads and GPU failure recovery follow that choice; no engine selection is required.
 - Optional Groq transcription using `whisper-large-v3-turbo`.
 - Configurable global hotkeys, click-to-toggle, and hold-to-speak recording.
 - Automatic paste into the focused application, keeping the transcript on the
@@ -143,7 +146,7 @@ python -m pip install -r src-tauri/requirements.txt
 npm run tauri dev
 ```
 
-On first use, open **AI** and download Parakeet TDT 0.6B v3 (~740 MB GGUF). Windows packages include the native inference helper. Existing ONNX installations download the pinned GGUF on first local load after upgrading; old files remain available for development fallback. RAM and GPU memory depend on the backend and clip length. Use **Libera RAM** to unload the model without deleting files. See [native transcription](docs/native-transcription.md) for build instructions and memory measurement.
+On first use, open **AI** and download Parakeet TDT 0.6B v3 (~670 MB ONNX for CPU or ~740 MB GGUF for GPU). Windows packages detect the available hardware and select the engine automatically. Existing CPU installations retain their ONNX model; a usable GPU enables the pinned GGUF download. GPU failures retry the same recording on CPU. RAM and GPU memory depend on the backend and clip length. Use **Libera RAM** to unload the model without deleting files. See [native transcription](docs/native-transcription.md) for build instructions and memory measurement.
 
 ### Android preview
 
