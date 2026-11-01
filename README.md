@@ -73,15 +73,16 @@ a small overview/settings/history Hub. The Hub checks GitHub for newer Android
 releases after startup and only considers the `android-vX.Y.Z` tag family and
 the signed `app-universal-release.apk` asset; Windows releases are ignored. A
 newer mobile release is downloaded, verified, and sent to the Android installer
-automatically. While the Hub task remains open, the compact control stays
-available over other apps; it is also allowed to remain visible on the lock
-screen. Closing the Hub task cancels active capture, pending transcription, and
+automatically. With the optional Accessibility service enabled, the compact
+control stays available over other apps while the Hub task remains open. It is
+hidden when the screen turns off or the device is locked, then returns after
+unlock. Closing the Hub task cancels active capture, pending transcription, and
 the recording notification.
 
 The Android port is currently a private preview. Read the
 [Android architecture plan](docs/android-architecture-plan.md) and the
-[merge-readiness checklist](docs/android-merge-readiness.md) for the supported
-mobile boundaries. The current [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.22)
+[production-readiness checklist](docs/android-merge-readiness.md) for the supported
+mobile boundaries. The current [Android preview release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.34)
 contains the installable signed APK. Never distribute an `*-unsigned.apk`;
 Android requires a signed APK for direct installation.
 
@@ -119,11 +120,14 @@ Android requires a signed APK for direct installation.
 
 ### Android
 
-1. Install a signed Android preview from the `main` branch or its release.
+1. Build and sign an Android preview from `main`, or install the signed APK
+   from the current Android release.
 2. Open the Hub, configure Groq Cloud once, grant microphone access, and
    enable/select **Traflix Voice Keyboard** in Android settings.
-3. In any supported text field, choose Hold to Speak or Toggle in the Hub.
-4. Press the Traflix microphone key. The transcript is committed through the
+3. To use the floating control, open **System** in the Hub, tap **Widget sopra
+   le app**, and enable the Accessibility service in Android settings.
+4. In any supported text field, choose Hold to Speak or Toggle in the Hub.
+5. Press the Traflix microphone key. The transcript is committed through the
    active `InputConnection` and local history remains on the device.
 
 Windows 10 and Windows 11 are the supported desktop platforms. Android 13+
@@ -153,10 +157,10 @@ On first use, open **AI** and download Parakeet TDT 0.6B v3 (~670 MB ONNX for CP
 The Android implementation is maintained on
 [`main`](https://github.com/iTzFrancesco/Traflix-Voice/tree/main). Build and
 signing instructions are in
-[Android merge readiness](docs/android-merge-readiness.md). A release APK must
+[Android release readiness](docs/android-merge-readiness.md). A release APK must
 be signed; files ending in `-unsigned.apk` are build intermediates and are not
 valid direct-install packages. The current preview can be downloaded from the
-[Android v0.1.22 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.22).
+[Android v0.1.34 release](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.34).
 
 The mobile updater checks for a newer Android tag after the Hub opens and on
 return from the installer permission screen. It downloads only the expected APK
@@ -194,7 +198,7 @@ For Android, also build the configured target with the Android SDK/NDK and a
 keystore kept outside the repository. Then run `apksigner verify --verbose` on
 the generated APK before sharing it. See the
 [Android architecture plan](docs/android-architecture-plan.md) for the device
-matrix and the [merge-readiness checklist](docs/android-merge-readiness.md) for
+matrix and the [production-readiness checklist](docs/android-merge-readiness.md) for
 the release gates.
 
 Focused benchmark scripts and technical reports are under `scripts/` and
