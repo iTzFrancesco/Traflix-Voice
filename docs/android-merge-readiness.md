@@ -1,12 +1,26 @@
-# Android merge readiness
+# Android release readiness
 
-Status: conditional. The Android work on `feat/android-mobile-ime` is ready for
-private preview and code review. It is not yet a production-ready Android
-release for `main`.
+## Current status (2026-11-01)
 
-## Decision
+The Android implementation is present on `main`. GitHub Releases listed
+[`android-v0.1.34`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.34)
+as the latest Android prerelease on this date, with the signed
+`app-universal-release.apk` asset. The local Android configuration uses version
+`0.1.34` and `versionCode` `1006032`. The client still uses direct Groq BYOK,
+so the Android release channel remains a private preview. The repository does
+not establish current physical-device or Play policy review results; verify
+those gates before a production release.
 
-Do not merge this branch into `main` as a production release yet.
+The sections describing the original `feat/android-mobile-ime` review and
+`v0.1.5` artifact below are historical evidence for that snapshot.
+
+## Original merge decision
+
+Status at the original review: conditional. The Android work on
+`feat/android-mobile-ime` was ready for private preview and code review, but
+not a production-ready Android release for `main`.
+
+Do not merge that branch into `main` as a production release yet.
 
 The code is isolated enough for an integration pull request. A merge is
 reasonable only if `main` is explicitly allowed to contain an unsigned,
@@ -61,7 +75,7 @@ When changing one surface, keep the change inside its surface directory unless
 the shared contract really changes. A shared-contract change must be checked
 against both desktop and Android builds.
 
-## Verified on this branch
+## Verification recorded for the original preview branch
 
 - `npm run build` passes after the desktop/mobile entry-point split.
 - `cargo fmt --all -- --check` passes.
@@ -99,7 +113,7 @@ against both desktop and Android builds.
   installation to Android's package installer after the user grants the
   unknown-sources permission when required.
 
-## Installable preview artifact
+## Historical installable preview artifact: v0.1.5
 
 The corrected private test preview is published as
 [`android-v0.1.5`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.5).
@@ -123,7 +137,7 @@ activation, microphone capture, `InputConnection` insertion, and OEM
 background behavior still need a physical-device pass. The API 30 x86 emulator
 has been used for the install-and-launch smoke test.
 
-## Gates before a production merge
+## Production release gates
 
 1. Install the signed APK on at least one Android 13+ device and test both
    recording modes in a normal text field, browser, messaging app, and a
@@ -134,8 +148,9 @@ has been used for the install-and-launch smoke test.
 3. Replace or disable the private direct-Groq BYOK path. Production Android
    must use the Traflix gateway with short-lived tokens, quotas, privacy
    disclosure, and a documented data-retention policy.
-4. Sign the release with the production-kept keystore and publish a repeatable
-   Android CI artifact. Do not commit a keystore or passwords.
+4. Verify a release signed with the production-kept keystore. The current
+   workflow publishes signed private-preview APKs; that does not establish
+   production-key ownership. Do not commit a keystore or passwords.
 5. Complete the Play Data Safety, microphone foreground-service, IME, and
    privacy review. Run the device matrix described in the architecture plan.
 6. Decide whether the `REQUEST_INSTALL_PACKAGES` permission is acceptable for
@@ -193,7 +208,7 @@ aapt dump badging path/to/app-universal-release.apk
 If a device already has a build signed with a different key, uninstall that
 preview first or install the new artifact without `-r`.
 
-## Merge checklist
+## Original merge checklist
 
 - [x] Desktop and Android entry points are separated.
 - [x] Desktop-only Rust runtime is platform guarded.
@@ -208,6 +223,6 @@ preview first or install the new artifact without `-r`.
 - [ ] Production signing, Android CI, privacy review, and device matrix are
       complete.
 
-Current recommendation: keep the branch open for review and private testing;
-merge only as an explicitly experimental integration. For the normal primary
-branch, wait for the unchecked gates.
+Current recommendation: keep Android releases marked as private previews until
+the production gates above have current evidence. The implementation is
+already present on `main`.
