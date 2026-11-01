@@ -1,11 +1,15 @@
 # Android architecture plan
 
-Status: the native preview is implemented on `feat/android-mobile-ime`. This
-document remains the product and architecture contract for the Android port.
-The merge decision and release gates are tracked in
-[`docs/android-merge-readiness.md`](android-merge-readiness.md). The current
-branch is suitable for private preview and review, not yet for a production
-merge into `main`.
+## Current status (2026-11-01)
+
+The Android implementation is present on `main`. GitHub Releases listed
+[`android-v0.1.34`](https://github.com/iTzFrancesco/Traflix-Voice/releases/tag/android-v0.1.34)
+as the latest Android prerelease on this date. The local Android configuration
+uses version `0.1.34` and `versionCode` `1006032`. The client still uses direct
+Groq BYOK, so this remains a private preview rather than a production release.
+The original v0.1.5 design and verification notes below are historical where
+they differ from the current implementation. Current release gates are tracked
+in [`docs/android-merge-readiness.md`](android-merge-readiness.md).
 
 ## Implementation status
 
@@ -46,10 +50,11 @@ Its microphone button starts and stops a dictation session; the final text is
 inserted through the current `InputConnection`. Tauri/React remains the Hub for
 onboarding, account settings, privacy, history, statistics, and diagnostics.
 
-The core coordinator is independent of the entry surface. A Wispr-like floating
-bubble using `AccessibilityService` and an overlay can be added later, but it
-is not the MVP path. It needs more permissions, OEM-specific recovery, Play
-Console disclosure, and a separate insertion strategy.
+The core coordinator is independent of the entry surface. The implementation
+also includes an optional compact background widget driven by
+`VoiceAccessibilityService`. It uses Android's accessibility overlay and needs
+the user to enable the service in Android settings. The widget is hidden while
+the screen is off or the device is locked.
 
 ## Mobile product decisions
 
@@ -62,8 +67,8 @@ its transcription route remains Groq-only.
 The settings area contains the recording mode (`Hold to Speak` or toggle),
 language and formatting defaults, privacy/history controls, account or cloud
 connection status, and shortcuts into Android's input-method, microphone, app
-notification, and battery settings when repair is needed. It does not add a
-second provider or a desktop-style hotkey editor.
+notification, accessibility, and battery settings when repair is needed. It
+does not add a second provider or a desktop-style hotkey editor.
 
 History is stored in the app-private device database/files and is available
 without network access. Temporary audio is not retained by default. Dashboard
@@ -82,13 +87,14 @@ Toggle:        tap -> start capture; next tap -> stop and transcribe
 While recording, the keyboard renders a compact animated indicator in its own
 input view: listening/recording state, elapsed time, and a lightweight level
 animation. Processing, success, and error have distinct non-blocking states.
-The indicator is not a system overlay and requires no Accessibility or overlay
-permission. Volume updates stay native and are sampled before any UI event is
-sent to the Tauri Hub.
+This keyboard indicator is not a system overlay and requires no Accessibility
+permission. The optional background widget is a separate accessibility overlay.
+Volume updates stay native and are sampled before any UI event is sent to the
+Tauri Hub.
 
 ## Caller usage
 
-The keyboard and a future bubble should see the same small interface:
+The keyboard and optional accessibility widget use the same session interface:
 
 ```kotlin
 val session = dictationCoordinator.start(targetSnapshot)
@@ -196,6 +202,7 @@ only for the final commit. If the editor changed, the result becomes
 ```text
 android/
   VoiceInputMethodService       IME lifecycle and microphone UI
+  VoiceAccessibilityService     Optional background widget and editor tracking
   EditorTracker                 EditorInfo, generation, sensitive-field policy
   DictationCoordinator           Session state machine and orchestration
   AudioCapture                   AudioRecord, pre-roll, tail drain, level meter
@@ -206,17 +213,17 @@ android/
   VoiceRuntimeTauriPlugin        JS/Rust bridge for the Tauri Hub
 ```
 
-The Tauri plugin is a façade, not the runtime owner. The IME must work when the
-main activity or WebView has been stopped. Native storage is the source of truth
-for active sessions and pending results; React observes it through events and
-queries.
+The Tauri plugin is a façade, not the runtime owner. The IME and optional
+accessibility service must work when the main activity or WebView has been
+stopped. Native storage is the source of truth for active sessions and pending
+results; React observes it through events and queries.
 
 The desktop implementation keeps its current Windows adapter:
 
 ```text
 Desktop result -> clipboard + Ctrl+V
 Android result -> InputConnection.commitText
-Future bubble -> Accessibility action or explicit user paste
+Accessibility widget -> shared Android capture and result handling
 ```
 
 The shared contract is the session/result model and the status vocabulary, not
@@ -241,8 +248,8 @@ User focuses a text field
 The MVP uses final-result insertion only. Partial transcription is a later
 contract because unordered or late partials can duplicate text in an editor.
 
-The current private prototype has a direct Groq-only Android client so the IME
-can be exercised end to end before the gateway exists. The API key is encrypted
+The current Android client sends requests directly to Groq; the Android code
+does not use a Traflix gateway. The API key is encrypted
 with an Android Keystore-backed AES-GCM key and survives Hub/IME restarts; the
 Hub also persists the setting using the existing app settings contract so it is
 not requested again on every launch. The APK never contains a credential and
@@ -274,10 +281,11 @@ requires the final confirmation in the system installer. A release must keep
 both values monotonic: the public tag is the mobile product version, while
 `bundle.android.versionCode` must remain higher than every installed preview.
 
-The current mobile build uses tag `android-v0.1.5`, versionName `0.1.5`, and
-versionCode `1006003`, which is higher than the earlier preview's
-`versionCode=1006002`. The custom updater is intentionally not shared with the
-Windows shell, so desktop release behavior remains unchanged.
+The original v0.1.5 preview used versionCode `1006003`, above its earlier
+preview's `1006002`. The current Android configuration uses version `0.1.34`
+and versionCode `1006032` (checked 2026-11-01). The custom updater is
+intentionally not shared with the Windows shell, so desktop release behavior
+remains unchanged.
 
 ## Cloud contract
 
@@ -326,12 +334,17 @@ MVP permissions/capabilities:
 - an IME service declared with `BIND_INPUT_METHOD`;
 - `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MICROPHONE` for Android 14+
   when capture runs in a foreground service;
-- `POST_NOTIFICATIONS` for a visible recording/status notification.
+- `POST_NOTIFICATIONS` for a visible recording/status notification;
+- the optional `AccessibilityService` declaration for the background widget,
+  enabled explicitly by the user in Android settings.
 
-The first release does not request overlay or Accessibility permissions. The
-microphone is opened only after an explicit tap/hold, the foreground notification
-has a Stop action, and capture ends on Stop, cancellation, permission revocation,
-call/audio-focus loss, or editor invalidation.
+The keyboard indicator stays inside the IME and does not need an overlay. The
+background widget uses `TYPE_ACCESSIBILITY_OVERLAY` and requires the user to
+enable Traflix Voice in Android Accessibility settings. The widget is hidden
+when the screen is off or the device is locked. The microphone is opened only
+after an explicit tap/hold, the foreground notification has a Stop action, and
+capture ends on Stop, cancellation, permission revocation, call/audio-focus
+loss, or editor invalidation.
 
 Do not send audio from password, PIN, payment-number, or phone fields. Do not
 read surrounding field content unless a future feature has a separately
@@ -339,22 +352,22 @@ documented consent. Delete temporary audio after success; retain it only when a
 user-visible retry is explicitly enabled. Do not log audio, transcript text,
 tokens, API keys, or the active app's unrelated content.
 
-## Wispr-style alternative
+## Optional accessibility widget
 
-The alternative surface is:
+The current optional background surface is:
 
 ```text
 AccessibilityService detects editable field
-  -> TYPE_APPLICATION_OVERLAY bubble
+  -> TYPE_ACCESSIBILITY_OVERLAY widget
   -> AudioRecord/cloud
   -> AccessibilityNodeInfo action or explicit copy/paste fallback
 ```
 
-This keeps Gboard, matching Wispr Flow's Android UX, but requires overlay and
-Accessibility permissions, field-tree handling, OEM battery recovery, and a
-prominent Play disclosure/consent flow. It should be prototyped only after the
-IME core works. Both surfaces can share `DictationCoordinator`,
-`CloudTranscriber`, `PendingResultStore`, and the privacy policy.
+The widget can be used while another app is active after the user enables the
+Accessibility service. It is hidden while the screen is off or the device is
+locked. It adds Accessibility-service disclosure and consent, field tracking,
+and OEM battery behavior to the release review. The keyboard and widget share
+the Android capture and result-handling code.
 
 ## Implementation phases and gates
 
@@ -402,8 +415,9 @@ and IME main paths.
 
 Run Play Data Safety/privacy review, signing and AAB/APK builds, offline/error
 tests, accessibility/security review, and a device matrix including Pixel,
-Samsung, Xiaomi/Redmi/POCO, OnePlus, OPPO, Vivo, and Motorola. Consider the
-Wispr-like bubble only after deciding to accept its policy surface.
+Samsung, Xiaomi/Redmi/POCO, OnePlus, OPPO, Vivo, and Motorola. The current
+preview already includes the optional accessibility widget; production release
+still needs review of its policy and disclosure requirements.
 
 ## Alternatives considered
 
@@ -435,6 +449,8 @@ stopped. Native Kotlin must own those lifecycle-sensitive operations.
   stops on separate taps.
 - The keyboard shows a lightweight animated listening/processing state without
   requiring a system overlay.
+- The optional accessibility widget is available over unlocked apps only after
+  the user enables its service; it is hidden while the screen is off or locked.
 - A successful cloud result is committed once at the current cursor/selection.
 - A changed editor never receives an old result; the result becomes copyable.
 - Sensitive fields are blocked with a clear explanation.
@@ -443,8 +459,8 @@ stopped. Native Kotlin must own those lifecycle-sensitive operations.
 - Temporary audio is deleted by default and no sensitive content appears in logs.
 - The Android Hub exposes only overview, essential settings, and local history;
   Groq Cloud is the only transcription provider shown or supported.
-- The Hub can open the relevant Android settings screens when a permission or
-  keyboard activation needs repair.
+- The Hub can open the relevant Android settings screens when a permission,
+  keyboard activation, or optional widget needs repair.
 - The Hub displays the same session status and history whether or not its WebView
   is currently open.
 - The Hub checks only mobile GitHub releases and lets the user start a signed
