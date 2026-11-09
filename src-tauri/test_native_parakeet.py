@@ -54,7 +54,7 @@ class NativeBackendTests(unittest.TestCase):
              patch.object(native, "verify", return_value=False), \
              patch.object(native, "download") as download, \
              patch.object(native, "load", return_value=gpu_model) as load, \
-             patch.object(parakeet.os.path, "isfile", return_value=True):
+             patch.object(native, "helper_path", return_value="helper"):
             events = []
             loaded = parakeet.load("models", events.append)
             self.assertIsInstance(loaded, parakeet.AdaptiveRecognizer)

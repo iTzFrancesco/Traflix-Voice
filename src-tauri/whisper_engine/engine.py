@@ -172,6 +172,7 @@ class WhisperEngine:
         return model_module.verify_model(self.models_dir, size)
 
     def load_model(self, size):
+        size = model_module.normalize_model_id(size)
         with self._model_lock:
             if self.model is not None and self.current_model_size == size:
                 return model_module.retain_model(self.model)

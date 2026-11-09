@@ -90,7 +90,7 @@ def local_engine():
     native = MagicMock()
     native.create_stream.return_value.result.text = "synthetic transcript"
     engine.model = ParakeetRecognizer(native)
-    engine.current_model_size = "parakeet"
+    engine.current_model_size = "parakeet-ultra"
     events = []
     engine.log = events.append
     return engine, native, events

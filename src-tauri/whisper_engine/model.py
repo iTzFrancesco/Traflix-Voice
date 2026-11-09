@@ -11,6 +11,10 @@ def backend_status():
     return parakeet_backend.backend_status()
 
 
+def normalize_model_id(size):
+    return parakeet_backend.normalize_model_id(size)
+
+
 def release_model(model):
     """Best-effort native release for a loaded adapter (see ParakeetRecognizer.close)."""
     if model is None:
@@ -34,18 +38,18 @@ def retain_model(model):
 
 
 def verify_model(models_dir, size):
-    parakeet_backend.normalize_model_id(size)
+    normalize_model_id(size)
     return parakeet_backend.verify(models_dir)
 
 
 def load_model(models_dir, size, log_func):
-    size = parakeet_backend.normalize_model_id(size)
+    size = normalize_model_id(size)
     return parakeet_backend.load(models_dir, log_func)
 
 
 def preload_default_model(models_dir, model_size, log_func):
     try:
-        model_size = parakeet_backend.normalize_model_id(model_size)
+        model_size = normalize_model_id(model_size)
         is_valid, _ = verify_model(models_dir, model_size)
         if is_valid:
             log_func({"status": "loading_model", "message": f"Caricamento modello {model_size}..."})
@@ -62,7 +66,7 @@ def preload_default_model(models_dir, model_size, log_func):
 
 def download_model(models_dir, size, log_func):
     try:
-        parakeet_backend.normalize_model_id(size)
+        normalize_model_id(size)
     except ValueError as error:
         log_func({"status": "download_error", "message": str(error)})
         return
