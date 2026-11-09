@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare whole-clip and production Parakeet inference on local WAV fixtures.
+"""Compare whole-clip and accuracy-first chunked Ultra inference on WAV fixtures.
 
 Both modes reuse the same recognizer and run the complete local preprocessing
 and result path. Alternating measurement order reduces warm-cache bias. No
@@ -21,21 +21,26 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src-tauri"))
 
 from benchmark_local import wer  # noqa: E402
-from whisper_engine import audio as audio_module, parakeet, transcriber  # noqa: E402
+from whisper_engine import audio as audio_module, native_parakeet, parakeet, transcriber  # noqa: E402
 from whisper_engine.constants import SAMPLE_RATE  # noqa: E402
 
 
 class WholeClipRecognizer:
-    """Reproduce the pre-chunking adapter using the same native sessions."""
+    """Send the full prepared clip through the same native helper session."""
 
     def __init__(self, recognizer):
         self.recognizer = recognizer
 
     def transcribe(self, recording, language=""):
-        stream = self.recognizer.create_stream()
-        stream.accept_waveform(sample_rate=SAMPLE_RATE, waveform=recording)
-        self.recognizer.decode_stream(stream)
-        return [SimpleNamespace(text=stream.result.text.strip())]
+        return [SimpleNamespace(text=self.recognizer.transcribe(recording).strip())]
+
+
+def native_session(model):
+    if isinstance(model, parakeet.AdaptiveRecognizer):
+        return model._recognizer.model._session
+    if isinstance(model, native_parakeet.NativeRecognizer):
+        return model._session
+    raise TypeError("Expected the native Parakeet Ultra model")
 
 
 def load_audio(path):
@@ -64,17 +69,15 @@ def main():
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--reps", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
-    parser.add_argument("--threads", type=int)
     parser.add_argument("--json-out", type=Path)
-    parser.add_argument("--min-long-speedup", type=float, default=1.0)
     parser.add_argument("--max-wer-increase", type=float, default=0.0)
     args = parser.parse_args()
     if args.reps < 1 or args.warmup < 0:
         parser.error("--reps must be positive and --warmup must be non-negative")
 
     fixtures = json.loads(args.manifest.read_text(encoding="utf-8-sig"))
-    model = parakeet.load(str(args.models_dir), lambda event: None, num_threads=args.threads)
-    baseline = WholeClipRecognizer(model._recognizer)
+    model = parakeet.load(str(args.models_dir), lambda event: None)
+    baseline = WholeClipRecognizer(native_session(model))
     results = []
     failed = []
     try:
@@ -120,14 +123,12 @@ def main():
             print(json.dumps({key: value for key, value in result.items() if key != "times"}), flush=True)
             if after_wer > before_wer + args.max_wer_increase + 1e-9:
                 failed.append(f"{path.name}: WER increased by {after_wer - before_wer:.4f}")
-            if len(chunks) > 1 and speedup < args.min_long_speedup:
-                failed.append(f"{path.name}: speedup {speedup:.2f}x < {args.min_long_speedup:.2f}x")
     finally:
         model.close()
     if args.json_out:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(json.dumps({
-            "threads": parakeet._worker_threads() if args.threads is None else args.threads,
+            "model": "parakeet-ultra",
             "reps": args.reps,
             "scope": "gain, local preprocessing, inference and result; excludes capture, UI and paste",
             "results": results,

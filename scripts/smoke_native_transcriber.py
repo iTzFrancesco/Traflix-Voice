@@ -14,9 +14,10 @@ import urllib.request
 import wave
 
 REV = "7045d1c0fe7cee37747b2792977421d435e75fca"
-MODEL = "parakeet-tdt-0.6b-v3-Q8_0.gguf"
-MODEL_REV = "85ac09ea12fc4b1112fa76810059364bc6adc9de"
-MODEL_HASH = "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7"
+MODEL = "parakeet-ultra-Q8_0.gguf"
+MODEL_REPO = "handy-computer/parakeet-ultra-gguf"
+MODEL_REV = "a1539be1b849ea7463b88343e5277b373d0c4ea9"
+MODEL_HASH = "007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59"
 
 
 def fetch(url, destination, expected=None):
@@ -44,7 +45,7 @@ def main():
                 shutil.copy2(path, runtime / path.name)
         model = args.model.resolve() if args.model else root / MODEL
         if args.model is None:
-            fetch(f"https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v3-gguf/resolve/{MODEL_REV}/{MODEL}", model, MODEL_HASH)
+            fetch(f"https://huggingface.co/{MODEL_REPO}/resolve/{MODEL_REV}/{MODEL}", model, MODEL_HASH)
         wav = root / "public.wav"
         fetch(f"https://raw.githubusercontent.com/anomalyco/transcribe.cpp/{REV}/samples/jfk.wav", wav, "59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e")
         with wave.open(str(wav), "rb") as source:

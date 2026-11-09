@@ -46,7 +46,7 @@ def main():
     if native.helper_path() is None:
         parser.error("build the native helper first")
     if not native.verify(args.model_dir, checksum=True):
-        parser.error("a verified Parakeet v3 Q8_0 GGUF is required")
+        parser.error("a verified Parakeet Ultra Q8_0 GGUF is required")
     audio = np.zeros(5 * 16_000, dtype=np.float32)
     if args.wav:
         with wave.open(str(args.wav), "rb") as source:

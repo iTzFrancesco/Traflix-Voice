@@ -3,7 +3,7 @@
 
 Mirrors the conventions of scripts/benchmark_cloud_path.py (warmup +
 iterations, median/p95, optional JSON results) but measures only the local
-inference path: whisper.cpp (pywhispercpp) and Parakeet (sherpa-onnx).
+inference path: Parakeet Ultra (transcribe.cpp) and optional Whisper Turbo.
 
 The Groq/cloud code path is never exercised here.
 
@@ -41,7 +41,6 @@ sys.modules.setdefault("pywhispercpp.model", MagicMock())
 
 from whisper_engine import parakeet as parakeet_backend  # noqa: E402
 from whisper_engine import transcriber as transcriber_module  # noqa: E402
-from whisper_engine.constants import PARAKEET_MODEL_ID  # noqa: E402
 
 MODELS_DIR = Path("/tmp/tvmodels")
 TURBO_MODEL_ID = "large-v3-turbo-q5_0"
@@ -75,12 +74,9 @@ def load_wav(path: str) -> np.ndarray:
     return np.ascontiguousarray(audio, dtype=np.float32)
 
 
-def load_parakeet(num_threads: int | None):
-    import sherpa_onnx  # noqa: F401  (checked for a clear error message)
-
+def load_parakeet():
     events: list[dict] = []
-    kwargs = {} if num_threads is None else {"num_threads": num_threads}
-    return parakeet_backend.load(str(MODELS_DIR), events.append, **kwargs)
+    return parakeet_backend.load(str(MODELS_DIR), events.append)
 
 
 def load_turbo(n_threads: int | None):
@@ -98,7 +94,9 @@ def load_turbo(n_threads: int | None):
 
 def transcribe_once(model, recording: np.ndarray, language: str, whisper_params: dict) -> tuple[str, float]:
     """Run the production local path and return (text, seconds)."""
-    if isinstance(model, parakeet_backend.ParakeetRecognizer):
+    from whisper_engine.native_parakeet import NativeRecognizer
+
+    if isinstance(model, (NativeRecognizer, parakeet_backend.AdaptiveRecognizer)):
         start = time.perf_counter()
         segments = model.transcribe(recording, language=language)
         elapsed = time.perf_counter() - start
@@ -133,11 +131,11 @@ def main() -> None:
     parser.add_argument("--language", default="it")
     parser.add_argument("--whisper-param", action="append", default=[],
                         help="extra whisper transcribe kwarg, e.g. beam_size=1")
-    parser.add_argument("--profile", action="store_true",
-                        help="parakeet: split accept_waveform vs decode_stream timings")
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--label", default="")
     args = parser.parse_args()
+    if args.threads is not None and args.backend == "parakeet":
+        parser.error("--threads is unavailable for the native Parakeet Ultra backend")
 
     # Restore the real pywhispercpp for the turbo backend (mocked above only
     # so that importing whisper_engine never requires PortAudio/whisper).
@@ -172,7 +170,7 @@ def main() -> None:
 
     print(f"[{args.label or args.backend}] loading model...", flush=True)
     t0 = time.perf_counter()
-    model = load_parakeet(args.threads) if args.backend == "parakeet" else load_turbo(args.threads)
+    model = load_parakeet() if args.backend == "parakeet" else load_turbo(args.threads)
     print(f"[{args.label or args.backend}] loaded in {time.perf_counter() - t0:.1f}s", flush=True)
 
     results = []
@@ -185,23 +183,10 @@ def main() -> None:
         for _ in range(args.warmup):
             transcribe_once(model, recording, args.language, whisper_params)
         times, texts = [], []
-        profile_acc = {"accept": [], "decode": []}
         for _ in range(args.reps):
-            if args.profile and isinstance(model, parakeet_backend.ParakeetRecognizer):
-                stream = model._recognizer.create_stream()
-                s = time.perf_counter()
-                stream.accept_waveform(sample_rate=16000, waveform=recording)
-                profile_acc["accept"].append(time.perf_counter() - s)
-                s = time.perf_counter()
-                model._recognizer.decode_stream(stream)
-                profile_acc["decode"].append(time.perf_counter() - s)
-                text = stream.result.text.strip()
-                times.append(profile_acc["accept"][-1] + profile_acc["decode"][-1])
-                texts.append(text)
-            else:
-                text, elapsed = transcribe_once(model, recording, args.language, whisper_params)
-                times.append(elapsed)
-                texts.append(text)
+            text, elapsed = transcribe_once(model, recording, args.language, whisper_params)
+            times.append(elapsed)
+            texts.append(text)
         stats = summarize(times)
         stats["rtf"] = round(entry["dur"] / stats["median"], 2) if stats["median"] else 0.0
         stats["wer"] = round(wer(texts[-1], entry["text"]), 3)
@@ -212,9 +197,6 @@ def main() -> None:
             **stats,
             "text": texts[-1],
         }
-        if args.profile:
-            result["profile_accept"] = round(statistics.median(profile_acc["accept"]), 3)
-            result["profile_decode"] = round(statistics.median(profile_acc["decode"]), 3)
         results.append(result)
         print(
             f"{result['clip']} ({entry['dur']}s): median {stats['median']}s "
