@@ -71,16 +71,22 @@ class NativeBackendTests(unittest.TestCase):
             session.assert_not_called()
 
     def test_download_pins_model_revision(self):
-        with patch.object(native, "hf_hub_download") as download, patch.object(native, "verify", return_value=True):
-            native.download("models")
-            self.assertEqual(download.call_args.kwargs["revision"], native.REVISION)
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(native, "hf_hub_download") as download, \
+                 patch.object(native, "verify", return_value=True):
+                native.download(directory)
+                self.assertEqual(download.call_args.kwargs["revision"], native.REVISION)
 
     def test_loaded_backend_is_reported_to_frontend(self):
         session = Mock()
         session.metadata = {"backend": "vulkan", "device": "Test GPU"}
-        with patch.object(native, "verify", return_value=True), patch.object(native, "NativeSession", return_value=session):
+        with patch.object(native, "verify", return_value=True), \
+             patch.object(native, "helper_path", return_value="helper"), \
+             patch.object(native, "cleanup_legacy_models"), \
+             patch.object(native, "NativeSession", return_value=session):
             events = []
-            recognizer = native.load("models", events.append)
+            recognizer = native.load("models/parakeet-ultra", events.append)
             info = next(event for event in events if event["status"] == "gpu_info")
             self.assertEqual(info["current_device"], "vulkan")
             self.assertIn("Test GPU", info["message"])
@@ -89,15 +95,20 @@ class NativeBackendTests(unittest.TestCase):
     def test_driver_failure_retries_with_cpu_modules_only(self):
         session = native.NativeSession.__new__(native.NativeSession)
         session.process = None
+        session.cpu_only = False
         with patch.object(session, "_start_backend", side_effect=[RuntimeError("driver"), {"backend":"cpu"}]) as start:
             self.assertEqual(session._start(), {"backend":"cpu"})
             self.assertEqual([call.args[0] for call in start.call_args_list], [False, True])
 
-    def test_cpu_selection_preserves_onnx_without_gguf_download(self):
-        with patch.object(native, "gpu_available", return_value=False), patch.object(parakeet, "_load_cpu", return_value="cpu") as cpu, patch.object(native, "download") as download:
-            self.assertEqual(parakeet.load("models", Mock()), "cpu")
-            cpu.assert_called_once()
-            download.assert_not_called()
+    def test_cpu_selection_loads_the_ultra_gguf(self):
+        log = Mock()
+        with patch.object(native, "helper_path", return_value="helper"), \
+             patch.object(native, "verify", return_value=True), \
+             patch.object(native, "gpu_available", return_value=False), \
+             patch.object(native, "load", return_value="cpu") as load, \
+             patch.object(native, "cleanup_legacy_models"):
+            self.assertEqual(parakeet.load("models", log), "cpu")
+            load.assert_called_once_with(parakeet.model_dir("models"), log, cpu_only=True)
 
     def test_gpu_failure_retries_same_audio_on_cpu_and_pins_owner(self):
         gpu_session = Mock()

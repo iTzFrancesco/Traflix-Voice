@@ -78,8 +78,7 @@ def handle_command(cmd, data, engine):
         if not was_loaded:
             engine.log({"status": "info", "message": "Nessun modello locale da rimuovere dalla memoria."})
     elif cmd == "check_backend":
-        # Probe sherpa-onnx without allocating the ~1 GB recognizer. The UI
-        # uses this to explain a local failure before the user retries.
+        # Probe the packaged native helper before the user retries local ASR.
         try:
             from whisper_engine import model as _model_module
             status = _model_module.backend_status()

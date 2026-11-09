@@ -1,21 +1,24 @@
-"""Persistent transcribe.cpp helper for the same Parakeet v3 GGUF used by Hex."""
+"""Persistent transcribe.cpp helper for the pinned Parakeet Ultra GGUF."""
 import hashlib
 import json
 from pathlib import Path
 import queue
+import shutil
 import subprocess
 import sys
 import threading
 import time
+import unicodedata
 
 import numpy as np
 from huggingface_hub import hf_hub_download
 
-FILENAME = "parakeet-tdt-0.6b-v3-Q8_0.gguf"
-REPO_ID = "handy-computer/parakeet-tdt-0.6b-v3-gguf"
-REVISION = "85ac09ea12fc4b1112fa76810059364bc6adc9de"
-MODEL_BYTES = 739_508_576
-MODEL_SHA256 = "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7"
+FILENAME = "parakeet-ultra-Q8_0.gguf"
+REPO_ID = "handy-computer/parakeet-ultra-gguf"
+REVISION = "a1539be1b849ea7463b88343e5277b373d0c4ea9"
+MODEL_BYTES = 740_363_168
+MODEL_SHA256 = "007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59"
+LEGACY_MODEL_DIRS = ("parakeet-tdt-0.6b-v3-int8",)
 _verified = set()
 _gpu_probe = {}
 
@@ -80,26 +83,53 @@ def verify(directory, checksum=False):
 
 
 def download(directory):
+    Path(directory).mkdir(parents=True, exist_ok=True)
     hf_hub_download(repo_id=REPO_ID, revision=REVISION, filename=FILENAME, local_dir=directory)
     if not verify(directory, checksum=True):
-        # Do not delete an existing model or the legacy ONNX fallback on failure.
         raise RuntimeError("Verifica SHA-256 del modello GGUF fallita. Ripeti il download.")
 
 
+def cleanup_legacy_models(models_dir, log_func=None):
+    """Remove only the previously supported Parakeet v3 directory."""
+    root = Path(models_dir).resolve()
+    for model_id in LEGACY_MODEL_DIRS:
+        legacy_dir = root / model_id
+        try:
+            if legacy_dir.is_symlink() or legacy_dir.parent.resolve() != root:
+                continue
+            if legacy_dir.is_dir():
+                shutil.rmtree(legacy_dir)
+                if log_func is not None:
+                    log_func({
+                        "status": "info",
+                        "message": f"Rimosso il vecchio modello {model_id} dopo la verifica di Parakeet Ultra.",
+                    })
+        except OSError as error:
+            if log_func is not None:
+                log_func({
+                    "status": "warning",
+                    "message": f"Il vecchio modello {model_id} non è stato rimosso: {error}",
+                })
+
+
 class NativeSession:
-    def __init__(self, executable, model_path):
+    def __init__(self, executable, model_path, cpu_only=False):
         self.executable = str(executable)
         self.model_path = str(model_path)
+        self.cpu_only = cpu_only
         self.lock = threading.Lock()
         self.process = None
         self.metadata = self._start()
 
     def _start(self):
+        if self.cpu_only:
+            return self._start_backend(True)
         try:
             return self._start_backend(False)
         except (RuntimeError, OSError):
             # A driver can fail during Vulkan initialization. Retry in a fresh
             # process with only CPU modules registered.
+            self.cpu_only = True
             return self._start_backend(True)
 
     def _start_backend(self, cpu_only):
@@ -185,25 +215,68 @@ class NativeRecognizer:
 
     def transcribe(self, recording, language=""):
         from whisper_engine.parakeet import (
-            _compact_digital_pauses, _split_at_pauses, _CHUNK_CONTEXT_SAMPLES, _Segment,
+            _compact_digital_pauses, _split_at_pauses, _CHUNK_CONTEXT_SAMPLES,
+            _CHUNK_OVERLAP_SAMPLES, _Segment,
         )
         session = self._session
         audio = _compact_digital_pauses(np.ascontiguousarray(recording, dtype=np.float32).reshape(-1))
         chunks = _split_at_pauses(audio)
-        segments = []
-        for index, chunk in enumerate(chunks):
-            leading = _CHUNK_CONTEXT_SAMPLES if index else 0
-            trailing = _CHUNK_CONTEXT_SAMPLES if index < len(chunks) - 1 else 0
+        if len(chunks) == 1:
+            return [_Segment(session.transcribe(chunks[0]))]
+
+        texts = []
+        offset = 0
+        for index, core in enumerate(chunks):
+            core_end = offset + core.size
+            start = max(0, offset - _CHUNK_OVERLAP_SAMPLES)
+            end = min(audio.size, core_end + _CHUNK_OVERLAP_SAMPLES)
+            chunk = audio[start:end]
+            leading = _CHUNK_CONTEXT_SAMPLES if index == 0 else 0
+            trailing = _CHUNK_CONTEXT_SAMPLES if index == len(chunks) - 1 else 0
             if leading or trailing:
                 chunk = np.pad(chunk, (leading, trailing))
-            segments.append(_Segment(session.transcribe(chunk)))
-        return segments
+            texts.append(session.transcribe(chunk).strip())
+            offset = core_end
+        return [_Segment(_merge_overlapping_text(texts))]
 
 
-def load(directory, log_func):
+def _merge_overlapping_text(texts):
+    merged = []
+    for text in texts:
+        words = text.split()
+        if not words:
+            continue
+        overlap = 0
+        if merged:
+            previous = " ".join(merged)
+            previous_words = previous.split()
+            limit = min(12, len(previous_words), len(words))
+            for size in range(limit, 0, -1):
+                left = [_word_key(word) for word in previous_words[-size:]]
+                right = [_word_key(word) for word in words[:size]]
+                if all(left) and left == right:
+                    overlap = size
+                    break
+        merged.extend(words[overlap:])
+    return " ".join(merged).strip()
+
+
+def _word_key(word):
+    return "".join(
+        character.casefold()
+        for character in word
+        if not unicodedata.category(character).startswith("P")
+    )
+
+
+def load(directory, log_func, cpu_only=False):
     if not verify(directory, checksum=True):
-        raise RuntimeError("Modello GGUF mancante o non valido. Scarica Parakeet dalla tab IA.")
-    session = NativeSession(helper_path(), Path(directory) / FILENAME)
+        raise RuntimeError("Modello GGUF mancante o non valido. Scarica Parakeet Ultra dalla tab IA.")
+    executable = helper_path()
+    if executable is None:
+        raise RuntimeError("Motore nativo mancante. Ricompila l'helper transcribe.cpp e riavvia l'app.")
+    session = NativeSession(executable, Path(directory) / FILENAME, cpu_only=cpu_only)
+    cleanup_legacy_models(Path(directory).parent, log_func)
     log_func({"status": "info", "message": (
         f"Parakeet GGUF pronto: transcribe.cpp, {session.metadata['backend']}, "
         f"{session.metadata['device']}."

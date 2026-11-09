@@ -135,8 +135,8 @@ fn main() {
                         },
                     )
                     .map_err(|e| e.to_string())?;
-                    if loaded.arch() != "parakeet" || loaded.variant() != "tdt-0.6b-v3" {
-                        return Err("expected Parakeet TDT 0.6B v3".into());
+                    if loaded.arch() != "parakeet" || loaded.variant() != "tdt-0.6b-ultra" {
+                        return Err("expected Parakeet Ultra".into());
                     }
                     // As in Hex, complete a real inference before announcing readiness.
                     run(&loaded, &vec![0.0; 24_000])?;

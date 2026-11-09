@@ -67,7 +67,7 @@ export default function ModelCard({
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-start mb-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="m-0 text-[1rem] font-bold text-[var(--ink)]">Whisper {model.name}</h3>
+            <h3 className="m-0 text-[1rem] font-bold text-[var(--ink)]">{model.name}</h3>
             {model.tag && (
               <span className="text-[0.62rem] font-bold px-[7px] py-[2px] rounded-full whitespace-nowrap bg-[rgba(255,140,0,0.15)] text-[var(--primary-orange)] border border-[rgba(255,140,0,0.3)]">
                 {model.tag}

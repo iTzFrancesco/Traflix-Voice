@@ -38,7 +38,7 @@ TAURI_MOCK = r"""
   const settings = {
     hotkey: "XBUTTON2",
     secondaryHotkey: "",
-    model: "parakeet-tdt-0.6b-v3-int8",
+    model: "parakeet-ultra",
     autoPaste: true,
     keepClipboardResult: true,
     minimizeTray: true,

@@ -1,11 +1,4 @@
-"""Local Parakeet dispatch: native GGUF by default, legacy ONNX in development.
-
-The retired whisper.cpp path was compared against the legacy ONNX backend
-in docs/local-optimization-report.md. Native GGUF verification and memory
-measurements are documented in docs/native-transcription.md.
-Model ids from older settings are accepted and resolve to Parakeet instead of
-failing, so existing installs keep working after the switch.
-"""
+"""Local Parakeet Ultra dispatch through the native GGUF CPU/GPU runtime."""
 from whisper_engine import parakeet as parakeet_backend
 from whisper_engine.native_parakeet import NativeRecognizer
 
@@ -32,21 +25,27 @@ def release_model(model):
 
 def retain_model(model):
     """Pin the native handle for a capture or inference already in progress."""
-    return model.snapshot() if isinstance(model, (parakeet_backend.ParakeetRecognizer, NativeRecognizer)) else model
+    model_types = (
+        parakeet_backend.AdaptiveRecognizer,
+        parakeet_backend.ParakeetRecognizer,
+        NativeRecognizer,
+    )
+    return model.snapshot() if isinstance(model, model_types) else model
 
 
 def verify_model(models_dir, size):
+    parakeet_backend.normalize_model_id(size)
     return parakeet_backend.verify(models_dir)
 
 
 def load_model(models_dir, size, log_func):
-    if not parakeet_backend.is_parakeet_model(size):
-        log_func({"status": "info", "message": f"Modello locale '{size}' non supportato, uso Parakeet."})
+    size = parakeet_backend.normalize_model_id(size)
     return parakeet_backend.load(models_dir, log_func)
 
 
 def preload_default_model(models_dir, model_size, log_func):
     try:
+        model_size = parakeet_backend.normalize_model_id(model_size)
         is_valid, _ = verify_model(models_dir, model_size)
         if is_valid:
             log_func({"status": "loading_model", "message": f"Caricamento modello {model_size}..."})
@@ -62,4 +61,9 @@ def preload_default_model(models_dir, model_size, log_func):
 
 
 def download_model(models_dir, size, log_func):
+    try:
+        parakeet_backend.normalize_model_id(size)
+    except ValueError as error:
+        log_func({"status": "download_error", "message": str(error)})
+        return
     parakeet_backend.download(models_dir, log_func)

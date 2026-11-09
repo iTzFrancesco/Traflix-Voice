@@ -1,6 +1,7 @@
 SAMPLE_RATE = 16000
-DEFAULT_LOCAL_MODEL = "parakeet-tdt-0.6b-v3-int8"
-PARAKEET_MODEL_ID = "parakeet-tdt-0.6b-v3-int8"
+DEFAULT_LOCAL_MODEL = "parakeet-ultra"
+PARAKEET_MODEL_ID = DEFAULT_LOCAL_MODEL
+LEGACY_LOCAL_MODEL_IDS = ("parakeet-tdt-0.6b-v3-int8",)
 # 32 ms keeps the meter and stop response responsive. The lightweight queue
 # and throttled volume calculation keep the extra callback rate inexpensive.
 BLOCK_SIZE = 512

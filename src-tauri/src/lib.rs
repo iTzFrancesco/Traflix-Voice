@@ -227,7 +227,7 @@ mod tests {
         let s = AppSettings::default();
         assert_eq!(s.hotkey, "XBUTTON2");
         assert!(!s.hold_to_speak);
-        assert_eq!(s.model, "parakeet-tdt-0.6b-v3-int8");
+        assert_eq!(s.model, "parakeet-ultra");
         assert_eq!(s.selected_language, "it");
         assert!(s.keep_clipboard_result);
         assert!(s.cloud_correction_enabled);
@@ -327,7 +327,7 @@ mod tests {
         // Load and verify
         let loaded = load_settings_from_file(&path);
         assert_eq!(loaded.hotkey, original.hotkey);
-        assert_eq!(loaded.model, original.model);
+        assert_eq!(loaded.model, "parakeet-ultra");
         assert_eq!(loaded.minimize_tray, original.minimize_tray);
         assert_eq!(loaded.selected_device, original.selected_device);
         assert_eq!(loaded.selected_language, original.selected_language);
@@ -347,7 +347,7 @@ mod tests {
 
         let reloaded = load_settings_from_file(&path);
         assert_eq!(reloaded.hotkey, "Control+Shift+A");
-        assert_eq!(reloaded.model, "parakeet-tdt-0.6b-v3-int8"); // unchanged
+        assert_eq!(reloaded.model, "parakeet-ultra");
 
         // Cleanup
         let _ = std::fs::remove_file(&path);
@@ -391,7 +391,7 @@ mod tests {
         // Should return defaults
         let settings = load_settings_from_file(&path);
         assert_eq!(settings.hotkey, "XBUTTON2");
-        assert_eq!(settings.model, "parakeet-tdt-0.6b-v3-int8");
+        assert_eq!(settings.model, "parakeet-ultra");
         assert!(!settings.hold_to_speak);
 
         let _ = std::fs::remove_dir(&dir);

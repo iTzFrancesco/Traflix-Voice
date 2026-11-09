@@ -96,8 +96,8 @@ class TestWhisperEngineInit(unittest.TestCase):
                 "transcribe",
                 side_effect=lambda *_args: worker_ids.append(threading.get_ident()),
             ):
-                first = engine.start_transcription(None, "small")
-                second = engine.start_transcription(None, "small")
+                first = engine.start_transcription(None, "parakeet-ultra")
+                second = engine.start_transcription(None, "parakeet-ultra")
                 first.result(timeout=1)
                 second.result(timeout=1)
         finally:
@@ -201,7 +201,7 @@ class TestRunCommandParsing(unittest.TestCase):
         mock_thread_cls.return_value = mock_thread
 
         lines = [
-            json.dumps({"command": "download", "model": "small"}) + "\n",
+            json.dumps({"command": "download", "model": "parakeet-ultra"}) + "\n",
             json.dumps({"command": "quit"}) + "\n",
         ]
         with (
@@ -219,7 +219,7 @@ class TestRunCommandParsing(unittest.TestCase):
         engine = self._make_engine()
 
         lines = [
-            json.dumps({"command": "transcribe", "device": 1, "model": "base"}) + "\n",
+            json.dumps({"command": "transcribe", "device": 1, "model": "parakeet-ultra"}) + "\n",
             json.dumps({"command": "quit"}) + "\n",
         ]
         with (
@@ -228,7 +228,7 @@ class TestRunCommandParsing(unittest.TestCase):
         ):
             engine.run()
 
-        start_transcription.assert_called_once_with(1, "base", "it")
+        start_transcription.assert_called_once_with(1, "parakeet-ultra", "it")
 
     @patch("sys.stdout", new_callable=io.StringIO)
     def test_cmd_transcribe_defaults_model_to_parakeet(self, _):
@@ -244,7 +244,7 @@ class TestRunCommandParsing(unittest.TestCase):
         ):
             engine.run()
 
-        start_transcription.assert_called_once_with(0, "parakeet-tdt-0.6b-v3-int8", "it")
+        start_transcription.assert_called_once_with(0, "parakeet-ultra", "it")
 
     # -- stop ---------------------------------------------------------------
     @patch("sys.stdout", new_callable=io.StringIO)
@@ -1007,40 +1007,36 @@ class TestGroqCaptureKeepwarm(unittest.TestCase):
 
 
 class TestModelPath(unittest.TestCase):
-    """Parakeet-only dispatcher: every id resolves to the Parakeet backend."""
+    """The only local model is Ultra; old Parakeet settings normalize to it."""
 
     def test_download_model_path(self):
-        """download_model should fetch the Parakeet files into its subdir."""
+        """download_model fetches and warms the pinned Ultra GGUF."""
+        engine = WhisperEngine()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.models_dir = temp_dir
+            with patch("whisper_engine.native_parakeet.helper_path", return_value="helper"), \
+                 patch("whisper_engine.native_parakeet.download") as mock_dl, \
+                 patch("whisper_engine.parakeet._load_native", return_value=MagicMock()), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                engine.download_model("parakeet-ultra")
+
+            mock_dl.assert_called_once()
+            self.assertTrue(mock_dl.call_args.args[0].endswith("parakeet-ultra"))
+
+    def test_legacy_model_id_migrates_to_ultra(self):
+        """The previous Parakeet setting ID resolves to Ultra."""
         engine = WhisperEngine()
 
-        # makedirs() must succeed for the download to start: a hardcoded root
-        # path is not writable on CI runners, so use a temp dir instead.
         with tempfile.TemporaryDirectory() as temp_dir:
             engine.models_dir = temp_dir
 
-            with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
-                 patch("whisper_engine.parakeet._verify_cpu", return_value=(True, "OK")), \
-                 patch("sys.stdout", new_callable=io.StringIO):
+            with patch("whisper_engine.native_parakeet.helper_path", return_value="helper"), \
+                 patch("whisper_engine.native_parakeet.download") as mock_dl, \
+                 patch("whisper_engine.parakeet._load_native", return_value=MagicMock()), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
                 engine.download_model("parakeet-tdt-0.6b-v3-int8")
 
-            self.assertEqual(mock_dl.call_count, 4)
-            _, kwargs = mock_dl.call_args_list[0]
-            self.assertEqual(kwargs["repo_id"], "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8")
-            self.assertTrue(kwargs["local_dir"].endswith("parakeet-tdt-0.6b-v3-int8"))
-
-    def test_legacy_model_id_falls_back_to_parakeet(self):
-        """Ids from older settings must not fail; they resolve to Parakeet."""
-        engine = WhisperEngine()
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine.models_dir = temp_dir
-
-            with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
-                 patch("whisper_engine.parakeet._verify_cpu", return_value=(True, "OK")), \
-                 patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-                engine.download_model("small")
-
-            self.assertEqual(mock_dl.call_count, 4)
+            mock_dl.assert_called_once()
             statuses = [
                 json.loads(line).get("status")
                 for line in mock_stdout.getvalue().splitlines()
@@ -1056,7 +1052,7 @@ class TestModelPath(unittest.TestCase):
 
         with patch("whisper_engine.model.parakeet_backend.load", return_value=adapter) as mock_load, \
              patch("sys.stdout", new_callable=io.StringIO):
-            engine.load_model("parakeet-tdt-0.6b-v3-int8")
+            engine.load_model("parakeet-ultra")
 
         mock_load.assert_called_once()
         self.assertIs(engine.model, adapter)
@@ -1068,22 +1064,22 @@ class TestModelPath(unittest.TestCase):
 
         with patch("whisper_engine.model.parakeet_backend.load", return_value=MagicMock()) as mock_load, \
              patch("sys.stdout", new_callable=io.StringIO):
-            engine.load_model("parakeet-tdt-0.6b-v3-int8")
-            engine.load_model("parakeet-tdt-0.6b-v3-int8")
+            engine.load_model("parakeet-ultra")
+            engine.load_model("parakeet-ultra")
 
         mock_load.assert_called_once()
 
-    def test_load_model_reloads_on_size_change(self):
-        """Switching model size should trigger a new backend load."""
+    def test_load_model_reuses_ultra_for_legacy_id(self):
+        """A legacy model ID maps to the cached Ultra model."""
         engine = WhisperEngine()
         engine.models_dir = "/models"
 
         with patch("whisper_engine.model.parakeet_backend.load", return_value=MagicMock()) as mock_load, \
              patch("sys.stdout", new_callable=io.StringIO):
             engine.load_model("parakeet-tdt-0.6b-v3-int8")
-            engine.load_model("other")
+            engine.load_model("parakeet-ultra")
 
-        self.assertEqual(mock_load.call_count, 2)
+        self.assertEqual(mock_load.call_count, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1096,7 +1092,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
         engine.model = MagicMock()
-        engine.current_model_size = "small"
+        engine.current_model_size = "parakeet-ultra"
         return engine
 
     def test_listening_is_emitted_only_after_the_microphone_opens(self):
@@ -1127,7 +1123,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine.log = log
         with patch("whisper_engine.engine.sd.InputStream", FakeInputStream), \
              patch.object(engine, "_process_recording"):
-            engine.transcribe(None, "small")
+            engine.transcribe(None, "parakeet-ultra")
         self.assertEqual([e["status"] for e in events], ["listening", "processing"])
 
     def test_microphone_open_failure_never_emits_listening(self):
@@ -1136,7 +1132,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         events = []
         engine.log = events.append
         with patch("whisper_engine.engine.sd.InputStream", side_effect=RuntimeError("no mic")):
-            engine.transcribe(None, "small")
+            engine.transcribe(None, "parakeet-ultra")
         self.assertEqual([e["status"] for e in events], ["error", "ready"])
 
     def test_stop_during_model_loading_returns_to_ready(self):
@@ -1145,7 +1141,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         engine.log = events.append
         with patch.object(engine, "load_model", side_effect=lambda *_: engine.stop_recording()), \
              patch("whisper_engine.engine.sd.InputStream") as stream:
-            engine.transcribe(None, "small")
+            engine.transcribe(None, "parakeet-ultra")
         stream.assert_not_called()
         self.assertEqual([e["status"] for e in events], ["ready"])
 
@@ -1160,7 +1156,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         block = np.full((BLOCK_SIZE, 1), 0.1, dtype=np.float32)
         self._mock_input_stream(engine, [block])
         with patch.object(engine, "_process_recording") as process:
-            engine.transcribe(None, "small")
+            engine.transcribe(None, "parakeet-ultra")
         np.testing.assert_array_equal(process.call_args.args[0], block[:, 0])
         self.assertEqual(process.call_args.args[3], BLOCK_SIZE / SAMPLE_RATE)
 
@@ -1196,7 +1192,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         self._mock_input_stream(engine, [fake_audio])
 
         with patch.object(engine, "load_model", return_value=engine.model):
-            engine.transcribe(0, "small")
+            engine.transcribe(0, "parakeet-ultra")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed_lines = [json.loads(l) for l in output_lines if l]
@@ -1212,7 +1208,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         self._mock_input_stream(engine, [])
 
         with patch.object(engine, "load_model", return_value=engine.model):
-            engine.transcribe(0, "small")
+            engine.transcribe(0, "parakeet-ultra")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed_lines = [json.loads(l) for l in output_lines if l]
@@ -1234,7 +1230,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         self._mock_input_stream(engine, [block1, block2])
 
         with patch.object(engine, "load_model", return_value=engine.model):
-            engine.transcribe(0, "small")
+            engine.transcribe(0, "parakeet-ultra")
 
         call_args = engine.model.transcribe.call_args
         self.assertIsNotNone(call_args, "model.transcribe should have been called")
@@ -1263,7 +1259,7 @@ class TestTranscriptionFlow(unittest.TestCase):
 
         self._mock_input_stream(engine, [np.full((BLOCK_SIZE, 1), 0.1, dtype=np.float32)])
         with patch.object(engine, "load_model", return_value=engine.model):
-            engine.transcribe(0, "small")
+            engine.transcribe(0, "parakeet-ultra")
 
         results = [e for e in events if e.get("status") == "result"]
         self.assertEqual(len(results), 1)
@@ -1282,7 +1278,7 @@ class TestTranscriptionFlow(unittest.TestCase):
         self._mock_input_stream(engine, [fake_audio])
 
         with patch.object(engine, "load_model", return_value=engine.model):
-            engine.transcribe(0, "small")
+            engine.transcribe(0, "parakeet-ultra")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed_lines = [json.loads(l) for l in output_lines if l]
@@ -1312,7 +1308,7 @@ class TestTranscriptionFlow(unittest.TestCase):
 
         with patch.object(engine, "_transcribe_cloud", side_effect=dispatch_cloud) as cloud, \
              patch.object(engine, "_transcribe_local") as local:
-            engine.transcribe(0, "small")
+            engine.transcribe(0, "parakeet-ultra")
 
         cloud.assert_called_once()
         local.assert_not_called()
@@ -1371,12 +1367,12 @@ class TestTranscriptionFlow(unittest.TestCase):
         second = None
         try:
             with patch.object(sd, "InputStream", FakeInputStream):
-                first = engine.start_transcription(None, "small")
+                first = engine.start_transcription(None, "parakeet-ultra")
                 self.assertTrue(first_listening.wait(timeout=1))
                 engine.stop_recording()
                 self.assertTrue(cloud_request_started.wait(timeout=1))
 
-                second = engine.start_transcription(None, "small")
+                second = engine.start_transcription(None, "parakeet-ultra")
                 self.assertTrue(
                     second_listening.wait(timeout=1),
                     "the second recording must start while the first cloud request is pending",
@@ -1569,8 +1565,9 @@ class TestDownloadModel(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             engine.models_dir = temp_dir
 
-            with patch("whisper_engine.parakeet.hf_hub_download", side_effect=OSError("disk full")):
-                engine.download_model("tiny")
+            with patch("whisper_engine.native_parakeet.helper_path", return_value="helper"), \
+                 patch("whisper_engine.native_parakeet.download", side_effect=OSError("disk full")):
+                engine.download_model("parakeet-ultra")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed = [json.loads(l) for l in output_lines if l]
@@ -1585,9 +1582,10 @@ class TestDownloadModel(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             engine.models_dir = temp_dir
 
-            with patch("whisper_engine.parakeet.hf_hub_download"), \
-                 patch("whisper_engine.parakeet._verify_cpu", return_value=(True, "OK")):
-                engine.download_model("small")
+            with patch("whisper_engine.native_parakeet.helper_path", return_value="helper"), \
+                 patch("whisper_engine.native_parakeet.download"), \
+                 patch("whisper_engine.parakeet._load_native", return_value=MagicMock()):
+                engine.download_model("parakeet-ultra")
 
         output_lines = mock_stdout.getvalue().strip().split("\n")
         parsed = [json.loads(l) for l in output_lines if l]
@@ -1683,7 +1681,7 @@ class TestInstantStop(unittest.TestCase):
                     engine._active_session = session
                     engine.audio_queue = session.queue
                     engine.is_recording = True
-                engine.transcribe(None, "small", capture_session=session)
+                engine.transcribe(None, "parakeet-ultra", capture_session=session)
 
         kinds = [e.get("status") for e in events]
         self.assertIn("listening", kinds)
@@ -1751,7 +1749,7 @@ class TestConstants(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Parakeet local backend (sherpa-onnx) -- whisper/cloud paths untouched
+# Parakeet Ultra local backend -- cloud paths untouched
 # ---------------------------------------------------------------------------
 class TestParakeetBackend(unittest.TestCase):
     def setUp(self):
@@ -1759,56 +1757,47 @@ class TestParakeetBackend(unittest.TestCase):
         from whisper_engine.constants import DEFAULT_LOCAL_MODEL, PARAKEET_MODEL_ID
         self.parakeet = parakeet_module
         self.PARAKEET_MODEL_ID = PARAKEET_MODEL_ID
-        self.assertEqual(DEFAULT_LOCAL_MODEL, "parakeet-tdt-0.6b-v3-int8")
+        self.assertEqual(DEFAULT_LOCAL_MODEL, "parakeet-ultra")
 
     def test_model_routing(self):
         self.assertTrue(self.parakeet.is_parakeet_model(self.PARAKEET_MODEL_ID))
         self.assertFalse(self.parakeet.is_parakeet_model("large-v3-turbo-q5_0"))
-        self.assertFalse(self.parakeet.is_parakeet_model("small"))
+        self.assertFalse(self.parakeet.is_parakeet_model("medium"))
 
     def test_verify_reports_missing_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             is_valid, msg = self.parakeet.verify(temp_dir)
             self.assertFalse(is_valid)
-            self.assertIn("File non trovato", msg)
+            self.assertIn("File modello mancante", msg)
 
     def test_verify_accepts_complete_model_dir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            directory = self.parakeet.model_dir(temp_dir)
-            os.makedirs(directory)
-            for filename in self.parakeet.FILES:
-                with open(os.path.join(directory, filename), "wb") as f:
-                    f.write(b"x")
-            self.assertEqual(self.parakeet.verify(temp_dir), (True, "OK"))
+            with patch("whisper_engine.native_parakeet.verify", return_value=True):
+                self.assertEqual(self.parakeet.verify(temp_dir), (True, "OK"))
 
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_legacy_id_load_logs_fallback_and_uses_parakeet(self, _mock_stdout):
+    def test_legacy_id_load_uses_ultra_without_fallback(self, _mock_stdout):
         engine = WhisperEngine()
         engine.models_dir = "/models"
         adapter = MagicMock()
         events = []
         with patch("whisper_engine.model.parakeet_backend.load", return_value=adapter) as mock_load:
             engine.log = events.append
-            engine.load_model("small")
+            engine.load_model("parakeet-tdt-0.6b-v3-int8")
         mock_load.assert_called_once()
         self.assertIs(engine.model, adapter)
-        self.assertTrue(any("non supportato" in e.get("message", "") for e in events))
+        self.assertEqual(engine.current_model_size, "parakeet-ultra")
 
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_parakeet_download_fetches_four_onnx_files(self, mock_stdout):
+    def test_parakeet_download_fetches_and_warms_ultra_gguf(self, mock_stdout):
         engine = WhisperEngine()
         with tempfile.TemporaryDirectory() as temp_dir:
             engine.models_dir = temp_dir
-            with patch("whisper_engine.parakeet.hf_hub_download") as mock_dl, \
-                 patch("whisper_engine.parakeet._verify_cpu", return_value=(True, "OK")):
+            with patch("whisper_engine.native_parakeet.helper_path", return_value="helper"), \
+                 patch("whisper_engine.native_parakeet.download") as mock_dl, \
+                 patch("whisper_engine.parakeet._load_native", return_value=MagicMock()):
                 engine.download_model(self.PARAKEET_MODEL_ID)
-            self.assertEqual(mock_dl.call_count, 4)
-            filenames = [c.kwargs["filename"] for c in mock_dl.call_args_list]
-            self.assertEqual(list(self.parakeet.FILES), filenames)
-            self.assertEqual(
-                mock_dl.call_args_list[0].kwargs["repo_id"],
-                self.parakeet.REPO_ID,
-            )
+            mock_dl.assert_called_once()
         statuses = [
             json.loads(line).get("status")
             for line in mock_stdout.getvalue().splitlines()
@@ -1818,27 +1807,11 @@ class TestParakeetBackend(unittest.TestCase):
         self.assertIn("download_complete", statuses)
 
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_parakeet_load_without_dependency_logs_error(self, mock_stdout):
+    def test_parakeet_load_without_native_helper_fails_clearly(self, mock_stdout):
         with tempfile.TemporaryDirectory() as temp_dir:
-            directory = self.parakeet.model_dir(temp_dir)
-            os.makedirs(directory)
-            for filename in self.parakeet.FILES:
-                with open(os.path.join(directory, filename), "wb") as f:
-                    f.write(b"x")
-            with patch.dict(sys.modules, {"sherpa_onnx": None}):
-                with self.assertRaises(ImportError):
+            with patch("whisper_engine.native_parakeet.helper_path", return_value=None):
+                with self.assertRaisesRegex(RuntimeError, "Motore nativo Parakeet Ultra"):
                     self.parakeet.load(temp_dir, ipc_module.log)
-        errors = [
-            json.loads(line)
-            for line in mock_stdout.getvalue().splitlines()
-            if line
-        ]
-        self.assertTrue(
-            any(
-                e.get("status") == "error" and "sherpa-onnx" in e.get("message", "")
-                for e in errors
-            )
-        )
 
     def test_parakeet_adapter_matches_whisper_transcribe_shape(self):
         stream = MagicMock()
@@ -1899,10 +1872,11 @@ class TestLocalSpeedRounds(unittest.TestCase):
         from whisper_engine.parakeet import _split_at_pauses
         recording = self._long_recording()
         chunks = _split_at_pauses(recording)
-        self.assertEqual(len(chunks), 4)
+        self.assertGreaterEqual(len(chunks), 3)
         np.testing.assert_array_equal(np.concatenate(chunks), recording)
         for chunk in chunks:
             self.assertTrue(np.shares_memory(chunk, recording))
+            self.assertLessEqual(chunk.size, 28 * SAMPLE_RATE)
         for left, right in zip(chunks, chunks[1:]):
             self.assertEqual(left[-1], 0)
             self.assertEqual(right[0], 0)
@@ -1914,20 +1888,21 @@ class TestLocalSpeedRounds(unittest.TestCase):
         self.assertEqual(len(chunks), 1)
         self.assertIs(chunks[0], recording)
 
-    def test_parakeet_does_not_force_a_cut_in_continuous_speech(self):
+    def test_parakeet_bounds_continuous_speech_with_low_energy_cuts(self):
         from whisper_engine.parakeet import _split_at_pauses
         recording = np.full(SAMPLE_RATE * 70, 0.1, dtype=np.float32)
         recording[20 * SAMPLE_RATE:20 * SAMPLE_RATE + 1280] = 0
         chunks = _split_at_pauses(recording)
-        self.assertEqual(len(chunks), 1)
-        self.assertIs(chunks[0], recording)
+        self.assertGreater(len(chunks), 1)
+        self.assertLessEqual(max(chunk.size for chunk in chunks), 28 * SAMPLE_RATE)
+        np.testing.assert_array_equal(np.concatenate(chunks), recording)
 
     def test_parakeet_pause_detection_scales_to_weak_speech_and_ignores_click(self):
         from whisper_engine.parakeet import _split_at_pauses
         recording = self._long_recording(amplitude=0.0002)
         recording[0] = 1
         chunks = _split_at_pauses(recording)
-        self.assertEqual(len(chunks), 4)
+        self.assertGreaterEqual(len(chunks), 3)
         np.testing.assert_array_equal(np.concatenate(chunks), recording)
         for left, right in zip(chunks, chunks[1:]):
             self.assertEqual(left[-1], 0)
@@ -1938,22 +1913,26 @@ class TestLocalSpeedRounds(unittest.TestCase):
         recording = self._long_recording(amplitude=0.05)
         recording[recording == 0] = 0.003
         chunks = _split_at_pauses(recording)
-        self.assertEqual(len(chunks), 1)
-        self.assertIs(chunks[0], recording)
+        self.assertEqual(len(chunks), 3)
+        self.assertLessEqual(max(chunk.size for chunk in chunks), 28 * SAMPLE_RATE)
+        np.testing.assert_array_equal(np.concatenate(chunks), recording)
 
     def test_parakeet_retains_speech_before_a_late_first_pause(self):
         from whisper_engine.parakeet import _split_at_pauses
         recording = np.full(SAMPLE_RATE * 100, 0.1, dtype=np.float32)
         recording[65 * SAMPLE_RATE:65 * SAMPLE_RATE + 4800] = 0
         chunks = _split_at_pauses(recording)
-        self.assertEqual(len(chunks), 2)
+        self.assertGreaterEqual(len(chunks), 2)
         np.testing.assert_array_equal(np.concatenate(chunks), recording)
-        self.assertGreater(chunks[0].size, 60 * SAMPLE_RATE)
+        self.assertLessEqual(max(chunk.size for chunk in chunks), 28 * SAMPLE_RATE)
 
     def test_parakeet_long_adapter_keeps_order_repetitions_and_last_word(self):
         from whisper_engine.parakeet import ParakeetRecognizer
         streams = [MagicMock() for _ in range(4)]
-        for stream, text in zip(streams, ("prima parola", "parola ripetuta", "terza parte", "ultima")):
+        for stream, text in zip(
+            streams,
+            ("prima parola", "parola ripetuta", "terza parte", "ultima parola"),
+        ):
             stream.result.text = text
         recognizer = MagicMock()
         recognizer.create_stream.side_effect = streams
@@ -1964,7 +1943,7 @@ class TestLocalSpeedRounds(unittest.TestCase):
         )
         self.assertEqual(recognizer.decode_stream.call_count, 4)
         self.assertEqual(events, [{
-            "status": "result", "text": "prima parola parola ripetuta terza parte ultima",
+            "status": "result", "text": "prima parola parola ripetuta terza parte ultima parola",
             "duration": 70.0,
         }])
         padding = int(CLOUD_EDGE_PAD_SECONDS * SAMPLE_RATE)
@@ -2034,26 +2013,17 @@ class TestLocalSpeedRounds(unittest.TestCase):
         engine.models_dir = "/models"
         return engine
 
-    def test_inference_threads_within_bounds(self):
-        from whisper_engine.parakeet import _worker_threads
-        threads = _worker_threads()
-        self.assertGreaterEqual(threads, 1)
-        self.assertLessEqual(threads, 6)
-
-    def test_parakeet_load_forwards_num_threads(self):
+    def test_parakeet_loads_the_same_native_model_on_cpu(self):
         from whisper_engine import parakeet as parakeet_module
-        fake_sherpa = MagicMock()
+        from whisper_engine import native_parakeet
+        log = lambda _event: None
         with tempfile.TemporaryDirectory() as temp_dir:
-            directory = parakeet_module.model_dir(temp_dir)
-            os.makedirs(directory)
-            for filename in parakeet_module.FILES:
-                with open(os.path.join(directory, filename), "wb") as f:
-                    f.write(b"x")
-            with patch.dict(sys.modules, {"sherpa_onnx": fake_sherpa}):
-                parakeet_module.load(temp_dir, lambda data: None, num_threads=2)
-        _, kwargs = fake_sherpa.OfflineRecognizer.from_transducer.call_args
-        self.assertEqual(kwargs["num_threads"], 2)
-        self.assertEqual(kwargs["model_type"], "nemo_transducer")
+            with patch.object(native_parakeet, "helper_path", return_value="helper"), \
+                 patch.object(native_parakeet, "verify", return_value=True), \
+                 patch.object(native_parakeet, "gpu_available", return_value=False), \
+                 patch.object(native_parakeet, "load", return_value=MagicMock()) as load:
+                parakeet_module.load(temp_dir, log)
+        load.assert_called_once_with(parakeet_module.model_dir(temp_dir), log, cpu_only=True)
 
     def test_prepare_local_recording_is_zero_copy_for_engine_input(self):
         recording = np.ones(SAMPLE_RATE, dtype=np.float32)
@@ -2080,7 +2050,7 @@ class TestLocalSpeedRounds(unittest.TestCase):
         speech = np.full(SAMPLE_RATE, 0.05, dtype=np.float32)
         padded = np.concatenate([np.zeros(SAMPLE_RATE), speech, np.zeros(SAMPLE_RATE)])
         with patch.object(engine, "load_model"):
-            engine._transcribe_local(padded, "parakeet-tdt-0.6b-v3-int8", "it", 3.0)
+            engine._transcribe_local(padded, "parakeet-ultra", "it", 3.0)
 
         heard = adapter.transcribe.call_args.args[0]
         self.assertLess(heard.size, padded.size)
@@ -2098,7 +2068,7 @@ class TestLocalSpeedRounds(unittest.TestCase):
         with patch.object(engine, "load_model"):
             engine._transcribe_local(
                 np.zeros(SAMPLE_RATE, dtype=np.float32),
-                "parakeet-tdt-0.6b-v3-int8",
+                "parakeet-ultra",
                 "it",
                 1.0,
             )
@@ -2136,20 +2106,19 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         adapter.close()
         self.assertIsNone(adapter._recognizer)
 
-    def test_backend_status_reports_missing_dep_actionably(self):
+    def test_backend_status_reports_missing_native_helper_actionably(self):
         from whisper_engine import parakeet as parakeet_module
-        with patch.dict(sys.modules, {"sherpa_onnx": None}):
+        with patch("whisper_engine.native_parakeet.helper_path", return_value=None):
             self.assertFalse(parakeet_module.is_backend_available())
             status = parakeet_module.backend_status()
         self.assertFalse(status["available"])
-        self.assertIn("sherpa-onnx", status["message"])
-        self.assertIn("py -m pip install", status["message"])
+        self.assertIn("Motore nativo Parakeet Ultra", status["message"])
 
     def test_unload_model_frees_and_emits_unloaded(self):
         engine = WhisperEngine()
         adapter = MagicMock()
         engine.model = adapter
-        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        engine.current_model_size = "parakeet-ultra"
         events = []
         engine.log = events.append
         with patch("whisper_engine.model.release_model") as mock_release, \
@@ -2179,7 +2148,7 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         with patch("whisper_engine.model.parakeet_backend.load", return_value=new_adapter), \
              patch("whisper_engine.model.release_model") as mock_release, \
              patch("sys.stdout", new_callable=io.StringIO):
-            engine.load_model("parakeet-tdt-0.6b-v3-int8")
+            engine.load_model("parakeet-ultra")
         mock_release.assert_called_once_with(old_adapter)
         self.assertIs(engine.model, new_adapter)
 
@@ -2196,7 +2165,7 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
         engine.model = MagicMock()
-        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        engine.current_model_size = "parakeet-ultra"
         events = []
         engine.log = events.append
         ipc_module.handle_command("unload_model", {}, engine)
@@ -2209,7 +2178,7 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         engine.log = events.append
         with patch(
             "whisper_engine.model.backend_status",
-            return_value={"available": False, "message": "manca sherpa-onnx"},
+            return_value={"available": False, "message": "manca l'helper nativo"},
         ):
             ipc_module.handle_command("check_backend", {}, engine)
         self.assertEqual(events[-1]["status"], "backend_status")
@@ -2229,7 +2198,7 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         engine = WhisperEngine()
         engine.provider = "local"
         engine.model = MagicMock()
-        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        engine.current_model_size = "parakeet-ultra"
         events = []
         engine.log = events.append
         with patch.object(engine, "prepare_groq_client"):
@@ -2242,9 +2211,9 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         engine = WhisperEngine()
         engine.models_dir = "/models"
         engine.model = MagicMock()
-        engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
+        engine.current_model_size = "parakeet-ultra"
         with patch("whisper_engine.model.preload_default_model") as mock_preload:
-            engine._preload_default_model("parakeet-tdt-0.6b-v3-int8")
+            engine._preload_default_model("parakeet-ultra")
         mock_preload.assert_not_called()
 
     def test_preload_serializes_first_transcription_model_load(self):
@@ -2258,7 +2227,7 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         def blocking_preload(*_args, **_kwargs):
             preload_started.set()
             self.assertTrue(release_preload.wait(timeout=1))
-            return preloaded_adapter, "parakeet-tdt-0.6b-v3-int8"
+            return preloaded_adapter, "parakeet-ultra"
 
         with patch(
             "whisper_engine.model.preload_default_model",
@@ -2266,13 +2235,13 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         ), patch("whisper_engine.model.load_model") as mock_load:
             preload_thread = threading.Thread(
                 target=engine._preload_default_model,
-                args=("parakeet-tdt-0.6b-v3-int8",),
+                args=("parakeet-ultra",),
             )
             preload_thread.start()
             self.assertTrue(preload_started.wait(timeout=1))
 
             def load_model():
-                engine.load_model("parakeet-tdt-0.6b-v3-int8")
+                engine.load_model("parakeet-ultra")
                 load_finished.set()
 
             load_thread = threading.Thread(target=load_model)
@@ -2298,13 +2267,13 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         def _win_race(*_args, **_kwargs):
             # Simulate a transcribe completing while preload was loading.
             engine.model = raced_adapter
-            engine.current_model_size = "parakeet-tdt-0.6b-v3-int8"
-            return preloaded_adapter, "parakeet-tdt-0.6b-v3-int8"
+            engine.current_model_size = "parakeet-ultra"
+            return preloaded_adapter, "parakeet-ultra"
 
         with patch(
             "whisper_engine.model.preload_default_model", side_effect=_win_race
         ), patch("whisper_engine.model.release_model") as mock_release:
-            engine._preload_default_model("parakeet-tdt-0.6b-v3-int8")
+            engine._preload_default_model("parakeet-ultra")
         mock_release.assert_called_once_with(preloaded_adapter)
         self.assertIs(engine.model, raced_adapter)
 
@@ -2319,7 +2288,7 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         engine.log = events.append
         engine._process_recording(
             np.full(SAMPLE_RATE, 0.05, dtype=np.float32),
-            "parakeet-tdt-0.6b-v3-int8",
+            "parakeet-ultra",
             "it",
             2.0,
             "local",
@@ -2344,7 +2313,7 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         ), patch.object(transcriber_module, "release_groq_client"):
             engine._process_recording(
                 np.full(SAMPLE_RATE * 2, 0.05, dtype=np.float32),
-                "parakeet-tdt-0.6b-v3-int8",
+                "parakeet-ultra",
                 "it",
                 2.0,
                 "cloud",

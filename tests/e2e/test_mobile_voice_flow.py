@@ -16,7 +16,7 @@ TAURI_MOCK = r"""
         calls.push({ command, args });
         if (command === "load_settings") {
           return {
-            hotkey: "XBUTTON2", secondaryHotkey: "", model: "parakeet-tdt-0.6b-v3-int8",
+            hotkey: "XBUTTON2", secondaryHotkey: "", model: "parakeet-ultra",
             autoPaste: true, minimizeTray: true, selectedDevice: "default",
             selectedLanguage: "it", computeDevice: "cpu", holdToSpeak: false,
             groqApiKey: "fake-mobile-key", provider: "cloud", widgetMode: "always",

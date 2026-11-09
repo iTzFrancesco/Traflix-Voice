@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri_plugin_shell::process::CommandChild;
 
+pub const DEFAULT_LOCAL_MODEL: &str = "parakeet-ultra";
+
 // ─── STRUTTURE DATI ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -100,7 +102,7 @@ impl Default for AppSettings {
         AppSettings {
             hotkey: "XBUTTON2".to_string(),
             secondary_hotkey: String::new(),
-            model: "parakeet-tdt-0.6b-v3-int8".to_string(),
+            model: DEFAULT_LOCAL_MODEL.to_string(),
             auto_paste: None,
             keep_clipboard_result: true,
             minimize_tray: true,

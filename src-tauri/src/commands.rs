@@ -11,6 +11,7 @@ use crate::hotkey::parse_hotkey;
 use crate::settings::{atomic_write, ensure_app_data_dir, load_settings_from_file};
 use crate::state::{
     AppSettings, AppState, AppStats, AudioDeviceInfo, GroqUsage, TranscriptionEntry,
+    DEFAULT_LOCAL_MODEL,
 };
 
 // ─── COMANDI TAURI ───────────────────────────────────────────────────────────
@@ -40,8 +41,9 @@ pub async fn load_settings(state: State<'_, AppState>) -> Result<AppSettings, St
 pub async fn save_settings<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
-    settings: AppSettings,
+    mut settings: AppSettings,
 ) -> Result<(), String> {
+    settings.model = DEFAULT_LOCAL_MODEL.to_string();
     ensure_app_data_dir(&state.settings_path);
     let data = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     info!(
@@ -170,23 +172,16 @@ pub async fn check_model_exists(app: AppHandle, model_id: String) -> bool {
 }
 
 fn model_exists(app: AppHandle, model_id: String) -> bool {
-    let app_dir = app.path().app_data_dir().unwrap_or_default();
-    let dir = app_dir.join("models").join(&model_id);
-    if dir
-        .join("parakeet-tdt-0.6b-v3-Q8_0.gguf")
-        .metadata()
-        .is_ok_and(|m| m.len() == 739_508_576)
-    {
-        return true;
+    if model_id != DEFAULT_LOCAL_MODEL {
+        return false;
     }
-    [
-        "encoder.int8.onnx",
-        "decoder.int8.onnx",
-        "joiner.int8.onnx",
-        "tokens.txt",
-    ]
-    .iter()
-    .all(|f| dir.join(f).exists())
+    let app_dir = app.path().app_data_dir().unwrap_or_default();
+    app_dir
+        .join("models")
+        .join(DEFAULT_LOCAL_MODEL)
+        .join("parakeet-ultra-Q8_0.gguf")
+        .metadata()
+        .is_ok_and(|metadata| metadata.len() == 740_363_168)
 }
 
 /// Invia un comando al processo Python

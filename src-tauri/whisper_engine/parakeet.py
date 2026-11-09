@@ -1,63 +1,59 @@
-"""Parakeet v3 local dispatch: native GGUF, with a legacy INT8 ONNX fallback.
-
-Kept in its own module on purpose: model.py only dispatches to it, and the
-Groq/cloud flow in transcriber.py stays untouched.
-"""
+"""Parakeet Ultra audio preparation and native CPU/GPU dispatch."""
 import os
 import threading
+import unicodedata
 
 import numpy as np
-from huggingface_hub import hf_hub_download
 
 from whisper_engine.constants import (
     CLOUD_EDGE_PAD_SECONDS,
     CLOUD_SILENCE_PADDING_SECONDS,
+    DEFAULT_LOCAL_MODEL,
+    LEGACY_LOCAL_MODEL_IDS,
     PARAKEET_MODEL_ID,
     SAMPLE_RATE,
 )
 
-REPO_ID = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-CPU_REVISION = "2bda32ec70b097a55adaa07d9a7173915b43cc78"
-FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
 _PAUSE_FRAME_SAMPLES = SAMPLE_RATE // 50
 _MIN_PAUSE_FRAMES = 8
-_CHUNK_TARGET_SAMPLES = 20 * SAMPLE_RATE
-_CHUNK_SEARCH_SAMPLES = 8 * SAMPLE_RATE
-_MIN_CHUNK_SAMPLES = _CHUNK_TARGET_SAMPLES - _CHUNK_SEARCH_SAMPLES
 _CHUNK_CONTEXT_SAMPLES = int(CLOUD_EDGE_PAD_SECONDS * SAMPLE_RATE)
-_PAUSE_PADDING_SAMPLES = int(CLOUD_SILENCE_PADDING_SECONDS * SAMPLE_RATE)
-_MISSING_DEP_MESSAGE = (
-    "Backend Parakeet non disponibile: pacchetto 'sherpa-onnx' non installato. "
-    "Installalo con: py -m pip install sherpa-onnx (Windows) oppure "
-    "python3 -m pip install sherpa-onnx, poi riavvia l'app. "
-    "In alternativa passa al provider Cloud nella tab IA."
+_CHUNK_OVERLAP_SAMPLES = SAMPLE_RATE // 2
+_MAX_SINGLE_PASS_SAMPLES = 28 * SAMPLE_RATE
+_MAX_CHUNK_SAMPLES = _MAX_SINGLE_PASS_SAMPLES - 2 * _CHUNK_OVERLAP_SAMPLES
+_MAX_FINAL_CORE_SAMPLES = (
+    _MAX_SINGLE_PASS_SAMPLES - _CHUNK_OVERLAP_SAMPLES - _CHUNK_CONTEXT_SAMPLES
 )
+_MIN_TRAILING_SAMPLES = 2 * SAMPLE_RATE
+_PAUSE_PADDING_SAMPLES = int(CLOUD_SILENCE_PADDING_SECONDS * SAMPLE_RATE)
 
 
 def is_backend_available():
-    """True when the sherpa-onnx wheel can be imported in this interpreter."""
     from whisper_engine import native_parakeet
-    try:
-        import sherpa_onnx  # noqa: F401
-        return True
-    except Exception:
-        return native_parakeet.gpu_available()
+    return native_parakeet.helper_path() is not None
 
 
 def backend_status():
-    """Machine-readable backend probe used by the `check_backend` IPC command."""
     from whisper_engine import native_parakeet
-    if is_backend_available() and native_parakeet.helper_path() is not None:
-        return {"available": True, "message": "Selezione automatica GPU GGUF / CPU ONNX disponibile."}
-    if is_backend_available():
-        return {"available": True, "message": "Backend sherpa-onnx disponibile."}
-    return {"available": False, "message": _MISSING_DEP_MESSAGE}
+    if native_parakeet.helper_path() is None:
+        return {
+            "available": False,
+            "message": "Motore nativo Parakeet Ultra non trovato. Ricompila l'helper e riavvia l'app.",
+        }
+    if native_parakeet.gpu_available():
+        return {"available": True, "message": "Parakeet Ultra disponibile su CPU e GPU."}
+    return {"available": True, "message": "Parakeet Ultra disponibile su CPU."}
 
 
 def is_parakeet_model(size):
-    return size == PARAKEET_MODEL_ID or (
-        isinstance(size, str) and size.startswith("parakeet")
-    )
+    return size == DEFAULT_LOCAL_MODEL or size in LEGACY_LOCAL_MODEL_IDS
+
+
+def normalize_model_id(size):
+    if size is None or size == "":
+        return DEFAULT_LOCAL_MODEL
+    if is_parakeet_model(size):
+        return DEFAULT_LOCAL_MODEL
+    raise ValueError(f"Modello locale non supportato: {size}. È disponibile solo Parakeet Ultra.")
 
 
 def model_dir(models_dir):
@@ -65,41 +61,16 @@ def model_dir(models_dir):
 
 
 def verify(models_dir):
-    directory = model_dir(models_dir)
     from whisper_engine import native_parakeet
-    if native_parakeet.helper_path() is not None and native_parakeet.verify(directory):
+    directory = model_dir(models_dir)
+    if native_parakeet.verify(directory):
         return True, "OK"
-    return _verify_cpu(directory)
-
-
-def _verify_cpu(directory):
-    for filename in FILES:
-        path = os.path.join(directory, filename)
-        if not os.path.exists(path):
-            return False, f"File non trovato: {path}"
-        try:
-            if os.path.getsize(path) == 0:
-                return False, f"File vuoto: {path}"
-        except OSError as e:
-            return False, str(e)
-    return True, "OK"
-
-
-def _worker_threads():
-    try:
-        count = os.cpu_count() or 1
-    except Exception:
-        count = 1
-    # Six threads improved long-clip decoding on a 6-core/12-thread Windows
-    # host without changing short-clip latency. Preserve the four-thread cap
-    # on smaller CPUs so longer dictations do not crowd out the desktop.
-    cap = 6 if count >= 12 else 4
-    return max(1, min(cap, count))
+    return False, f"File modello mancante o dimensione non valida: {native_parakeet.FILENAME}"
 
 
 def _compact_digital_pauses(audio):
     """Shorten zero-only pauses over one second, keeping both edge contexts."""
-    if audio.size <= _CHUNK_TARGET_SAMPLES + _CHUNK_SEARCH_SAMPLES:
+    if audio.size <= _MAX_SINGLE_PASS_SAMPLES:
         return audio
     transitions = np.diff(np.concatenate(([False], audio == 0, [False])).astype(np.int8))
     starts = np.flatnonzero(transitions == 1)
@@ -117,15 +88,8 @@ def _compact_digital_pauses(audio):
 
 
 def _split_at_pauses(audio):
-    """Bound long inference inputs at quiet pauses, retaining every sample.
-
-    Full-clip inference grows disproportionately on long dictations. A cut
-    needs at least 160 ms of quiet audio; continuous or noisy speech stays
-    together rather than forcing a word boundary. Scale the quiet threshold
-    to the upper speech level so low-volume words and isolated clicks do not
-    make the entire recording look silent.
-    """
-    if audio.size <= _CHUNK_TARGET_SAMPLES + _CHUNK_SEARCH_SAMPLES:
+    """Split long audio at pauses or nearby low-energy points, retaining all samples."""
+    if audio.size <= _MAX_SINGLE_PASS_SAMPLES:
         return [audio]
 
     frame_count = audio.size // _PAUSE_FRAME_SAMPLES
@@ -133,10 +97,10 @@ def _split_at_pauses(audio):
         frame_count, _PAUSE_FRAME_SAMPLES,
     )
     peaks = np.max(np.abs(frames), axis=1)
-    quiet_threshold = min(0.001, float(np.percentile(peaks, 90)) * 0.01)
+    # Keep the pause detector conservative: a quiet voice beside louder speech
+    # must not be classified as silence and removed from the transcript.
+    quiet_threshold = min(0.0001, float(np.percentile(peaks, 90)) * 0.0001)
     quiet = peaks <= quiet_threshold
-    if quiet.all():
-        return [audio]
     transitions = np.diff(np.concatenate(([False], quiet, [False])).astype(np.int8))
     starts = np.flatnonzero(transitions == 1)
     ends = np.flatnonzero(transitions == -1)
@@ -148,19 +112,33 @@ def _split_at_pauses(audio):
 
     chunks = []
     start = 0
-    while audio.size - start > _CHUNK_TARGET_SAMPLES + _CHUNK_SEARCH_SAMPLES:
-        eligible = [
-            cut for cut in cuts
-            if start + _MIN_CHUNK_SAMPLES <= cut <= audio.size - 2 * SAMPLE_RATE
-        ]
-        if not eligible:
-            break
-        target = start + _CHUNK_TARGET_SAMPLES
-        cut = min(eligible, key=lambda point: abs(point - target))
+    # The final core receives a left overlap and trailing edge padding. Start
+    # another chunk before those additions could push the helper input over
+    # Ultra's conservative 28-second single-pass limit.
+    while audio.size - start > _MAX_FINAL_CORE_SAMPLES:
+        max_cut = min(start + _MAX_CHUNK_SAMPLES, audio.size - _MIN_TRAILING_SAMPLES)
+        min_cut = start + SAMPLE_RATE
+        eligible = [cut for cut in cuts if min_cut <= cut <= max_cut]
+        if eligible:
+            # Prefer the latest real pause that keeps this decoder input under
+            # its 28-second operating limit.
+            cut = max(eligible)
+        else:
+            # Continuous speech has no safe pause. Search the final two seconds
+            # before the limit and overlap both sides of the low-energy cut.
+            search_start = max(min_cut, max_cut - 2 * SAMPLE_RATE)
+            search_end = max_cut
+            first = max(0, search_start // _PAUSE_FRAME_SAMPLES)
+            last = min(frame_count, (search_end + _PAUSE_FRAME_SAMPLES - 1) // _PAUSE_FRAME_SAMPLES)
+            if first < last:
+                cut = (first + int(np.argmin(peaks[first:last]))) * _PAUSE_FRAME_SAMPLES
+                cut = min(max(cut, min_cut), max_cut)
+            else:
+                cut = max_cut
+        if cut <= start or cut > start + _MAX_CHUNK_SAMPLES:
+            cut = max_cut
         chunks.append(audio[start:cut])
         start = cut
-    if not chunks:
-        return [audio]
     chunks.append(audio[start:])
     return chunks
 
@@ -173,44 +151,23 @@ class _Segment:
 
 
 class ParakeetRecognizer:
-    """Adapter exposing the transcribe() shape used by transcribe_local.
-
-    transcribe_local() calls model.transcribe(recording, language=...), so
-    matching that signature keeps the shared local path unchanged. The
-    transducer handles the supported languages itself; language is accepted
-    for interface compatibility and ignored.
-    """
+    """Adapter for offline recognizers that expose create_stream/decode_stream."""
 
     def __init__(self, recognizer):
         self._recognizer = recognizer
 
     def snapshot(self):
-        """Pin native sessions independently of the engine's unloadable adapter."""
         return ParakeetRecognizer(self._recognizer)
 
     def close(self):
-        """Drop the native recognizer so RSS is released on unload.
-
-        sherpa-onnx holds ONNX sessions (~1 GB) behind this handle. Clearing
-        the reference plus gc.collect() in the engine is what actually frees
-        the RAM; without it `model = None` alone can leave the memory mapped
-        until the next collection cycle. An active transcription keeps its
-        own reference until its last chunk has completed.
-        """
-        try:
-            self._recognizer = None
-        except Exception:
-            pass
+        self._recognizer = None
 
     def transcribe(self, recording, language=""):
         recognizer = self._recognizer
-        audio = np.ascontiguousarray(recording, dtype=np.float32).reshape(-1)
-        audio = _compact_digital_pauses(audio)
+        audio = _compact_digital_pauses(np.ascontiguousarray(recording, dtype=np.float32).reshape(-1))
         chunks = _split_at_pauses(audio)
         segments = []
         for index, chunk in enumerate(chunks):
-            # New boundaries need onset/tail context so TDT retains short
-            # words beside the cut, even when the natural pause is brief.
             leading = _CHUNK_CONTEXT_SAMPLES if index else 0
             trailing = _CHUNK_CONTEXT_SAMPLES if index < len(chunks) - 1 else 0
             if leading or trailing:
@@ -237,7 +194,7 @@ class _AdaptiveSession:
             try:
                 return self.model.transcribe(recording, language=language)
             except Exception:
-                if not isinstance(self.model, native_parakeet.NativeRecognizer):
+                if self.model._session.metadata.get("backend") == "cpu":
                     raise
                 self.model.close()
                 self.model = None
@@ -246,128 +203,97 @@ class _AdaptiveSession:
                 self.model = self.cpu_factory()
                 return self.model.transcribe(recording, language=language)
 
-    def __del__(self):
-        try:
+    def close(self):
+        with self.lock:
             if self.model is not None:
                 self.model.close()
+                self.model = None
+
+    def __del__(self):
+        try:
+            self.close()
         except Exception:
             pass
 
 
-class AdaptiveRecognizer(ParakeetRecognizer):
+class AdaptiveRecognizer:
+    def __init__(self, session):
+        self._recognizer = session
+
     def snapshot(self):
         return AdaptiveRecognizer(self._recognizer)
 
+    def close(self):
+        self._recognizer = None
+
     def transcribe(self, recording, language=""):
+        if self._recognizer is None:
+            raise RuntimeError("La sessione Parakeet Ultra è stata rilasciata.")
         return self._recognizer.transcribe(recording, language)
 
 
-def load(models_dir, log_func, num_threads=None):
+def _load_native(models_dir, log_func):
     from whisper_engine import native_parakeet
+    directory = model_dir(models_dir)
+    if native_parakeet.helper_path() is None:
+        raise RuntimeError("Motore nativo Parakeet Ultra non trovato. Ricompila l'helper e riavvia l'app.")
     if native_parakeet.gpu_available():
-        directory = model_dir(models_dir)
-        try:
-            if not native_parakeet.verify(directory):
-                log_func({"status": "downloading", "model": PARAKEET_MODEL_ID,
-                          "message": "Preparazione Parakeet per la GPU (~740 MB)..."})
-                native_parakeet.download(directory)
-                log_func({"status": "download_complete", "model": PARAKEET_MODEL_ID,
-                          "message": "Modello GGUF scaricato."})
-            log_func({"status": "loading_model", "message": "Preparazione Parakeet GPU..."})
-            gpu_model = native_parakeet.load(directory, log_func)
-            if gpu_model._session.metadata.get("backend") != "cpu":
-                return AdaptiveRecognizer(_AdaptiveSession(gpu_model,
-                    lambda: _load_cpu(models_dir, log_func, num_threads), log_func))
-            gpu_model.close()
-        except Exception:
-            log_func({"status": "warning", "message": "Avvio GPU non riuscito. Uso automatico della CPU."})
-        native_parakeet.disable_gpu()
-    return _load_cpu(models_dir, log_func, num_threads)
+        model = native_parakeet.load(directory, log_func)
+        if model._session.metadata.get("backend") != "cpu":
+            return AdaptiveRecognizer(_AdaptiveSession(
+                model,
+                lambda: native_parakeet.load(directory, log_func, cpu_only=True),
+                log_func,
+            ))
+        return model
+    return native_parakeet.load(directory, log_func, cpu_only=True)
 
 
-def _load_cpu(models_dir, log_func, num_threads=None):
+def load(models_dir, log_func):
+    from whisper_engine import native_parakeet
     directory = model_dir(models_dir)
-    if not all(os.path.isfile(os.path.join(directory, f)) and os.path.getsize(os.path.join(directory, f)) > 0 for f in FILES):
-        _download_cpu(models_dir, log_func)
-    is_valid, msg = _verify_cpu(directory)
-    if not is_valid:
-        log_func({"status": "error", "message": f"Modello Parakeet non valido: {msg}"})
-        raise Exception(f"Modello Parakeet non valido: {msg}")
-
-    try:
-        import sherpa_onnx
-    except ImportError:
-        log_func({"status": "error", "message": _MISSING_DEP_MESSAGE})
-        raise
-
-    directory = model_dir(models_dir)
-    log_func({"status": "loading_model", "message": "Caricamento modello Parakeet TDT 0.6B v3..."})
-    try:
-        recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-            encoder=os.path.join(directory, "encoder.int8.onnx"),
-            decoder=os.path.join(directory, "decoder.int8.onnx"),
-            joiner=os.path.join(directory, "joiner.int8.onnx"),
-            tokens=os.path.join(directory, "tokens.txt"),
-            num_threads=_worker_threads() if num_threads is None else num_threads,
-            sample_rate=SAMPLE_RATE,
-            model_type="nemo_transducer",
-        )
-    except Exception as e:
-        log_func({"status": "error", "message": f"Errore caricamento modello Parakeet: {str(e)}"})
-        raise
-    log_func({"status": "info", "message": "Modello Parakeet caricato."})
-    log_func({"status": "gpu_info", "current_device": "cpu", "message": "Dispositivo in uso: CPU (ONNX automatico)"})
-    return ParakeetRecognizer(recognizer)
-
-
-def _remove_partial_files(directory):
-    for filename in FILES:
-        try:
-            path = os.path.join(directory, filename)
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
+    if native_parakeet.helper_path() is None:
+        raise RuntimeError("Motore nativo Parakeet Ultra non trovato. Ricompila l'helper e riavvia l'app.")
+    downloaded = False
+    if not native_parakeet.verify(directory, checksum=True):
+        model_path = os.path.join(directory, native_parakeet.FILENAME)
+        if os.path.exists(model_path):
+            try:
+                os.remove(model_path)
+            except OSError as error:
+                raise RuntimeError(f"Il modello Parakeet Ultra non valido non può essere sostituito: {error}") from error
+        log_func({
+            "status": "downloading",
+            "model": PARAKEET_MODEL_ID,
+            "message": "Download Parakeet Ultra GGUF (~740 MB)...",
+        })
+        native_parakeet.download(directory)
+        downloaded = True
+    model = _load_native(models_dir, log_func)
+    if downloaded:
+        log_func({"status": "download_complete", "model": PARAKEET_MODEL_ID,
+                  "message": "Parakeet Ultra scaricato, verificato e pronto."})
+    return model
 
 
 def download(models_dir, log_func):
     from whisper_engine import native_parakeet
-    if native_parakeet.gpu_available():
-        try:
-            log_func({"status": "downloading", "message": "Download Parakeet GGUF Q8 (~740 MB)...", "model": PARAKEET_MODEL_ID})
-            native_parakeet.download(model_dir(models_dir))
-            log_func({"status": "download_complete", "message": "Modello Parakeet GGUF scaricato.", "model": PARAKEET_MODEL_ID})
-        except Exception as error:
-            log_func({"status": "download_error", "message": f"Download fallito: {error}", "model": PARAKEET_MODEL_ID})
-        return
-    _download_cpu(models_dir, log_func)
-
-
-def _download_cpu(models_dir, log_func):
     directory = model_dir(models_dir)
-    try:
-        os.makedirs(directory, exist_ok=True)
-    except Exception as e:
-        log_func({"status": "download_error", "message": f"Download fallito: {str(e)}", "model": PARAKEET_MODEL_ID})
+    if native_parakeet.helper_path() is None:
+        log_func({"status": "download_error", "model": PARAKEET_MODEL_ID,
+                  "message": "Motore nativo Parakeet Ultra non trovato. Ricompila l'helper e riavvia l'app."})
         return
-
+    log_func({"status": "downloading", "model": PARAKEET_MODEL_ID,
+              "message": "Download Parakeet Ultra GGUF (~740 MB)..."})
     try:
-        log_func({"status": "downloading", "message": "Download modello Parakeet TDT 0.6B v3...", "model": PARAKEET_MODEL_ID})
-        for filename in FILES:
-            hf_hub_download(
-                repo_id=REPO_ID,
-                revision=CPU_REVISION,
-                filename=filename,
-                local_dir=directory,
-            )
-
-        is_valid, msg = _verify_cpu(directory)
-        if not is_valid:
-            log_func({"status": "error", "message": f"Verifica fallita: {msg}"})
-            _remove_partial_files(directory)
-            return
-
-        log_func({"status": "download_complete", "message": "Modello Parakeet scaricato.", "model": PARAKEET_MODEL_ID})
-    except Exception as e:
-        log_func({"status": "download_error", "message": f"Download fallito: {str(e)}", "model": PARAKEET_MODEL_ID})
-        _remove_partial_files(directory)
+        model_path = os.path.join(directory, native_parakeet.FILENAME)
+        if os.path.exists(model_path) and not native_parakeet.verify(directory, checksum=True):
+            os.remove(model_path)
+        native_parakeet.download(directory)
+        model = _load_native(models_dir, log_func)
+        model.close()
+        log_func({"status": "download_complete", "model": PARAKEET_MODEL_ID,
+                  "message": "Parakeet Ultra scaricato, verificato e pronto."})
+    except Exception as error:
+        log_func({"status": "download_error", "model": PARAKEET_MODEL_ID,
+                  "message": f"Download Parakeet Ultra non riuscito: {error}"})

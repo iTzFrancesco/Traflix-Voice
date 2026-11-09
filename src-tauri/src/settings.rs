@@ -1,11 +1,18 @@
 use std::fs;
 use std::path::Path;
 
-use crate::state::{AppSettings, AppStats};
+use crate::state::{AppSettings, AppStats, DEFAULT_LOCAL_MODEL};
 
 pub fn load_settings_from_file(path: &Path) -> AppSettings {
     if let Ok(data) = fs::read_to_string(path) {
-        if let Ok(settings) = serde_json::from_str(&data) {
+        if let Ok(mut settings) = serde_json::from_str::<AppSettings>(&data) {
+            if settings.model != DEFAULT_LOCAL_MODEL {
+                settings.model = DEFAULT_LOCAL_MODEL.to_string();
+                if let Ok(normalized) = serde_json::to_string_pretty(&settings) {
+                    ensure_app_data_dir(path);
+                    let _ = atomic_write(path, &normalized);
+                }
+            }
             return settings;
         }
     }
