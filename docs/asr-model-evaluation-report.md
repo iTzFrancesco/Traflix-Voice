@@ -3,6 +3,10 @@
 Data: 2026-08-17
 Stato: ricerca, nessuna modifica al codice.
 
+Nota: questo documento precede l'integrazione di Parakeet Ultra. Il modello
+locale attuale dell'app è Parakeet Ultra; i confronti con v3 qui sotto sono
+storici e non misurano l'accuratezza del runtime attuale.
+
 ## Contesto
 
 L'app usa oggi `whisper-large-v3-turbo` via API Groq (`src-tauri/whisper_engine/constants.py:6`),

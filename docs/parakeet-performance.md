@@ -1,5 +1,9 @@
 # Parakeet long-dictation performance
 
+This report records measurements for the previous Parakeet TDT v3 and its
+Sherpa-ONNX path. The current application model is Parakeet Ultra via the
+native GGUF runtime; these v3 results do not establish Ultra's accuracy or speed.
+
 The local Parakeet adapter now processes long dictations in chunks near quiet
 pauses. This addresses the disproportionate increase in inference time when
 the previous adapter sent an entire long capture to one native stream.

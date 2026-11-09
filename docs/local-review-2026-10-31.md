@@ -1,5 +1,8 @@
 # Local dictation and Keep ready review
 
+Historical review of the v3 dual-backend implementation. The current local
+model is Parakeet Ultra on the native GGUF CPU/GPU runtime.
+
 The release keeps engine choice automatic. Native GGUF/Vulkan accelerates
 Parakeet v3 on supported GPUs; CPU uses the existing ONNX model, selected after
 an apples-to-apples local measurement showed it was faster on this host.

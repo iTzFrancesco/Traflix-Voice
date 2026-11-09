@@ -1,30 +1,34 @@
 # Native Parakeet transcription
 
-Desktop local dictation selects the engine automatically. A usable GPU enables
-the same `transcribe.cpp` revision and Parakeet TDT 0.6B v3 Q8_0 artifact as
-Hex 3.0.0. CPU dictation retains the faster existing Sherpa-ONNX backend. The standalone Rust helper retains
-model weights, warms up inference before reporting readiness, chooses its
-backend automatically, and frees inference scratch after each segment.
-Windows x64 builds enable Vulkan. Other builds use the available native
-backends, including CPU. This does not change the Android cloud recorder.
+Desktop local dictation uses one pinned Parakeet Ultra Q8_0 artifact through
+`transcribe.cpp` on both CPU and GPU. The standalone Rust helper retains model
+weights, warms up inference before reporting readiness, chooses its backend
+automatically, and frees inference scratch after each segment. Windows x64
+builds enable Vulkan; other builds use the available native backends, including
+CPU. Sherpa-ONNX remains packaged for the optional cloud silence gate, not for
+local speech recognition. This does not change the Android cloud recorder.
 
-Python owns the provider-independent Keep ready microphone, gain, conservative edge trimming,
-pause-aware chunks, result duration and external JSON IPC. Normal audio passes
+Python owns provider-independent microphone capture, keep-ready behavior, gain,
+conservative edge trimming, pause-aware chunks, result duration and external
+JSON IPC. Normal audio passes
 to the helper through a binary pipe and is never written to a temporary file.
 The helper has one serialized inference session at a time. Active dictations
 retain ownership when the UI unloads the model; the last owner terminates the
 helper, releasing both RAM and GPU allocations. A crashed/timed-out helper is
 terminated and can be recreated on the next dictation.
 
-The settings model ID remains `parakeet-tdt-0.6b-v3-int8` for compatibility.
-The actual new artifact is `parakeet-tdt-0.6b-v3-Q8_0.gguf`, 739,508,576 bytes.
-It is pinned to Hugging Face revision `85ac09ea12fc4b1112fa76810059364bc6adc9de`
-and verified with SHA-256 before loading. Existing ONNX installations download this artifact only when a GPU is available.
-Their CPU files are retained. A probe detects devices before loading weights.
-GPU initialization or inference failure automatically falls back to CPU ONNX;
-missing CPU files are downloaded when required. The original recording is retried
-and still produces one final result. The CPU artifact is pinned at Hugging Face
-revision `2bda32ec70b097a55adaa07d9a7173915b43cc78`.
+The settings model ID is `parakeet-ultra`. Existing v3 model settings migrate to
+this ID. The artifact is `parakeet-ultra-Q8_0.gguf`, 740,363,168 bytes, pinned
+to Hugging Face revision `a1539be1b849ea7463b88343e5277b373d0c4ea9` and checked
+against SHA-256
+`007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59` before
+loading. Long recordings are split below a conservative 28-second operating
+limit, including overlap and edge padding;
+natural pauses are preferred, and continuous speech uses overlapping chunks
+cut near a low-energy frame. Once the helper initializes and warms Ultra
+successfully, the app removes the known previous v3 model directory. A failed
+download, checksum or warmup leaves the old files untouched. GPU inference
+failure retries the same recording on CPU with this same GGUF artifact.
 
 ## Development and packaging
 
@@ -64,7 +68,10 @@ Windows hardware, clipboard, microphone, model migration and Vulkan execution
 still require an interactive desktop check. CPU-only Linux verification does
 not establish Windows speed or recognition accuracy on natural Italian speech.
 
-## Initial scalar baseline on 31 October 2026
+## Historical v3 baseline from 31 October 2026
+
+The figures in this section describe the previous v3 integration and do not
+measure Parakeet Ultra.
 
 The pinned helper compiled on Linux and passed its Rust framing test, formatting
 and Clippy. The Python suite passed with 257 tests, 170 subtests and 3 skips;
@@ -115,7 +122,10 @@ trim, pause boundaries and the 220 ms stop tail still apply to the captured clip
 The mode is default-on and has an explicit desktop settings opt-out. Android
 retains its existing on-demand microphone lifecycle.
 
-## Automatic CPU/GPU decision verified
+## Historical v3 CPU/GPU comparison
+
+The measurements below compare the previous v3 runtimes and do not predict
+Ultra's accuracy, latency or memory use.
 
 A follow-up comparison used the same 6.5925-second synthetic Italian input and
 production gain/edge processing. Three warm measurements gave a median of

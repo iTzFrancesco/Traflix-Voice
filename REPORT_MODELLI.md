@@ -1,5 +1,9 @@
 # Report modelli STT — Traflix Voice (settembre 2026)
 
+**Storico — superato dal passaggio a Parakeet Ultra.** Questo confronto
+documenta la decisione precedente; l'unico modello locale dell'app attuale è
+Parakeet Ultra via `transcribe.cpp`.
+
 Vincoli: i5-11600K, 16 GB RAM, RX 6500XT. Nota chiave: su Windows la 6500XT è
 inutilizzabile per l'inferenza (niente CUDA/ROCm) → il locale gira su **CPU**.
 Oggi: locale = Whisper via `pywhispercpp` (ggml da `ggerganov/whisper.cpp`);

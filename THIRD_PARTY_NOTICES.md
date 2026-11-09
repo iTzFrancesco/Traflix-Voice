@@ -31,10 +31,10 @@ SOFTWARE.
 The helper links transcribe.cpp (MIT), including its ggml dependencies:
 https://github.com/anomalyco/transcribe.cpp/tree/7045d1c0fe7cee37747b2792977421d435e75fca
 
-Parakeet TDT 0.6B v3 is an NVIDIA model licensed under CC-BY-4.0:
-https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
-The Q8_0 conversion is distributed by handy-computer:
-https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v3-gguf
+Parakeet Ultra is a Moondream post-trained model licensed under CC-BY-4.0:
+https://huggingface.co/moondream/parakeet-ultra
+The pinned Q8_0 conversion is distributed by handy-computer:
+https://huggingface.co/handy-computer/parakeet-ultra-gguf
 MIT License
 
 Copyright (c) 2026 The transcribe.cpp authors

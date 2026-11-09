@@ -43,15 +43,15 @@ Windows application.
 - **Global hotkey**: XBUTTON2 (forward mouse button) by default,
   click-to-toggle or hold-to-speak; a secondary shortcut, model, language,
   and microphone are configurable in the app.
-- **Two transcription providers**: local Parakeet TDT 0.6B v3 (private,
-  on-device, with automatic Vulkan/GGUF GPU acceleration or ONNX CPU inference) or Groq Cloud
+- **Two transcription providers**: local Parakeet Ultra (private and on-device,
+  with automatic Vulkan/GGUF GPU or native GGUF CPU inference) or Groq Cloud
   (`whisper-large-v3-turbo`, needs an API key in System settings).
   The Home tab always shows which engine produced the last dictation.
 - **Keep ready microphone** on desktop: cloud and local dictation share an open
   microphone with 450 ms of in-memory pre-roll. Idle audio is neither saved nor
   uploaded. Select **Chiudi quando inattivo** in System to release it between clips.
-- **Local model management** (AI tab): one-click Parakeet download
-  (~670 MB on CPU, ~740 MB on GPU), a resident model for rapid dictation, and
+- **Local model management** (AI tab): one-click Parakeet Ultra download
+  (~740 MB on CPU or GPU), a resident model for rapid dictation, and
   **Libera RAM** to unload it from memory without deleting files.
   Switching to Cloud unloads the model automatically.
 - **Delivery**: automatic paste (Ctrl+V) into the focused application, with
@@ -88,7 +88,7 @@ Android requires a signed APK for direct installation.
 
 ## Features
 
-- Local Parakeet TDT 0.6B v3 automatically uses `transcribe.cpp` GGUF Q8 on an available GPU, or `sherpa-onnx` INT8 ONNX on CPU. Model downloads and GPU failure recovery follow that choice; no engine selection is required.
+- Local Parakeet Ultra uses the same pinned `transcribe.cpp` GGUF Q8 model on CPU and GPU, with automatic device selection and CPU retry if GPU inference fails.
 - Optional Groq transcription using `whisper-large-v3-turbo`.
 - Configurable global hotkeys, click-to-toggle, and hold-to-speak recording.
 - Automatic paste into the focused application, keeping the transcript on the
@@ -104,7 +104,7 @@ Android requires a signed APK for direct installation.
 ### Windows desktop
 
 1. Start the application and select a microphone in **System**.
-2. In **AI**, download the Parakeet TDT 0.6B v3 model for local dictation,
+2. In **AI**, download Parakeet Ultra for local dictation,
    or enable Groq Cloud mode (paste your API key in **System** first).
    Add the names and technical terms you dictate most often to the personal
    vocabulary in **AI** so cloud transcription spells them consistently.
@@ -150,7 +150,7 @@ python -m pip install -r src-tauri/requirements.txt
 npm run tauri dev
 ```
 
-On first use, open **AI** and download Parakeet TDT 0.6B v3 (~670 MB ONNX for CPU or ~740 MB GGUF for GPU). Windows packages detect the available hardware and select the engine automatically. Existing CPU installations retain their ONNX model; a usable GPU enables the pinned GGUF download. GPU failures retry the same recording on CPU. RAM and GPU memory depend on the backend and clip length. Use **Libera RAM** to unload the model without deleting files. See [native transcription](docs/native-transcription.md) for build instructions and memory measurement.
+On first use, open **AI** and download Parakeet Ultra (~740 MB GGUF). Windows packages use the same pinned model on CPU and GPU, selecting the available backend automatically. If GPU inference fails, the same recording is retried on CPU. Once Ultra passes checksum verification and a real helper warmup, the app removes its previous Parakeet v3 model directory. RAM and GPU memory depend on the backend and clip length. Use **Libera RAM** to unload the model without deleting it. See [native transcription](docs/native-transcription.md) for build instructions and memory measurement.
 
 ### Android preview
 
@@ -237,7 +237,7 @@ silently alter the other runtime.
 
 ## Third-party components
 
-Traflix Voice uses Parakeet (NVIDIA, CC-BY-4.0) via `transcribe.cpp` (and the legacy `sherpa-onnx` fallback), Hugging Face model
+Traflix Voice uses Parakeet Ultra (Moondream, CC-BY-4.0) via `transcribe.cpp`, plus Sherpa-ONNX for the optional cloud silence gate. Hugging Face model
 hosting, and the optional Groq API. These components remain subject to their
 own licenses and terms. Traflix Voice is independent and is not affiliated
 with OpenAI, Groq, or Hugging Face.
