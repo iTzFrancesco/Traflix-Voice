@@ -59,15 +59,19 @@ class HistoryEntryArgs {
 class LocalAudioFileArgs {
   var uri: String? = null
   var name: String? = null
+  var mimeType: String? = null
 }
 
 @TauriPlugin
 class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
   private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-  private var localAudioJob: Job? = null
+  private var audioTranscriptionJob: Job? = null
+  private var groqAudioEndpoint: GroqAudioTranscriptionEndpoint? = null
 
   override fun onDestroy(activity: AppCompatActivity) {
     audioScope.cancel()
+    groqAudioEndpoint?.shutdown()
+    groqAudioEndpoint = null
     super.onDestroy(activity)
   }
 
@@ -123,23 +127,26 @@ class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Command
-  fun transcribeLocalAudio(invoke: Invoke) {
+  fun transcribeAudioFile(invoke: Invoke) {
     val args = invoke.parseArgs(LocalAudioFileArgs::class.java)
     val uri = runCatching { Uri.parse(args.uri?.trim().orEmpty()) }.getOrNull()
     if (uri == null || uri.scheme != "content") {
       invoke.reject("Seleziona un file audio valido dal dispositivo")
       return
     }
-    if (localAudioJob?.isActive == true) {
+    if (audioTranscriptionJob?.isActive == true) {
       invoke.reject("È già in corso una trascrizione audio")
       return
     }
 
-    localAudioJob = audioScope.launch {
+    audioTranscriptionJob = audioScope.launch {
       try {
-        val transcript = OnDeviceAudioTranscriber(activity.applicationContext).transcribe(
+        val transcript = (groqAudioEndpoint ?: GroqAudioTranscriptionEndpoint(activity.applicationContext)
+          .also { groqAudioEndpoint = it }).transcribe(
           uri = uri,
           displayName = args.name?.takeIf { it.isNotBlank() } ?: "Audio selezionato",
+          mimeType = args.mimeType.orEmpty(),
+          language = VoiceSettingsStore(activity.applicationContext).transcriptionLanguage(),
         )
         val savedInHistory = try {
           withContext(Dispatchers.IO) {
@@ -147,25 +154,36 @@ class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
           }
           true
         } catch (error: Exception) {
-          Log.e(TAG, "save local audio transcript failed", error)
+          Log.e(TAG, "save Groq audio transcript failed", error)
           false
         }
         invoke.resolveObject(
           mapOf(
             "text" to transcript.text,
-            "language" to OnDeviceAudioTranscriber.languageName(transcript.locale.language),
+            "language" to languageName(transcript.language),
             "savedInHistory" to savedInHistory,
           ),
         )
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
-        Log.e(TAG, "local audio transcription failed", error)
-        invoke.reject(OnDeviceAudioTranscriber.friendlyError(error))
+        Log.e(TAG, "Groq audio transcription failed", error)
+        invoke.reject(error.message ?: "Trascrizione Groq Cloud non riuscita")
       } finally {
-        localAudioJob = null
+        audioTranscriptionJob = null
       }
     }
+  }
+
+  private fun languageName(language: String): String = when (language) {
+    "it" -> "Italiano"
+    "en" -> "English"
+    "fr" -> "Français"
+    "de" -> "Deutsch"
+    "es" -> "Español"
+    "pt" -> "Português"
+    "auto" -> "Rilevamento automatico"
+    else -> language.uppercase()
   }
 
   @Command

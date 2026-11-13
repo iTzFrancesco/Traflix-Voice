@@ -33,11 +33,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Receives one shared audio file and transcribes it without uploading the recording. */
+/** Receives one shared audio file and displays its Groq transcript in a floating panel. */
 class SharedAudioTranscriptionActivity : AppCompatActivity() {
   private var transcriptionJob: Job? = null
+  private var groqAudioEndpoint: GroqAudioTranscriptionEndpoint? = null
   private var sharedUri: Uri? = null
   private var sharedName = "Audio condiviso"
+  private var sharedMimeType = ""
   private var finalTranscript = ""
   private var activeOperationId: UUID? = null
 
@@ -72,6 +74,8 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
 
   override fun onDestroy() {
     transcriptionJob?.cancel()
+    groqAudioEndpoint?.shutdown()
+    groqAudioEndpoint = null
     super.onDestroy()
   }
 
@@ -111,7 +115,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
       radius = dp(23).toFloat()
       cardElevation = dp(12).toFloat()
       strokeWidth = dp(1)
-      strokeColor = ColorStateList.valueOf(COLOR_STROKE)
+      setStrokeColor(ColorStateList.valueOf(COLOR_STROKE))
       setCardBackgroundColor(COLOR_CANVAS)
     }
     val content = LinearLayout(this).apply {
@@ -122,7 +126,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
       ViewGroup.LayoutParams.MATCH_PARENT,
       ViewGroup.LayoutParams.WRAP_CONTENT,
     ))
-    scroll.addView(card, ScrollView.LayoutParams(
+    scroll.addView(card, android.widget.FrameLayout.LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT,
       ViewGroup.LayoutParams.WRAP_CONTENT,
     ))
@@ -133,7 +137,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     content.addView(space(5))
     content.addView(text("Trascrizione", COLOR_INK, 25f, true))
     content.addView(space(5))
-    content.addView(text("Il testo apparirà qui, sul dispositivo.", COLOR_MUTED, 13f, false))
+    content.addView(text("Il testo apparirà qui appena Groq avrà elaborato il file.", COLOR_MUTED, 13f, false))
     content.addView(space(15))
     content.addView(createSourceCard())
     content.addView(space(9))
@@ -157,7 +161,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
       radius = dp(14).toFloat()
       cardElevation = 0f
       strokeWidth = dp(1)
-      strokeColor = ColorStateList.valueOf(COLOR_ACCENT_STROKE)
+      setStrokeColor(ColorStateList.valueOf(COLOR_ACCENT_STROKE))
       setCardBackgroundColor(COLOR_ACCENT_WASH)
     }
     mark.addView(text("T", COLOR_ACCENT, 22f, true).apply {
@@ -175,7 +179,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     title.addView(space(2))
     title.addView(label("AUDIO CONDIVISO", COLOR_QUIET, 9f, true))
     row.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    row.addView(pill("SUL DISPOSITIVO", COLOR_SIGNAL, COLOR_SIGNAL_WASH))
+    row.addView(pill("GROQ CLOUD", COLOR_ACCENT, COLOR_ACCENT_WASH))
     val closeButton = text("×", COLOR_MUTED, 23f, false).apply {
       gravity = Gravity.CENTER
       contentDescription = "Chiudi trascrizione"
@@ -245,7 +249,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
       setPadding(dp(11), 0, 0, 0)
     }
     statusTitle = text("Audio ricevuto", COLOR_INK, 15f, true)
-    statusDescription = text("Preparo il riconoscimento vocale sul telefono…", COLOR_MUTED, 12f, false)
+    statusDescription = text("Invio il file audio a Groq Cloud…", COLOR_MUTED, 12f, false)
     copy.addView(statusTitle)
     copy.addView(space(4))
     copy.addView(statusDescription)
@@ -275,10 +279,10 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     heading.addView(label("TESTO RICONOSCIUTO", COLOR_ACCENT, 10f, true))
     heading.addView(space(4))
-    transcriptMeta = text("Trascrizione locale", COLOR_QUIET, 11f, false)
+    transcriptMeta = text("Trascrizione Groq Cloud", COLOR_QUIET, 11f, false)
     heading.addView(transcriptMeta)
     header.addView(heading, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    header.addView(pill("LOCALE", COLOR_SIGNAL, COLOR_SIGNAL_WASH))
+    header.addView(pill("CLOUD", COLOR_ACCENT, COLOR_ACCENT_WASH))
     column.addView(header)
     column.addView(space(14))
     transcriptText = text("", COLOR_INK, 16f, false).apply {
@@ -333,9 +337,9 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
       gravity = Gravity.CENTER_VERTICAL
       setPadding(dp(4), dp(2), dp(4), dp(2))
     }
-    row.addView(text("✓", COLOR_SIGNAL, 15f, true))
+    row.addView(text("i", COLOR_ACCENT, 15f, true))
     row.addView(text(
-      "  Il file viene elaborato sul telefono e non è inviato a Groq.",
+      "  Il file audio viene inviato a Groq Cloud per la trascrizione.",
       COLOR_QUIET,
       11f,
       false,
@@ -421,6 +425,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     }
     sharedUri = uri
     sharedName = displayName(uri)
+    sharedMimeType = runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
     fileNameView.text = sharedName
     startTranscription(uri)
   }
@@ -443,7 +448,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     val extension = displayName(uri).substringAfterLast('.', "").lowercase(Locale.ROOT)
     val recognizedAudio = mimeType.startsWith("audio/") ||
       mimeType == "application/ogg" ||
-      extension in setOf("opus", "ogg", "mp3", "m4a", "wav", "flac", "aac", "amr", "3gp")
+      extension in setOf("opus", "ogg", "mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "flac", "webm")
     return uri.takeIf { recognizedAudio }
   }
 
@@ -464,30 +469,16 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     transcriptCard.visibility = View.GONE
     errorCard.visibility = View.GONE
     progressBar.visibility = View.VISIBLE
-    setStatus("Preparo la trascrizione", "Controllo il modello vocale disponibile sul telefono…", COLOR_ACCENT, "…")
+    setStatus("Invio audio a Groq", "La trascrizione apparirà qui appena pronta…", COLOR_ACCENT, "↑")
 
     transcriptionJob = lifecycleScope.launch {
       try {
-        val transcript = OnDeviceAudioTranscriber(applicationContext).transcribe(
+        val transcript = (groqAudioEndpoint ?: GroqAudioTranscriptionEndpoint(applicationContext)
+          .also { groqAudioEndpoint = it }).transcribe(
           uri = uri,
           displayName = sharedName,
-          onStatus = { title, description ->
-            runOnUiThreadSafe {
-              if (activeOperationId == operationId) {
-                setStatus(title, description, COLOR_ACCENT, if (title == "Primo utilizzo") "↓" else "◉")
-              }
-            }
-          },
-          onPartialText = { partialText ->
-            runOnUiThreadSafe {
-              if (activeOperationId == operationId && finalTranscript.isBlank()) {
-                transcriptText.text = partialText
-                transcriptMeta.text = "Sto riconoscendo le parole…"
-                actions.visibility = View.GONE
-                transcriptCard.visibility = View.VISIBLE
-              }
-            }
-          },
+          mimeType = sharedMimeType,
+          language = VoiceSettingsStore(applicationContext).transcriptionLanguage(),
         )
         if (activeOperationId != operationId) return@launch
         finalTranscript = transcript.text
@@ -499,19 +490,19 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
         } catch (_: Exception) {
           false
         }
-        showTranscript(finalTranscript, transcript.locale, savedInHistory)
+        showTranscript(finalTranscript, transcript.language, savedInHistory)
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
-        if (activeOperationId == operationId) showFailure(OnDeviceAudioTranscriber.friendlyError(error))
+        if (activeOperationId == operationId) showFailure(error.message ?: "Trascrizione Groq Cloud non riuscita")
       }
     }
   }
-  private fun showTranscript(value: String, locale: Locale, savedInHistory: Boolean) {
+  private fun showTranscript(value: String, language: String, savedInHistory: Boolean) {
     finalTranscript = value
     transcriptText.text = value
     val wordCount = value.split(Regex("\\s+")).count { it.isNotBlank() }
-    transcriptMeta.text = "${languageName(locale.language)} · $wordCount parole"
+    transcriptMeta.text = "${languageName(language)} · $wordCount parole"
     actions.visibility = View.VISIBLE
     transcriptCard.visibility = View.VISIBLE
     errorCard.visibility = View.GONE
@@ -530,7 +521,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     transcriptCard.visibility = View.GONE
     errorDescription.text = message
     errorCard.visibility = View.VISIBLE
-    setStatus("Non è andata a buon fine", "Nessuna trascrizione cloud è stata avviata.", COLOR_ERROR, "!")
+    setStatus("Non è andata a buon fine", "Controlla la connessione e la chiave Groq, poi riprova.", COLOR_ERROR, "!")
   }
 
   private fun languageName(language: String): String = when (language) {
@@ -540,6 +531,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     "de" -> "Deutsch"
     "es" -> "Español"
     "pt" -> "Português"
+    "auto" -> "Rilevamento automatico"
     else -> language.uppercase(Locale.ROOT)
   }
 
@@ -550,10 +542,6 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     statusMark.text = mark
     statusMark.setTextColor(accent)
     statusMark.background = circleDrawable(if (accent == COLOR_SIGNAL) COLOR_SIGNAL_WASH else if (accent == COLOR_ERROR) COLOR_ERROR_WASH else COLOR_ACCENT_WASH)
-  }
-
-  private fun runOnUiThreadSafe(action: () -> Unit) {
-    if (!isFinishing && !isDestroyed) runOnUiThread(action)
   }
 
   private fun copyTranscript() {

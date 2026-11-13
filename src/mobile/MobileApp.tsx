@@ -351,16 +351,17 @@ export default function MobileApp() {
     return { uri: result.uri, name: result.name, mimeType: result.mimeType ?? "" };
   }, [invoke]);
 
-  const transcribeLocalAudio = useCallback(async (file: MobileAudioFile): Promise<MobileAudioTranscript> => {
-    const result = await invoke("plugin:voice-runtime|transcribeLocalAudio", {
+  const transcribeAudioFile = useCallback(async (file: MobileAudioFile): Promise<MobileAudioTranscript> => {
+    const result = await invoke("plugin:voice-runtime|transcribeAudioFile", {
       uri: file.uri,
       name: file.name,
+      mimeType: file.mimeType,
     }) as { text?: string; language?: string; savedInHistory?: boolean } | undefined;
-    if (!result?.text) throw new Error("La trascrizione locale non ha restituito testo.");
+    if (!result?.text) throw new Error("La trascrizione Groq Cloud non ha restituito testo.");
     await loadHistory();
     return {
       text: result.text,
-      language: result.language || "Lingua locale",
+      language: result.language || "Lingua non specificata",
       savedInHistory: result.savedInHistory === true,
     };
   }, [invoke, loadHistory]);
@@ -723,7 +724,7 @@ export default function MobileApp() {
       mobileUpdateError={mobileUpdateError}
       onInstallMobileUpdate={installMobileUpdate}
       onPickLocalAudio={pickLocalAudio}
-      onTranscribeLocalAudio={transcribeLocalAudio}
+      onTranscribeAudioFile={transcribeAudioFile}
       onReleaseLocalAudio={releaseLocalAudio}
     />
   );

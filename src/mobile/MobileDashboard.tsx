@@ -63,7 +63,7 @@ interface MobileDashboardProps {
   mobileUpdateError: string;
   onInstallMobileUpdate: () => Promise<void>;
   onPickLocalAudio: () => Promise<MobileAudioFile | null>;
-  onTranscribeLocalAudio: (file: MobileAudioFile) => Promise<MobileAudioTranscript>;
+  onTranscribeAudioFile: (file: MobileAudioFile) => Promise<MobileAudioTranscript>;
   onReleaseLocalAudio: (uri: string) => Promise<void>;
 }
 
@@ -278,7 +278,7 @@ export default function MobileDashboard({
   mobileUpdateError,
   onInstallMobileUpdate,
   onPickLocalAudio,
-  onTranscribeLocalAudio,
+  onTranscribeAudioFile,
   onReleaseLocalAudio,
 }: MobileDashboardProps) {
   const [destination, setDestination] = useState<MobileDestination>("overview");
@@ -407,7 +407,7 @@ export default function MobileDashboard({
     setLocalAudioTranscript(null);
     setLocalAudioCopied(false);
     try {
-      const transcript = await onTranscribeLocalAudio(localAudioFile);
+      const transcript = await onTranscribeAudioFile(localAudioFile);
       setLocalAudioTranscript(transcript);
       setLocalAudioState("done");
     } catch (error) {
@@ -696,18 +696,18 @@ export default function MobileDashboard({
     <div className="mobile-page mobile-page-enter">
       <div className="mobile-page-heading">
         <div>
-          <span className="mobile-eyebrow">Elaborazione sul telefono</span>
+          <span className="mobile-eyebrow">Trascrizione Groq Cloud</span>
           <h1 id="mobile-transcribe-title">Trascrivi audio</h1>
-          <p>Scegli un file e trasformalo in testo senza inviarlo a Groq.</p>
+          <p>Scegli un file e ricevi la trascrizione direttamente qui.</p>
         </div>
-        <span className="mobile-status-chip mobile-status-chip--local"><span className="mobile-status-dot" />Locale</span>
+        <span className="mobile-status-chip"><span className="mobile-status-dot" />Cloud</span>
       </div>
 
       <section className="mobile-card mobile-audio-upload-card" aria-labelledby="local-audio-title">
         <div className="mobile-audio-upload-mark"><MobileIcon name="audio" size={23} /></div>
         <span className="mobile-card-kicker">DA FILE A TESTO</span>
-        <h2 id="local-audio-title">Il tuo audio, in chiaro</h2>
-        <p className="mobile-card-description">Apri un file audio dal telefono. La trascrizione usa il riconoscimento locale di Google e segue la lingua scelta nelle impostazioni.</p>
+        <h2 id="local-audio-title">Il tuo audio, in testo</h2>
+        <p className="mobile-card-description">Apri un file audio dal telefono. Groq Cloud lo trascrive nella lingua scelta nelle impostazioni; serve una chiave Groq configurata nell’app.</p>
 
         {localAudioFile ? (
           <div className="mobile-audio-selected" aria-live="polite">
@@ -744,22 +744,22 @@ export default function MobileDashboard({
           >
             {localAudioState === "transcribing" ? (
               <><span className="mobile-audio-spinner" aria-hidden="true" />Trascrizione in corso…</>
-            ) : localAudioState === "error" ? "Riprova trascrizione" : "Trascrivi sul dispositivo"}
+            ) : localAudioState === "error" ? "Riprova trascrizione" : "Trascrivi con Groq"}
           </button>
         )}
 
         {localAudioState === "transcribing" && (
           <div className="mobile-audio-progress" role="status" aria-live="polite">
             <span className="mobile-audio-progress-track"><span /></span>
-            <p>Preparo il modello locale e riconosco le parole. Al primo utilizzo potrebbe servire una connessione per scaricare il modello.</p>
+            <p>Invio il file a Groq Cloud e preparo il testo. La durata dipende dalla connessione e dalla dimensione del file.</p>
           </div>
         )}
         {localAudioError && <p className="mobile-settings-error" role="alert">{localAudioError}</p>}
       </section>
 
       <section className="mobile-card mobile-audio-engine-card">
-        <span className="mobile-icon-tile mobile-icon-tile--signal"><MobileIcon name="shield" size={19} /></span>
-        <div><span className="mobile-eyebrow">Riconoscimento locale</span><strong>Il file rimane sul dispositivo</strong><p>La tastiera continua a usare il suo percorso Groq originale. Questa pagina è indipendente.</p></div>
+        <span className="mobile-icon-tile mobile-icon-tile--signal"><MobileIcon name="cloud" size={19} /></span>
+        <div><span className="mobile-eyebrow">Motore cloud</span><strong>Stesso servizio Groq dell’app</strong><p>La tastiera e i file audio usano il client Groq già configurato in Traflix Voice.</p></div>
       </section>
 
       {localAudioTranscript && (
@@ -783,7 +783,7 @@ export default function MobileDashboard({
 
       <section className="mobile-privacy-note">
         <MobileIcon name="shield" size={18} />
-        <p><strong>Audio privato.</strong> Il file viene letto dal selettore Android e trascritto sul dispositivo; il testo può essere eliminato dalla cronologia.</p>
+        <p><strong>Nota sulla privacy.</strong> Il file audio viene inviato a Groq Cloud tramite connessione protetta per generare la trascrizione. Il testo viene salvato nella cronologia locale.</p>
       </section>
     </div>
   );
@@ -884,7 +884,7 @@ export default function MobileDashboard({
           <img src="/assets/logo.png" alt="" />
           <div><strong>Traflix Voice</strong><span>Mobile Hub <small>v{appVersion || "…"}</small></span></div>
         </div>
-        <span className={`mobile-cloud-pill ${destination === "transcribe" ? "mobile-cloud-pill--local" : ""}`}><span />{destination === "transcribe" ? "Sul dispositivo" : "Groq Cloud"}</span>
+        <span className="mobile-cloud-pill"><span />Groq Cloud</span>
       </header>
 
       <main

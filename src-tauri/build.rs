@@ -26,7 +26,7 @@ fn main() {
     // invocation before the native plugin can handle it.
     const VOICE_RUNTIME_COMMANDS: &[&str] = &[
         "pickLocalAudioFile",
-        "transcribeLocalAudio",
+        "transcribeAudioFile",
         "releaseLocalAudioFile",
         "openAndroidSettings",
         "setRecordingMode",
