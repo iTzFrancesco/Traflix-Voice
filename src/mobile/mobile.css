@@ -39,6 +39,7 @@
 .mobile-brand span { color: var(--quiet); font-size: .65rem; letter-spacing: .02em; }
 .mobile-brand small { color: var(--accent); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .62rem; white-space: nowrap; }
 .mobile-cloud-pill { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: 30px; padding: 0 10px; border: 1px solid rgba(85,216,155,.2); border-radius: 999px; color: var(--signal); background: rgba(85,216,155,.075); font-size: .64rem; font-weight: 800; letter-spacing: .035em; }
+.mobile-cloud-pill--local { border-color: rgba(255,157,36,.22); color: var(--accent); background: rgba(255,157,36,.075); }
 .mobile-cloud-pill span, .mobile-connection-badge span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; }
 .mobile-main { flex: 1 1 auto; min-height: 0; height: auto; overflow-y: auto; padding: 7px calc(16px + env(safe-area-inset-right)) calc(94px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); overscroll-behavior: contain; }
 .mobile-content { width: 100%; max-width: 540px; margin: 0 auto; }
@@ -123,6 +124,38 @@ select.mobile-field { appearance: none; background-image: linear-gradient(45deg,
 .mobile-search-field input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 16px; }
 .mobile-search-field input::placeholder { color: var(--quiet); }
 .mobile-danger-note { margin: -2px 2px 11px; color: #ff969b; font-size: .67rem; }
+.mobile-status-chip--local { color: var(--signal); }
+.mobile-audio-upload-card > h2 { margin: 8px 0 0; color: var(--ink); font-family: "Outfit", "Satoshi", sans-serif; font-size: 1.22rem; letter-spacing: -.035em; }
+.mobile-audio-upload-mark { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 17px; border: 1px solid rgba(255,157,36,.2); border-radius: 15px; color: var(--accent); background: rgba(255,157,36,.09); }
+.mobile-audio-empty { display: grid; justify-items: center; gap: 5px; margin-top: 17px; padding: 21px 12px; border: 1px dashed rgba(255,255,255,.13); border-radius: 14px; color: var(--quiet); background: rgba(0,0,0,.12); text-align: center; }
+.mobile-audio-empty > span { color: var(--accent); font-size: 1.3rem; line-height: 1; }
+.mobile-audio-empty strong { margin-top: 3px; color: var(--muted); font-size: .74rem; }
+.mobile-audio-empty small { color: var(--quiet); font-size: .63rem; }
+.mobile-audio-selected { display: flex; align-items: center; gap: 10px; min-width: 0; margin-top: 15px; padding: 11px; border: 1px solid rgba(85,216,155,.19); border-radius: 13px; background: rgba(85,216,155,.055); }
+.mobile-audio-selected-icon { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; border-radius: 10px; color: var(--signal); background: rgba(85,216,155,.1); }
+.mobile-audio-selected-copy { display: grid; flex: 1 1 auto; min-width: 0; gap: 4px; }
+.mobile-audio-selected-copy strong { overflow: hidden; color: var(--ink); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-audio-selected-copy small { overflow: hidden; color: var(--quiet); font-size: .61rem; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-audio-clear { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; border: 1px solid rgba(255,255,255,.1); border-radius: 9px; color: var(--quiet); background: rgba(255,255,255,.035); cursor: pointer; font-size: 1.2rem; }
+.mobile-audio-clear:hover { border-color: rgba(255,98,107,.4); color: #ff969b; }
+.mobile-secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 46px; margin-top: 11px; padding: 0 13px; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; color: var(--ink); background: rgba(255,255,255,.045); cursor: pointer; font-size: .73rem; font-weight: 800; transition: border-color .18s ease, background .18s ease, color .18s ease; }
+.mobile-secondary-button:hover { border-color: rgba(255,157,36,.35); background: rgba(255,157,36,.07); }
+.mobile-secondary-button:disabled { cursor: wait; opacity: .65; }
+.mobile-audio-upload-card .mobile-primary-button { margin-top: 9px; }
+.mobile-audio-spinner { width: 15px; height: 15px; border: 2px solid rgba(23,18,12,.22); border-top-color: currentColor; border-radius: 50%; animation: spin 1s linear infinite; }
+.mobile-audio-progress { margin-top: 14px; }
+.mobile-audio-progress-track { display: block; overflow: hidden; height: 3px; border-radius: 99px; background: rgba(255,157,36,.14); }
+.mobile-audio-progress-track span { display: block; width: 36%; height: 100%; border-radius: inherit; background: var(--accent); animation: audioProgress 1.3s ease-in-out infinite alternate; }
+.mobile-audio-progress p { margin: 8px 0 0; color: var(--quiet); font-size: .65rem; line-height: 1.45; }
+.mobile-audio-engine-card { display: flex; align-items: flex-start; gap: 12px; }
+.mobile-audio-engine-card > div { min-width: 0; }
+.mobile-audio-engine-card strong { display: block; margin-top: 4px; color: var(--ink); font-size: .76rem; }
+.mobile-audio-engine-card p { margin: 5px 0 0; color: var(--quiet); font-size: .65rem; line-height: 1.45; }
+.mobile-transcript-card .mobile-section-heading h2 { margin: 4px 0 0; color: var(--ink); font-family: "Outfit", "Satoshi", sans-serif; font-size: 1.05rem; }
+.mobile-transcript-text { margin: 16px 0; color: #e1ded7; font-size: .82rem; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.mobile-transcript-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,.07); color: var(--quiet); font-size: .62rem; }
+.mobile-copy-button { width: auto; min-height: 37px; margin: 0; padding: 0 11px; font-size: .65rem; }
+@keyframes audioProgress { from { transform: translateX(-20%); } to { transform: translateX(185%); } }
 .mobile-history-list { display: grid; gap: 9px; }
 .mobile-history-card { overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(145deg, rgba(32,33,30,.9), rgba(24,25,23,.86)); box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
 .mobile-history-entry { width: 100%; padding: 14px; border: 1px solid var(--line); border-radius: 15px; color: var(--ink); background: linear-gradient(145deg, rgba(32,33,30,.9), rgba(24,25,23,.86)); text-align: left; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
@@ -138,7 +171,7 @@ select.mobile-field { appearance: none; background-image: linear-gradient(45deg,
 .mobile-empty-state { display: grid; justify-items: center; padding: 38px 19px; border: 1px dashed rgba(255,255,255,.13); border-radius: 16px; text-align: center; }
 .mobile-empty-state strong { margin-top: 13px; color: var(--ink); font-size: .8rem; }
 .mobile-empty-state p { margin: 6px 0 0; color: var(--quiet); font-size: .7rem; }
-.mobile-bottom-nav { position: fixed; z-index: 20; right: calc(12px + env(safe-area-inset-right)); bottom: calc(9px + env(safe-area-inset-bottom)); left: calc(12px + env(safe-area-inset-left)); display: grid; grid-template-columns: repeat(3, 1fr); height: 68px; padding: 5px; border: 1px solid rgba(255,255,255,.11); border-radius: 19px; background: rgba(23,24,22,.96); box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 22px rgba(4,5,5,.34); }
+.mobile-bottom-nav { position: fixed; z-index: 20; right: calc(12px + env(safe-area-inset-right)); bottom: calc(9px + env(safe-area-inset-bottom)); left: calc(12px + env(safe-area-inset-left)); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); height: 68px; padding: 5px; border: 1px solid rgba(255,255,255,.11); border-radius: 19px; background: rgba(23,24,22,.96); box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 22px rgba(4,5,5,.34); }
 .mobile-bottom-nav button { display: grid; place-items: center; align-content: center; gap: 4px; min-width: 48px; min-height: 48px; border: 0; border-radius: 14px; color: var(--quiet); background: transparent; cursor: pointer; font-size: .62rem; font-weight: 750; }
 .mobile-bottom-nav button:hover { color: var(--muted); background: rgba(255,255,255,.045); }
 .mobile-bottom-nav button.is-active { color: var(--accent); background: rgba(255,157,36,.12); box-shadow: inset 0 1px 0 rgba(255,255,255,.045); }

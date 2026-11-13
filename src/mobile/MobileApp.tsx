@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import MobileDashboard, {
+  type MobileAudioFile,
+  type MobileAudioTranscript,
   type MobileUpdateInfo,
   type MobileUpdateState,
   type MobileSettingsScreen,
@@ -334,6 +336,42 @@ export default function MobileApp() {
     },
     [invoke, loadHistory],
   );
+
+  const pickLocalAudio = useCallback(async (): Promise<MobileAudioFile | null> => {
+    const result = await invoke("plugin:voice-runtime|pickLocalAudioFile") as {
+      cancelled?: boolean;
+      uri?: string;
+      name?: string;
+      mimeType?: string;
+    } | undefined;
+    if (result?.cancelled) return null;
+    if (!result?.uri || !result.name) {
+      throw new Error("Il selettore Android non ha restituito un file audio valido.");
+    }
+    return { uri: result.uri, name: result.name, mimeType: result.mimeType ?? "" };
+  }, [invoke]);
+
+  const transcribeLocalAudio = useCallback(async (file: MobileAudioFile): Promise<MobileAudioTranscript> => {
+    const result = await invoke("plugin:voice-runtime|transcribeLocalAudio", {
+      uri: file.uri,
+      name: file.name,
+    }) as { text?: string; language?: string; savedInHistory?: boolean } | undefined;
+    if (!result?.text) throw new Error("La trascrizione locale non ha restituito testo.");
+    await loadHistory();
+    return {
+      text: result.text,
+      language: result.language || "Lingua locale",
+      savedInHistory: result.savedInHistory === true,
+    };
+  }, [invoke, loadHistory]);
+
+  const releaseLocalAudio = useCallback(async (uri: string): Promise<void> => {
+    try {
+      await invoke("plugin:voice-runtime|releaseLocalAudioFile", { uri });
+    } catch (error) {
+      console.debug("[mobile-audio] permission cleanup skipped:", error);
+    }
+  }, [invoke]);
 
   const handleSettingChange = useCallback(
     async (key: string, value: string | boolean) => {
@@ -684,6 +722,9 @@ export default function MobileApp() {
       mobileUpdateState={mobileUpdateState}
       mobileUpdateError={mobileUpdateError}
       onInstallMobileUpdate={installMobileUpdate}
+      onPickLocalAudio={pickLocalAudio}
+      onTranscribeLocalAudio={transcribeLocalAudio}
+      onReleaseLocalAudio={releaseLocalAudio}
     />
   );
 }

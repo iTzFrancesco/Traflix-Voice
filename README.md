@@ -69,15 +69,16 @@ The Android port is maintained on the
 [`main`](https://github.com/iTzFrancesco/Traflix-Voice/tree/main)
 branch. It provides a native Traflix Voice keyboard with hold-to-speak or
 toggle recording and Groq Cloud transcription, encrypted API-key persistence,
-and a small overview/settings/history Hub. It also registers as an audio share
-target: choose **Condividi** on an audio file in WhatsApp or another app, then
-select **Traflix Voice · Trascrivi audio**. Transcription starts automatically
-and runs on-device with Google ML Kit Speech Recognition; the result appears in
-a dedicated screen with copy/share actions and is saved in local history. The
-screen tries Basic mode first, which uses the traditional on-device speech
-recognizer, then Advanced mode if Basic is unavailable and the device supports
-it. This share route never falls back to Groq and does not intercept taps inside
-WhatsApp; Android requires the audio to be shared with Traflix Voice. The Hub
+and an overview/settings/history Hub. A **Trascrivi** page also lets users choose
+an audio file with Android's system picker and get a local transcript in the
+same mobile interface. The app registers as an audio share target too: choose
+**Condividi** on an audio file in WhatsApp or another app, then select
+**Traflix Voice · Trascrivi audio**. Both routes use the shared on-device Google
+ML Kit Speech Recognition service; the result is saved in local history. It
+tries Basic mode first, then Advanced mode if Basic is unavailable and the
+device supports it. Neither local route falls back to Groq, and neither changes
+the original Groq-powered keyboard path. Android still requires a voice note to
+be shared from WhatsApp; the app cannot intercept taps inside WhatsApp. The Hub
 checks GitHub for newer Android
 releases after startup and only considers the `android-vX.Y.Z` tag family and
 the signed `app-universal-release.apk` asset; Windows releases are ignored. A
@@ -142,6 +143,9 @@ Android requires a signed APK for direct installation.
    and select **Traflix Voice · Trascrivi audio**. The result opens in a separate
    screen; with **Rilevamento automatico** selected, this local route uses the
    phone's language because the model needs a fixed locale.
+7. To choose a file manually, open **Trascrivi** in the Hub, select an audio
+   file, then tap **Trascrivi sul dispositivo**. The transcript appears there
+   and is also added to local history.
 
 Windows 10 and Windows 11 are the supported desktop platforms. Android 13+
 is the target for the private mobile preview. macOS and Linux are not

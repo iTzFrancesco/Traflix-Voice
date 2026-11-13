@@ -59,31 +59,35 @@ the screen is off or the device is locked.
 ## Mobile product decisions
 
 The Android Hub is intentionally smaller than the desktop dashboard. It has
-three primary areas: overview, essential settings, and local history. It does
-not expose a provider selector. Keyboard dictation continues to use Groq Cloud;
-a separate incoming-audio share target uses on-device ML Kit Speech Recognition
-and never uploads the shared file or falls back to Groq. A Traflix gateway may
-own authentication and quotas for keyboard dictation.
+four primary areas: overview, manual local-audio transcription, essential
+settings, and local history. It does not expose a provider selector. Keyboard
+dictation continues to use Groq Cloud; both audio-file entry points use
+on-device ML Kit Speech Recognition and never upload the selected audio or fall
+back to Groq. A Traflix gateway may own authentication and quotas for keyboard
+dictation.
 
 ### Shared-audio transcription
 
 `SharedAudioTranscriptionActivity` accepts one audio URI through Android's
 `ACTION_SEND` or `ACTION_VIEW` intents. The user starts it from the source app's
 Share action; after choosing **Traflix Voice · Trascrivi audio**, recognition
-starts without another tap. Android does not expose a normal app's tap or
-playback stream inside WhatsApp, so the accessibility widget cannot silently
-intercept a voice-message tap or read audio still owned by WhatsApp.
+starts without another tap. The Hub also has a **Trascrivi** page that opens
+Android's `ACTION_OPEN_DOCUMENT` picker and passes the selected content URI to
+the same recognizer. Android does not expose a normal app's tap or playback
+stream inside WhatsApp, so the accessibility widget cannot silently intercept
+a voice-message tap or read audio still owned by WhatsApp.
 
-The activity uses Google ML Kit GenAI Speech Recognition on the device. It
-tries Basic mode first because it uses the traditional on-device recognizer,
-then tries Advanced mode if Basic is unavailable and the device supports it.
+Both entry points use `OnDeviceAudioTranscriber` and Google ML Kit GenAI Speech
+Recognition on the device. It tries Basic mode first because it uses the
+traditional on-device recognizer, then tries Advanced mode if Basic is
+unavailable and the device supports it.
 Basic file recognition requires Android API 31 or newer; the ML Kit artifact
 requires `minSdk` 26. The app accepts audio shared as a content URI and handles
 WhatsApp Ogg/Opus voice notes by copying the container to a temporary `.ogg`
 file in the app cache. That temporary copy is deleted after the recognition
-session. A successful transcript is shown in a selectable result card with
-copy/share actions and appended to the existing local history. It does not
-change the Groq keyboard path or add Groq as a fallback.
+session. A successful transcript is shown in the share screen or the Hub's
+result card and appended to the existing local history. It does not change the
+Groq keyboard path or add Groq as a fallback.
 
 Google currently documents the speech-recognition API as alpha and Italian in
 Basic mode as beta. Basic recognition is available on Android API 31+ devices;

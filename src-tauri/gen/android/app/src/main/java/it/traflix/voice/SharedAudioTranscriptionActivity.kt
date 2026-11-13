@@ -25,30 +25,16 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
-import com.google.mlkit.genai.common.DownloadStatus
-import com.google.mlkit.genai.common.FeatureStatus
-import com.google.mlkit.genai.common.audio.AudioSource
-import com.google.mlkit.genai.speechrecognition.SpeechRecognition
-import com.google.mlkit.genai.speechrecognition.SpeechRecognizer
-import com.google.mlkit.genai.speechrecognition.SpeechRecognizerOptions
-import com.google.mlkit.genai.speechrecognition.SpeechRecognizerResponse
-import com.google.mlkit.genai.speechrecognition.speechRecognizerOptions
-import com.google.mlkit.genai.speechrecognition.speechRecognizerRequest
-import java.io.File
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Receives one shared audio file and transcribes it without uploading the recording. */
 class SharedAudioTranscriptionActivity : AppCompatActivity() {
-  private var activeRecognizer: SpeechRecognizer? = null
   private var transcriptionJob: Job? = null
   private var sharedUri: Uri? = null
   private var sharedName = "Audio condiviso"
@@ -80,15 +66,11 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     setIntent(intent)
     activeOperationId = UUID.randomUUID()
     transcriptionJob?.cancel()
-    activeRecognizer?.close()
-    activeRecognizer = null
     handleSharedIntent(intent)
   }
 
   override fun onDestroy() {
     transcriptionJob?.cancel()
-    activeRecognizer?.close()
-    activeRecognizer = null
     super.onDestroy()
   }
 
@@ -449,61 +431,30 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     setStatus("Preparo la trascrizione", "Controllo il modello vocale disponibile sul telefono…", COLOR_ACCENT, "…")
 
     transcriptionJob = lifecycleScope.launch {
-      var temporaryFile: File? = null
-      var ownedRecognizer: SpeechRecognizer? = null
       try {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-          throw IllegalStateException("La trascrizione locale dei file richiede Android 12 o successivo.")
-        }
-        val locale = selectedLocale()
-        val recognizer = createReadyRecognizer(locale)
-        ownedRecognizer = recognizer
-        currentCoroutineContext().ensureActive()
-        if (activeOperationId != operationId) return@launch
-        activeRecognizer = recognizer
-        val settings = VoiceSettingsStore(this@SharedAudioTranscriptionActivity)
-        val languageDetail = if (settings.transcriptionLanguage() == "auto") {
-          "Lingua del telefono: ${languageName(locale.language)}."
-        } else {
-          "Lingua: ${languageName(locale.language)}."
-        }
-        setStatus("Analizzo l’audio", "Riconoscimento in corso · $languageDetail Il file resta sul dispositivo.", COLOR_ACCENT, "◉")
-
-        val sourceResult = createAudioSource(uri)
-        temporaryFile = sourceResult.second
-        val source = sourceResult.first
-        val responseText = try {
-          var partialText = ""
-          var completedText = ""
-          recognizer.startRecognition(speechRecognizerRequest { audioSource = source }).collect { response ->
-            when (response) {
-              is SpeechRecognizerResponse.PartialTextResponse -> partialText = response.text
-              is SpeechRecognizerResponse.FinalTextResponse -> completedText = response.text
-              is SpeechRecognizerResponse.ErrorResponse -> throw response.e
-              else -> Unit
-            }
-            if (partialText.isNotBlank() && completedText.isBlank()) {
-              runOnUiThreadSafe {
-                if (activeOperationId == operationId && finalTranscript.isBlank()) {
-                  transcriptText.text = partialText
-                  transcriptMeta.text = "Sto riconoscendo le parole…"
-                  actions.visibility = View.GONE
-                  transcriptCard.visibility = View.VISIBLE
-                }
+        val transcript = OnDeviceAudioTranscriber(applicationContext).transcribe(
+          uri = uri,
+          displayName = sharedName,
+          onStatus = { title, description ->
+            runOnUiThreadSafe {
+              if (activeOperationId == operationId) {
+                setStatus(title, description, COLOR_ACCENT, if (title == "Primo utilizzo") "↓" else "◉")
               }
             }
-          }
-          completedText.ifBlank { partialText }
-        } finally {
-          source.close()
-        }
-        if (responseText.isBlank()) {
-          throw IllegalStateException("Nel file non ho trovato parole da trascrivere.")
-        }
-
-        currentCoroutineContext().ensureActive()
+          },
+          onPartialText = { partialText ->
+            runOnUiThreadSafe {
+              if (activeOperationId == operationId && finalTranscript.isBlank()) {
+                transcriptText.text = partialText
+                transcriptMeta.text = "Sto riconoscendo le parole…"
+                actions.visibility = View.GONE
+                transcriptCard.visibility = View.VISIBLE
+              }
+            }
+          },
+        )
         if (activeOperationId != operationId) return@launch
-        finalTranscript = responseText.trim()
+        finalTranscript = transcript.text
         val savedInHistory = try {
           withContext(Dispatchers.IO) {
             VoiceHistoryStore(applicationContext).append(finalTranscript)
@@ -512,132 +463,14 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
         } catch (_: Exception) {
           false
         }
-        showTranscript(finalTranscript, locale, savedInHistory)
+        showTranscript(finalTranscript, transcript.locale, savedInHistory)
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
-        if (activeOperationId == operationId) showFailure(friendlyError(error))
-      } finally {
-        temporaryFile?.delete()
-        ownedRecognizer?.close()
-        if (activeRecognizer === ownedRecognizer) activeRecognizer = null
+        if (activeOperationId == operationId) showFailure(OnDeviceAudioTranscriber.friendlyError(error))
       }
     }
   }
-
-  private suspend fun createReadyRecognizer(locale: Locale): SpeechRecognizer {
-    var lastFailure: Exception? = null
-    val modes = listOf(
-      SpeechRecognizerOptions.Mode.MODE_BASIC,
-      SpeechRecognizerOptions.Mode.MODE_ADVANCED,
-    )
-
-    for (mode in modes) {
-      val modeLocale = localeForMode(locale, mode)
-      val recognizer = try {
-        SpeechRecognition.getClient(
-          speechRecognizerOptions {
-            this.locale = modeLocale
-            preferredMode = mode
-          },
-        )
-      } catch (error: Exception) {
-        lastFailure = error
-        continue
-      }
-
-      try {
-        when (recognizer.checkStatus()) {
-          FeatureStatus.AVAILABLE -> return recognizer
-          FeatureStatus.DOWNLOADABLE, FeatureStatus.DOWNLOADING -> {
-            setStatus(
-              "Primo utilizzo",
-              "Scarico il modello vocale sul telefono. Potrebbe servire internet solo questa volta.",
-              COLOR_ACCENT,
-              "↓",
-            )
-            when (val download = recognizer.download().first {
-              it is DownloadStatus.DownloadCompleted || it is DownloadStatus.DownloadFailed
-            }) {
-              is DownloadStatus.DownloadCompleted -> return recognizer
-              is DownloadStatus.DownloadFailed -> throw download.e
-              else -> Unit
-            }
-          }
-          else -> Unit
-        }
-      } catch (error: CancellationException) {
-        recognizer.close()
-        throw error
-      } catch (error: Exception) {
-        lastFailure = error
-      }
-
-      recognizer.close()
-    }
-
-    throw lastFailure ?: IllegalStateException(
-      "Su questo telefono non è disponibile un modello vocale locale per la lingua selezionata.",
-    )
-  }
-
-  private suspend fun createAudioSource(uri: Uri): Pair<AudioSource, File?> {
-    val type = runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty().lowercase(Locale.ROOT)
-    val extension = sharedName.substringAfterLast('.', "").lowercase(Locale.ROOT)
-    if (extension != "opus" && !type.contains("opus")) {
-      return AudioSource.fromUri(this, uri) to null
-    }
-
-    // WhatsApp voice notes are Ogg/Opus. Giving the same local container an .ogg
-    // suffix lets the on-device decoder select its OGG reader on affected devices.
-    val normalized = File(cacheDir, "shared-audio-${UUID.randomUUID()}.ogg")
-    try {
-      withContext(Dispatchers.IO) {
-        val input = contentResolver.openInputStream(uri)
-          ?: throw IllegalStateException("WhatsApp non ha reso disponibile il file audio.")
-        input.use { source ->
-          normalized.outputStream().use { output -> source.copyTo(output) }
-        }
-      }
-      return AudioSource.fromFile(normalized) to normalized
-    } catch (error: Exception) {
-      normalized.delete()
-      throw error
-    }
-  }
-
-  private fun selectedLocale(): Locale {
-    val selected = VoiceSettingsStore(this).transcriptionLanguage()
-    val tag = when (selected) {
-      "it" -> "it-IT"
-      "en" -> "en-US"
-      "fr" -> "fr-FR"
-      "de" -> "de-DE"
-      "es" -> "es-ES"
-      "pt" -> "pt-PT"
-      "auto" -> localeTagForLanguage(Locale.getDefault().language) ?: "it-IT"
-      else -> "it-IT"
-    }
-    return Locale.forLanguageTag(tag)
-  }
-
-  private fun localeForMode(locale: Locale, mode: Int): Locale {
-    if (locale.language == "pt" && mode == SpeechRecognizerOptions.Mode.MODE_BASIC) {
-      return Locale.forLanguageTag("pt-BR")
-    }
-    return locale
-  }
-
-  private fun localeTagForLanguage(language: String): String? = when (language.lowercase(Locale.ROOT)) {
-    "it" -> "it-IT"
-    "en" -> "en-US"
-    "fr" -> "fr-FR"
-    "de" -> "de-DE"
-    "es" -> "es-ES"
-    "pt" -> "pt-PT"
-    else -> null
-  }
-
   private fun showTranscript(value: String, locale: Locale, savedInHistory: Boolean) {
     finalTranscript = value
     transcriptText.text = value
@@ -662,21 +495,6 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     errorDescription.text = message
     errorCard.visibility = View.VISIBLE
     setStatus("Non è andata a buon fine", "Nessuna trascrizione cloud è stata avviata.", COLOR_ERROR, "!")
-  }
-
-  private fun friendlyError(error: Exception): String {
-    val message = error.message.orEmpty().lowercase(Locale.ROOT)
-    return when {
-      message.contains("android 12") -> error.message.orEmpty()
-      message.contains("download") || message.contains("network") || message.contains("connect") ->
-        "Non riesco a preparare il modello sul telefono. Connettiti a internet per il primo utilizzo e riprova."
-      message.contains("format") || message.contains("codec") || message.contains("audio") ->
-        "Il formato del vocale non è leggibile dal modello locale. Prova a condividerlo di nuovo da WhatsApp."
-      message.contains("no speech") || message.contains("empty") ->
-        "Nel file non ho trovato parole da trascrivere."
-      else -> error.message?.takeIf { it.isNotBlank() }
-        ?: "Il modello locale non è disponibile per questa lingua su questo telefono."
-    }
   }
 
   private fun languageName(language: String): String = when (language) {
