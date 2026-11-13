@@ -348,7 +348,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
       radius = dp(19).toFloat()
       cardElevation = 0f
       strokeWidth = dp(1)
-      strokeColor = ColorStateList.valueOf(stroke)
+      setStrokeColor(ColorStateList.valueOf(stroke))
       setCardBackgroundColor(background)
       addView(content, ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
