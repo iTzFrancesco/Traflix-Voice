@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">"Traflix Voice"</string>
     <string name="main_activity_title">"Traflix Voice"</string>
+    <string name="share_audio_label">Traflix Voice · Trascrivi audio</string>
     <string name="ime_name">"Traflix Voice Keyboard"</string>
     <string name="ime_subtype_italian">"Italiano"</string>
     <string name="accessibility_service_name">"Widget Traflix Voice"</string>

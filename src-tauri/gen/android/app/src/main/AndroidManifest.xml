@@ -30,6 +30,34 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".SharedAudioTranscriptionActivity"
+            android:exported="true"
+            android:label="@string/share_audio_label"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.traflix_voice">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/ogg" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/ogg" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".VoiceInputMethodService"
             android:exported="true"

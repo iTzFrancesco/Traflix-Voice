@@ -60,9 +60,38 @@ the screen is off or the device is locked.
 
 The Android Hub is intentionally smaller than the desktop dashboard. It has
 three primary areas: overview, essential settings, and local history. It does
-not expose a provider selector: Groq Cloud is the only supported transcription
-provider for Android. A Traflix gateway may own authentication and quotas, but
-its transcription route remains Groq-only.
+not expose a provider selector. Keyboard dictation continues to use Groq Cloud;
+a separate incoming-audio share target uses on-device ML Kit Speech Recognition
+and never uploads the shared file or falls back to Groq. A Traflix gateway may
+own authentication and quotas for keyboard dictation.
+
+### Shared-audio transcription
+
+`SharedAudioTranscriptionActivity` accepts one audio URI through Android's
+`ACTION_SEND` or `ACTION_VIEW` intents. The user starts it from the source app's
+Share action; after choosing **Traflix Voice · Trascrivi audio**, recognition
+starts without another tap. Android does not expose a normal app's tap or
+playback stream inside WhatsApp, so the accessibility widget cannot silently
+intercept a voice-message tap or read audio still owned by WhatsApp.
+
+The activity uses Google ML Kit GenAI Speech Recognition on the device. It
+tries Basic mode first because it uses the traditional on-device recognizer,
+then tries Advanced mode if Basic is unavailable and the device supports it.
+Basic file recognition requires Android API 31 or newer; the ML Kit artifact
+requires `minSdk` 26. The app accepts audio shared as a content URI and handles
+WhatsApp Ogg/Opus voice notes by copying the container to a temporary `.ogg`
+file in the app cache. That temporary copy is deleted after the recognition
+session. A successful transcript is shown in a selectable result card with
+copy/share actions and appended to the existing local history. It does not
+change the Groq keyboard path or add Groq as a fallback.
+
+Google currently documents the speech-recognition API as alpha and Italian in
+Basic mode as beta. Basic recognition is available on Android API 31+ devices;
+Advanced mode is restricted to selected compatible devices. If a model needs
+preparation, the first use may need an internet connection; audio transcription
+itself stays on-device. The API requires a fixed locale rather than acoustic
+language detection; when the Hub setting is `auto`, this route uses the phone's
+language. See [Google's API documentation](https://developers.google.com/ml-kit/genai/speech-recognition/android).
 
 The settings area contains the recording mode (`Hold to Speak` or toggle),
 language and formatting defaults, privacy/history controls, account or cloud
@@ -457,8 +486,9 @@ stopped. Native Kotlin must own those lifecycle-sensitive operations.
 - Network, quota, permission, audio-focus, and service-kill failures are visible
   and recoverable without losing a user-approved retry result.
 - Temporary audio is deleted by default and no sensitive content appears in logs.
-- The Android Hub exposes only overview, essential settings, and local history;
-  Groq Cloud is the only transcription provider shown or supported.
+- The Android Hub exposes only overview, essential settings, and local history.
+  Keyboard dictation remains Groq-based; a separate shared-audio screen uses
+  on-device ML Kit and has no cloud fallback.
 - The Hub can open the relevant Android settings screens when a permission,
   keyboard activation, or optional widget needs repair.
 - The Hub displays the same session status and history whether or not its WebView
