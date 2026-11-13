@@ -40,21 +40,21 @@ do not consume a release number.
 
 Stay on the current Windows `major.minor` series by default. Increment only the
 patch, exactly once, for compatible fixes and features. The user's current
-instruction is to remain on **1.8**: published stable **1.8.1 → 1.8.2** for this
+instruction is to remain on **1.8**: published stable **1.8.3 → 1.8.4** for this
 release. Do not automatically advance to 1.9 or 1.10 because features were added.
 A minor or major series change requires an explicit user request. Even then,
 advance exactly one level from the published base; never skip an intermediate
 series because a version appeared in an internal commit or an aborted attempt.
 
 Android has its own published sequence. Keep its `versionCode` strictly higher
-than every published APK. A cancelled, unpublished attempt does not require an
-extra increment: the still-unpublished 0.1.34/code 1006032 can be used again after
-cancelling and removing its unreleased tag as described below.
+than every published APK. The latest published Android preview is `android-v0.1.35` with
+versionCode `1006033`; this release increments to `0.1.36` / `1006034`. A
+cancelled, unpublished attempt does not consume a release version.
 
 For a Windows version bump, run the repository script with the new version:
 
 ```powershell
-npm run bump -- 1.8.2
+npm run bump -- 1.8.4
 ```
 
 The script requires authenticated GitHub CLI access, reads the latest published
@@ -131,9 +131,9 @@ different times.
    versions with the versions in the configuration files:
 
    ```powershell
-   git tag -a v1.8.2 -m "Traflix Voice 1.8.2"
-   git tag -a android-v0.1.34 -m "Traflix Voice Android 0.1.34"
-   git push origin v1.8.2 android-v0.1.34
+   git tag -a v1.8.4 -m "Traflix Voice 1.8.4"
+   git tag -a android-v0.1.36 -m "Traflix Voice Android 0.1.36"
+   git push origin v1.8.4 android-v0.1.36
    ```
 
 7. Follow both tagged workflows in GitHub Actions. Resolve failures before
