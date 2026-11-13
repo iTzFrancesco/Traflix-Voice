@@ -58,6 +58,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     configureSystemBars()
     setContentView(createScreen())
+    configureFloatingWindow()
     handleSharedIntent(intent)
   }
 
@@ -75,8 +76,8 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
   }
 
   private fun configureSystemBars() {
-    window.statusBarColor = COLOR_CANVAS
-    window.navigationBarColor = COLOR_CANVAS
+    window.statusBarColor = android.graphics.Color.TRANSPARENT
+    window.navigationBarColor = android.graphics.Color.TRANSPARENT
     window.decorView.systemUiVisibility = 0
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       window.isStatusBarContrastEnforced = false
@@ -85,37 +86,63 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
   }
 
+  private fun configureFloatingWindow() {
+    val width = (resources.displayMetrics.widthPixels - dp(28)).coerceAtMost(dp(520))
+    window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
+    window.setGravity(Gravity.CENTER)
+    window.addFlags(
+      WindowManager.LayoutParams.FLAG_DIM_BEHIND or
+        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+    )
+    window.attributes = window.attributes.apply { dimAmount = 0.2f }
+    window.setBackgroundDrawableResource(android.R.color.transparent)
+    setFinishOnTouchOutside(false)
+  }
+
   private fun createScreen(): View {
     val scroll = ScrollView(this).apply {
       setFillViewport(true)
       isVerticalScrollBarEnabled = false
-      setBackgroundColor(COLOR_CANVAS)
+      clipToPadding = false
+      setPadding(dp(7), dp(7), dp(7), dp(7))
+      setBackgroundColor(android.graphics.Color.TRANSPARENT)
+    }
+    val card = MaterialCardView(this).apply {
+      radius = dp(23).toFloat()
+      cardElevation = dp(12).toFloat()
+      strokeWidth = dp(1)
+      strokeColor = ColorStateList.valueOf(COLOR_STROKE)
+      setCardBackgroundColor(COLOR_CANVAS)
     }
     val content = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      setPadding(dp(22), dp(22), dp(22), dp(28))
+      setPadding(dp(18), dp(17), dp(18), dp(18))
     }
-    scroll.addView(content, ScrollView.LayoutParams(
+    card.addView(content, android.widget.FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ))
+    scroll.addView(card, ScrollView.LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT,
       ViewGroup.LayoutParams.WRAP_CONTENT,
     ))
 
     content.addView(createBrandHeader())
-    content.addView(space(28))
+    content.addView(space(18))
     content.addView(label("AUDIO CONDIVISO", COLOR_ACCENT, 11f, true))
-    content.addView(space(7))
-    content.addView(text("La tua trascrizione", COLOR_INK, 30f, true))
-    content.addView(space(7))
-    content.addView(text("Dal vocale al testo, direttamente sul telefono.", COLOR_MUTED, 14f, false))
-    content.addView(space(20))
+    content.addView(space(5))
+    content.addView(text("Trascrizione", COLOR_INK, 25f, true))
+    content.addView(space(5))
+    content.addView(text("Il testo apparirà qui, sul dispositivo.", COLOR_MUTED, 13f, false))
+    content.addView(space(15))
     content.addView(createSourceCard())
-    content.addView(space(12))
+    content.addView(space(9))
     content.addView(createStatusCard())
-    content.addView(space(12))
+    content.addView(space(9))
     content.addView(createTranscriptCard())
-    content.addView(space(12))
+    content.addView(space(9))
     content.addView(createErrorCard())
-    content.addView(space(16))
+    content.addView(space(11))
     content.addView(createPrivacyNote())
 
     return scroll
@@ -146,9 +173,20 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     }
     title.addView(label("TRAFLIX", COLOR_INK, 12f, true))
     title.addView(space(2))
-    title.addView(label("VOICE · MOBILE", COLOR_QUIET, 10f, true))
+    title.addView(label("AUDIO CONDIVISO", COLOR_QUIET, 9f, true))
     row.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     row.addView(pill("SUL DISPOSITIVO", COLOR_SIGNAL, COLOR_SIGNAL_WASH))
+    val closeButton = text("×", COLOR_MUTED, 23f, false).apply {
+      gravity = Gravity.CENTER
+      contentDescription = "Chiudi trascrizione"
+      isClickable = true
+      isFocusable = true
+      background = roundedDrawable(COLOR_SURFACE_ALT, dp(99).toFloat())
+      setOnClickListener { finish() }
+    }
+    row.addView(closeButton, LinearLayout.LayoutParams(dp(38), dp(38)).apply {
+      marginStart = dp(8)
+    })
     return row
   }
 
@@ -422,8 +460,6 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     val operationId = UUID.randomUUID()
     activeOperationId = operationId
     transcriptionJob?.cancel()
-    activeRecognizer?.close()
-    activeRecognizer = null
     finalTranscript = ""
     transcriptCard.visibility = View.GONE
     errorCard.visibility = View.GONE

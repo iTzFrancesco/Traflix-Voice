@@ -71,11 +71,13 @@ dictation.
 `SharedAudioTranscriptionActivity` accepts one audio URI through Android's
 `ACTION_SEND` or `ACTION_VIEW` intents. The user starts it from the source app's
 Share action; after choosing **Traflix Voice · Trascrivi audio**, recognition
-starts without another tap. The Hub also has a **Trascrivi** page that opens
-Android's `ACTION_OPEN_DOCUMENT` picker and passes the selected content URI to
-the same recognizer. Android does not expose a normal app's tap or playback
-stream inside WhatsApp, so the accessibility widget cannot silently intercept
-a voice-message tap or read audio still owned by WhatsApp.
+starts without another tap. It appears in a compact translucent panel above the
+source app, so the result stays visible over WhatsApp without requiring the
+Accessibility widget. The Hub also has a **Trascrivi** page that opens Android's
+`ACTION_OPEN_DOCUMENT` picker and passes the selected content URI to the same
+recognizer. Android does not expose a normal app's tap or playback stream inside
+WhatsApp, so the accessibility widget cannot silently intercept a voice-message
+tap or read audio still owned by WhatsApp.
 
 Both entry points use `OnDeviceAudioTranscriber` and Google ML Kit GenAI Speech
 Recognition on the device. It tries Basic mode first because it uses the

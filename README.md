@@ -74,11 +74,13 @@ an audio file with Android's system picker and get a local transcript in the
 same mobile interface. The app registers as an audio share target too: choose
 **Condividi** on an audio file in WhatsApp or another app, then select
 **Traflix Voice · Trascrivi audio**. Both routes use the shared on-device Google
-ML Kit Speech Recognition service; the result is saved in local history. It
-tries Basic mode first, then Advanced mode if Basic is unavailable and the
-device supports it. Neither local route falls back to Groq, and neither changes
-the original Groq-powered keyboard path. Android still requires a voice note to
-be shared from WhatsApp; the app cannot intercept taps inside WhatsApp. The Hub
+ML Kit Speech Recognition service; the result is saved in local history. The
+share route opens a compact floating panel over the source app, starts
+transcription automatically, and keeps the result visible there. It tries Basic
+mode first, then Advanced mode if Basic is unavailable and the device supports
+it. Neither local route falls back to Groq, and neither changes the original
+Groq-powered keyboard path. Android still requires a voice note to be shared
+from WhatsApp; the app cannot intercept taps inside WhatsApp. The Hub
 checks GitHub for newer Android
 releases after startup and only considers the `android-vX.Y.Z` tag family and
 the signed `app-universal-release.apk` asset; Windows releases are ignored. A
@@ -140,9 +142,10 @@ Android requires a signed APK for direct installation.
 5. Press the Traflix microphone key. The transcript is committed through the
    active `InputConnection` and local history remains on the device.
 6. To transcribe an existing voice note, use WhatsApp's **Condividi** action
-   and select **Traflix Voice · Trascrivi audio**. The result opens in a separate
-   screen; with **Rilevamento automatico** selected, this local route uses the
-   phone's language because the model needs a fixed locale.
+   and select **Traflix Voice · Trascrivi audio**. A floating panel appears over
+   WhatsApp and begins transcription automatically. With **Rilevamento
+   automatico** selected, it uses the phone's language because the model needs
+   a fixed locale.
 7. To choose a file manually, open **Trascrivi** in the Hub, select an audio
    file, then tap **Trascrivi sul dispositivo**. The transcript appears there
    and is also added to local history.
