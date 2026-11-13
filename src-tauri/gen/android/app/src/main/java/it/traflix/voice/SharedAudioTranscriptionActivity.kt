@@ -16,6 +16,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -44,17 +45,12 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
   private var activeOperationId: UUID? = null
 
   private lateinit var fileNameView: TextView
-  private lateinit var statusMark: TextView
-  private lateinit var statusTitle: TextView
-  private lateinit var statusDescription: TextView
+  private lateinit var progressRow: LinearLayout
   private lateinit var progressBar: ProgressBar
-  private lateinit var transcriptCard: MaterialCardView
+  private lateinit var transcriptContainer: LinearLayout
   private lateinit var transcriptText: TextView
-  private lateinit var transcriptMeta: TextView
-  private lateinit var errorCard: MaterialCardView
+  private lateinit var errorContainer: LinearLayout
   private lateinit var errorDescription: TextView
-  private lateinit var retryButton: MaterialButton
-  private lateinit var actions: LinearLayout
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -91,7 +87,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
   }
 
   private fun configureFloatingWindow() {
-    val width = (resources.displayMetrics.widthPixels - dp(28)).coerceAtMost(dp(520))
+    val width = (resources.displayMetrics.widthPixels - dp(48)).coerceAtMost(dp(500))
     window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
     window.setGravity(Gravity.CENTER)
     window.addFlags(
@@ -104,52 +100,39 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
   }
 
   private fun createScreen(): View {
-    val scroll = ScrollView(this).apply {
-      setFillViewport(true)
-      isVerticalScrollBarEnabled = false
-      clipToPadding = false
-      setPadding(dp(7), dp(7), dp(7), dp(7))
-      setBackgroundColor(android.graphics.Color.TRANSPARENT)
-    }
-    val card = MaterialCardView(this).apply {
+    val panel = MaterialCardView(this).apply {
       radius = dp(23).toFloat()
       cardElevation = dp(12).toFloat()
-      strokeWidth = dp(1)
-      setStrokeColor(ColorStateList.valueOf(COLOR_STROKE))
+      strokeWidth = 0
       setCardBackgroundColor(COLOR_CANVAS)
     }
     val content = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      setPadding(dp(18), dp(17), dp(18), dp(18))
+      setPadding(dp(18), dp(16), dp(18), dp(16))
     }
-    card.addView(content, android.widget.FrameLayout.LayoutParams(
+    panel.addView(content, android.widget.FrameLayout.LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT,
       ViewGroup.LayoutParams.WRAP_CONTENT,
     ))
-    scroll.addView(card, android.widget.FrameLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT,
-      ViewGroup.LayoutParams.WRAP_CONTENT,
-    ))
-
     content.addView(createBrandHeader())
-    content.addView(space(18))
-    content.addView(label("AUDIO CONDIVISO", COLOR_ACCENT, 11f, true))
-    content.addView(space(5))
-    content.addView(text("Trascrizione", COLOR_INK, 25f, true))
-    content.addView(space(5))
-    content.addView(text("Il testo apparirà qui appena Groq avrà elaborato il file.", COLOR_MUTED, 13f, false))
-    content.addView(space(15))
-    content.addView(createSourceCard())
-    content.addView(space(9))
-    content.addView(createStatusCard())
-    content.addView(space(9))
-    content.addView(createTranscriptCard())
-    content.addView(space(9))
-    content.addView(createErrorCard())
-    content.addView(space(11))
-    content.addView(createPrivacyNote())
+    content.addView(createSourceCard(), LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply { topMargin = dp(12) })
+    content.addView(createProgressRow(), LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply { topMargin = dp(12) })
+    content.addView(createTranscriptContent(), LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply { topMargin = dp(12) })
+    content.addView(createErrorContent(), LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply { topMargin = dp(12) })
 
-    return scroll
+    return panel
   }
 
   private fun createBrandHeader(): View {
@@ -157,38 +140,25 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
     }
-    val mark = MaterialCardView(this).apply {
-      radius = dp(14).toFloat()
-      cardElevation = 0f
-      strokeWidth = dp(1)
-      setStrokeColor(ColorStateList.valueOf(COLOR_ACCENT_STROKE))
-      setCardBackgroundColor(COLOR_ACCENT_WASH)
+    val logo = ImageView(this).apply {
+      setImageResource(R.mipmap.ic_launcher_round)
+      scaleType = ImageView.ScaleType.FIT_CENTER
+      contentDescription = null
     }
-    mark.addView(text("T", COLOR_ACCENT, 22f, true).apply {
-      gravity = Gravity.CENTER
-    }, android.widget.FrameLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT,
-      ViewGroup.LayoutParams.MATCH_PARENT,
-    ))
-    row.addView(mark, LinearLayout.LayoutParams(dp(44), dp(44)))
-    val title = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(dp(10), 0, 0, 0)
-    }
-    title.addView(label("TRAFLIX", COLOR_INK, 12f, true))
-    title.addView(space(2))
-    title.addView(label("AUDIO CONDIVISO", COLOR_QUIET, 9f, true))
-    row.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    row.addView(pill("GROQ CLOUD", COLOR_ACCENT, COLOR_ACCENT_WASH))
-    val closeButton = text("×", COLOR_MUTED, 23f, false).apply {
-      gravity = Gravity.CENTER
+    row.addView(logo, LinearLayout.LayoutParams(dp(40), dp(40)))
+    row.addView(text("Traflix Voice", COLOR_INK, 17f, true), LinearLayout.LayoutParams(
+      0,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+      1f,
+    ).apply { marginStart = dp(10) })
+    val closeButton = CloseIconView(this).apply {
       contentDescription = "Chiudi trascrizione"
       isClickable = true
       isFocusable = true
       background = roundedDrawable(COLOR_SURFACE_ALT, dp(99).toFloat())
       setOnClickListener { finish() }
     }
-    row.addView(closeButton, LinearLayout.LayoutParams(dp(38), dp(38)).apply {
+    row.addView(closeButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
       marginStart = dp(8)
     })
     return row
@@ -198,26 +168,11 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     val row = LinearLayout(this).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
-      setPadding(dp(15), dp(14), dp(14), dp(14))
     }
-    val icon = MaterialCardView(this).apply {
-      radius = dp(13).toFloat()
-      cardElevation = 0f
-      strokeWidth = 0
-      setCardBackgroundColor(COLOR_ACCENT_WASH)
-    }
-    icon.addView(text("♫", COLOR_ACCENT, 23f, true).apply {
-      gravity = Gravity.CENTER
-    }, android.widget.FrameLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT,
-      ViewGroup.LayoutParams.MATCH_PARENT,
-    ))
-    row.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)))
     val details = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      setPadding(dp(12), 0, dp(8), 0)
     }
-    details.addView(label("FILE AUDIO", COLOR_QUIET, 10f, true))
+    details.addView(label("File audio", COLOR_ACCENT, 10f, true))
     details.addView(space(5))
     fileNameView = text(sharedName, COLOR_INK, 14f, true).apply {
       maxLines = 2
@@ -225,140 +180,83 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     }
     details.addView(fileNameView)
     row.addView(details, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    row.addView(AudioWaveformView(this), LinearLayout.LayoutParams(dp(74), dp(34)))
-    return card(row, COLOR_SURFACE, COLOR_STROKE)
-  }
-
-  private fun createStatusCard(): View {
-    val column = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(dp(16), dp(15), dp(16), dp(16))
-    }
-    val row = LinearLayout(this).apply {
-      orientation = LinearLayout.HORIZONTAL
-      gravity = Gravity.CENTER_VERTICAL
-    }
-    statusMark = text("…", COLOR_ACCENT, 17f, true).apply {
-      gravity = Gravity.CENTER
-      background = circleDrawable(COLOR_ACCENT_WASH)
-      setPadding(dp(10), dp(7), dp(10), dp(7))
-    }
-    row.addView(statusMark)
-    val copy = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(dp(11), 0, 0, 0)
-    }
-    statusTitle = text("Audio ricevuto", COLOR_INK, 15f, true)
-    statusDescription = text("Invio il file audio a Groq Cloud…", COLOR_MUTED, 12f, false)
-    copy.addView(statusTitle)
-    copy.addView(space(4))
-    copy.addView(statusDescription)
-    row.addView(copy, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    column.addView(row)
-    progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-      isIndeterminate = true
-      progressTintList = ColorStateList.valueOf(COLOR_ACCENT)
-      indeterminateTintList = ColorStateList.valueOf(COLOR_ACCENT)
-      progressBackgroundTintList = ColorStateList.valueOf(COLOR_STROKE)
-    }
-    column.addView(progressBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)).apply {
-      topMargin = dp(16)
-    })
-    return card(column, COLOR_SURFACE, COLOR_STROKE)
-  }
-
-  private fun createTranscriptCard(): MaterialCardView {
-    val column = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(dp(16), dp(16), dp(16), dp(15))
-    }
-    val header = LinearLayout(this).apply {
-      orientation = LinearLayout.HORIZONTAL
-      gravity = Gravity.CENTER_VERTICAL
-    }
-    val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    heading.addView(label("TESTO RICONOSCIUTO", COLOR_ACCENT, 10f, true))
-    heading.addView(space(4))
-    transcriptMeta = text("Trascrizione Groq Cloud", COLOR_QUIET, 11f, false)
-    heading.addView(transcriptMeta)
-    header.addView(heading, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    header.addView(pill("CLOUD", COLOR_ACCENT, COLOR_ACCENT_WASH))
-    column.addView(header)
-    column.addView(space(14))
-    transcriptText = text("", COLOR_INK, 16f, false).apply {
-      setTextIsSelectable(true)
-      setLineSpacing(dp(3).toFloat(), 1.08f)
-      gravity = Gravity.START
-    }
-    column.addView(transcriptText, LinearLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT,
-      ViewGroup.LayoutParams.WRAP_CONTENT,
-    ))
-    column.addView(space(16))
-    actions = LinearLayout(this).apply {
-      orientation = LinearLayout.HORIZONTAL
-      gravity = Gravity.CENTER_VERTICAL
-    }
-    val copyButton = actionButton("Copia testo", primary = true).apply {
-      setOnClickListener { copyTranscript() }
-    }
-    val shareButton = actionButton("Condividi", primary = false).apply {
-      setOnClickListener { shareTranscript() }
-    }
-    actions.addView(copyButton, LinearLayout.LayoutParams(0, dp(48), 1f))
-    actions.addView(spaceWidth(9))
-    actions.addView(shareButton, LinearLayout.LayoutParams(0, dp(48), 1f))
-    actions.visibility = View.GONE
-    column.addView(actions)
-    return card(column, COLOR_SURFACE, COLOR_SIGNAL_STROKE).apply { visibility = View.GONE }
-  }
-
-  private fun createErrorCard(): MaterialCardView {
-    val column = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(dp(15), dp(14), dp(15), dp(14))
-    }
-    column.addView(label("NON RIESCO A TRASCRIVERE", COLOR_ERROR, 10f, true))
-    column.addView(space(6))
-    errorDescription = text("", COLOR_MUTED, 13f, false)
-    column.addView(errorDescription)
-    retryButton = actionButton("Riprova", primary = false).apply {
-      setOnClickListener { sharedUri?.let(::startTranscription) }
-    }
-    column.addView(retryButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply {
-      topMargin = dp(12)
-    })
-    return card(column, COLOR_ERROR_WASH, COLOR_ERROR_STROKE).apply { visibility = View.GONE }
-  }
-
-  private fun createPrivacyNote(): View {
-    val row = LinearLayout(this).apply {
-      orientation = LinearLayout.HORIZONTAL
-      gravity = Gravity.CENTER_VERTICAL
-      setPadding(dp(4), dp(2), dp(4), dp(2))
-    }
-    row.addView(text("i", COLOR_ACCENT, 15f, true))
-    row.addView(text(
-      "  Il file audio viene inviato a Groq Cloud per la trascrizione.",
-      COLOR_QUIET,
-      11f,
-      false,
-    ))
+    row.addView(AudioWaveformView(this), LinearLayout.LayoutParams(dp(58), dp(28)))
     return row
   }
 
-  private fun card(content: View, background: Int, stroke: Int): MaterialCardView =
-    MaterialCardView(this).apply {
-      radius = dp(19).toFloat()
-      cardElevation = 0f
-      strokeWidth = dp(1)
-      setStrokeColor(ColorStateList.valueOf(stroke))
-      setCardBackgroundColor(background)
-      addView(content, ViewGroup.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT,
-      ))
+  private fun createProgressRow(): View {
+    progressRow = LinearLayout(this).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
     }
+    progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleSmall).apply {
+      isIndeterminate = true
+      indeterminateTintList = ColorStateList.valueOf(COLOR_ACCENT)
+    }
+    progressRow.addView(progressBar, LinearLayout.LayoutParams(dp(18), dp(18)))
+    progressRow.addView(text("Trascrivo audio…", COLOR_MUTED, 13f, false), LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply { marginStart = dp(9) })
+    return progressRow
+  }
+
+  private fun createTranscriptContent(): View {
+    val column = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+    }
+    column.addView(View(this).apply { setBackgroundColor(COLOR_STROKE) }, LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      dp(1),
+    ))
+    val transcriptScroll = BoundedScrollView(this, dp(220)).apply {
+      isFillViewport = false
+      isVerticalScrollBarEnabled = true
+      overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+    }
+    transcriptText = text("", COLOR_INK, 16f, false).apply {
+      setLineSpacing(dp(3).toFloat(), 1.08f)
+      gravity = Gravity.START
+      setPadding(0, dp(12), dp(6), dp(8))
+    }
+    transcriptScroll.addView(transcriptText, android.widget.FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ))
+    val copyButton = actionButton("Copia testo", primary = true).apply {
+      setOnClickListener { copyTranscript() }
+    }
+    column.addView(transcriptScroll, LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ))
+    column.addView(copyButton, LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      dp(48),
+    ).apply { topMargin = dp(10) })
+    transcriptContainer = column.apply { visibility = View.GONE }
+    return transcriptContainer
+  }
+
+  private fun createErrorContent(): View {
+    val column = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+    }
+    column.addView(label("Trascrizione non riuscita", COLOR_ERROR, 13f, true))
+    errorDescription = text("", COLOR_MUTED, 13f, false)
+    column.addView(errorDescription, LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply { topMargin = dp(5) })
+    val retryButton = actionButton("Riprova", primary = false).apply {
+      setOnClickListener { sharedUri?.let(::startTranscription) }
+    }
+    column.addView(retryButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply {
+      topMargin = dp(9)
+    })
+    errorContainer = column.apply { visibility = View.GONE }
+    return errorContainer
+  }
 
   private fun text(value: String, color: Int, size: Float, bold: Boolean): TextView =
     TextView(this).apply {
@@ -371,13 +269,6 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
 
   private fun label(value: String, color: Int, size: Float, bold: Boolean): TextView =
     text(value, color, size, bold).apply { letterSpacing = 0.12f }
-
-  private fun pill(value: String, foreground: Int, background: Int): TextView =
-    text(value, foreground, 9f, true).apply {
-      letterSpacing = 0.07f
-      setPadding(dp(9), dp(7), dp(9), dp(7))
-      this.background = roundedDrawable(background, dp(99).toFloat())
-    }
 
   private fun actionButton(value: String, primary: Boolean): MaterialButton =
     MaterialButton(this).apply {
@@ -401,15 +292,6 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
 
   private fun space(heightDp: Int): View = View(this).apply {
     layoutParams = LinearLayout.LayoutParams(1, dp(heightDp))
-  }
-
-  private fun spaceWidth(widthDp: Int): View = View(this).apply {
-    layoutParams = LinearLayout.LayoutParams(dp(widthDp), 1)
-  }
-
-  private fun circleDrawable(color: Int) = android.graphics.drawable.GradientDrawable().apply {
-    shape = android.graphics.drawable.GradientDrawable.OVAL
-    setColor(color)
   }
 
   private fun roundedDrawable(color: Int, radius: Float) = android.graphics.drawable.GradientDrawable().apply {
@@ -466,10 +348,9 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     activeOperationId = operationId
     transcriptionJob?.cancel()
     finalTranscript = ""
-    transcriptCard.visibility = View.GONE
-    errorCard.visibility = View.GONE
-    progressBar.visibility = View.VISIBLE
-    setStatus("Invio audio a Groq", "La trascrizione apparirà qui appena pronta…", COLOR_ACCENT, "↑")
+    transcriptContainer.visibility = View.GONE
+    errorContainer.visibility = View.GONE
+    progressRow.visibility = View.VISIBLE
 
     transcriptionJob = lifecycleScope.launch {
       try {
@@ -482,15 +363,13 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
         )
         if (activeOperationId != operationId) return@launch
         finalTranscript = transcript.text
-        val savedInHistory = try {
+        try {
           withContext(Dispatchers.IO) {
             VoiceHistoryStore(applicationContext).append(finalTranscript)
           }
-          true
         } catch (_: Exception) {
-          false
         }
-        showTranscript(finalTranscript, transcript.language, savedInHistory)
+        showTranscript(finalTranscript)
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
@@ -498,50 +377,20 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
       }
     }
   }
-  private fun showTranscript(value: String, language: String, savedInHistory: Boolean) {
+  private fun showTranscript(value: String) {
     finalTranscript = value
     transcriptText.text = value
-    val wordCount = value.split(Regex("\\s+")).count { it.isNotBlank() }
-    transcriptMeta.text = "${languageName(language)} · $wordCount parole"
-    actions.visibility = View.VISIBLE
-    transcriptCard.visibility = View.VISIBLE
-    errorCard.visibility = View.GONE
-    progressBar.visibility = View.GONE
-    val detail = if (savedInHistory) {
-      "Testo pronto e salvato nella cronologia locale."
-    } else {
-      "Testo pronto. Non sono riuscito a salvarlo nella cronologia."
-    }
-    setStatus("Trascrizione pronta", detail, COLOR_SIGNAL, "✓")
+    progressRow.visibility = View.GONE
+    errorContainer.visibility = View.GONE
+    transcriptContainer.visibility = View.VISIBLE
   }
 
   private fun showFailure(message: String) {
-    if (!::errorCard.isInitialized) return
-    progressBar.visibility = View.GONE
-    transcriptCard.visibility = View.GONE
+    if (!::errorContainer.isInitialized) return
+    progressRow.visibility = View.GONE
+    transcriptContainer.visibility = View.GONE
     errorDescription.text = message
-    errorCard.visibility = View.VISIBLE
-    setStatus("Non è andata a buon fine", "Controlla la connessione e la chiave Groq, poi riprova.", COLOR_ERROR, "!")
-  }
-
-  private fun languageName(language: String): String = when (language) {
-    "it" -> "Italiano"
-    "en" -> "English"
-    "fr" -> "Français"
-    "de" -> "Deutsch"
-    "es" -> "Español"
-    "pt" -> "Português"
-    "auto" -> "Rilevamento automatico"
-    else -> language.uppercase(Locale.ROOT)
-  }
-
-  private fun setStatus(title: String, description: String, accent: Int, mark: String) {
-    if (!::statusTitle.isInitialized || isFinishing) return
-    statusTitle.text = title
-    statusDescription.text = description
-    statusMark.text = mark
-    statusMark.setTextColor(accent)
-    statusMark.background = circleDrawable(if (accent == COLOR_SIGNAL) COLOR_SIGNAL_WASH else if (accent == COLOR_ERROR) COLOR_ERROR_WASH else COLOR_ACCENT_WASH)
+    errorContainer.visibility = View.VISIBLE
   }
 
   private fun copyTranscript() {
@@ -551,16 +400,39 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     Toast.makeText(this, "Trascrizione copiata", Toast.LENGTH_SHORT).show()
   }
 
-  private fun shareTranscript() {
-    if (finalTranscript.isBlank()) return
-    val intent = Intent(Intent.ACTION_SEND).apply {
-      type = "text/plain"
-      putExtra(Intent.EXTRA_TEXT, finalTranscript)
+  private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+  private class BoundedScrollView(context: Context, private val maxHeight: Int) : ScrollView(context) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+      super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+      if (measuredHeight > maxHeight) {
+        super.onMeasure(
+          widthMeasureSpec,
+          MeasureSpec.makeMeasureSpec(maxHeight, MeasureSpec.EXACTLY),
+        )
+      }
     }
-    startActivity(Intent.createChooser(intent, "Condividi trascrizione"))
   }
 
-  private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+  private class CloseIconView(context: Context) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = COLOR_MUTED
+      strokeWidth = context.resources.displayMetrics.density * 1.8f
+      strokeCap = Paint.Cap.ROUND
+      style = Paint.Style.STROKE
+    }
+
+    override fun onDraw(canvas: Canvas) {
+      super.onDraw(canvas)
+      val half = dp(5).toFloat()
+      val centerX = width / 2f
+      val centerY = height / 2f
+      canvas.drawLine(centerX - half, centerY - half, centerX + half, centerY + half, paint)
+      canvas.drawLine(centerX + half, centerY - half, centerX - half, centerY + half, paint)
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+  }
 
   private class AudioWaveformView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -589,18 +461,11 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
 
   private companion object {
     val COLOR_CANVAS = android.graphics.Color.rgb(17, 18, 17)
-    val COLOR_SURFACE = android.graphics.Color.rgb(29, 30, 27)
     val COLOR_SURFACE_ALT = android.graphics.Color.rgb(36, 37, 34)
     val COLOR_STROKE = android.graphics.Color.rgb(57, 58, 53)
     val COLOR_INK = android.graphics.Color.rgb(245, 243, 239)
     val COLOR_MUTED = android.graphics.Color.rgb(190, 188, 181)
-    val COLOR_QUIET = android.graphics.Color.rgb(143, 141, 133)
     val COLOR_ACCENT = android.graphics.Color.rgb(255, 157, 36)
-    val COLOR_ACCENT_WASH = android.graphics.Color.rgb(57, 42, 24)
-    val COLOR_ACCENT_STROKE = android.graphics.Color.rgb(95, 67, 34)
-    val COLOR_SIGNAL = android.graphics.Color.rgb(85, 216, 155)
-    val COLOR_SIGNAL_WASH = android.graphics.Color.rgb(24, 54, 42)
-    val COLOR_SIGNAL_STROKE = android.graphics.Color.rgb(44, 83, 64)
     val COLOR_ERROR = android.graphics.Color.rgb(255, 132, 136)
     val COLOR_ERROR_WASH = android.graphics.Color.rgb(59, 31, 33)
     val COLOR_ERROR_STROKE = android.graphics.Color.rgb(102, 51, 54)
