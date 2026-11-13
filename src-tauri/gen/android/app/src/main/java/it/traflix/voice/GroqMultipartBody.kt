@@ -8,13 +8,18 @@ internal class GroqMultipartBody(
   private val file: File,
   language: String,
   boundary: String,
+  fileName: String = "recording.wav",
+  contentType: String = "audio/wav",
+  minimumFileBytes: Long = WAV_HEADER_BYTES + 1,
 ) {
   private val expectedFileLength = file.length().also {
-    if (!file.isFile || it <= WAV_HEADER_BYTES) {
+    if (!file.isFile || it < minimumFileBytes) {
       throw IllegalStateException("Registrazione vuota")
     }
   }
   private val expectedLastModified = file.lastModified()
+  private val safeFileName = sanitizeFileName(fileName)
+  private val safeContentType = sanitizeContentType(contentType)
   private val prefix = buildString {
     fun textPart(name: String, value: String) {
       append("--$boundary\r\n")
@@ -26,8 +31,8 @@ internal class GroqMultipartBody(
     textPart("response_format", "json")
     if (language.isNotBlank() && language != "auto") textPart("language", language)
     append("--$boundary\r\n")
-    append("Content-Disposition: form-data; name=\"file\"; filename=\"recording.wav\"\r\n")
-    append("Content-Type: audio/wav\r\n\r\n")
+    append("Content-Disposition: form-data; name=\"file\"; filename=\"$safeFileName\"\r\n")
+    append("Content-Type: $safeContentType\r\n\r\n")
   }.toByteArray(Charsets.UTF_8)
   private val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
 
@@ -69,8 +74,23 @@ internal class GroqMultipartBody(
 
   private fun changedFile(): IOException = IOException("Registrazione modificata durante l'invio")
 
+  private fun sanitizeFileName(value: String): String = value
+    .substringAfterLast('/')
+    .substringAfterLast('\\')
+    .map { character ->
+      if (character.isLetterOrDigit() || character in setOf('.', '-', '_')) character else '_'
+    }
+    .joinToString("")
+    .trim('.', '_')
+    .take(120)
+    .ifBlank { "audio.bin" }
+
+  private fun sanitizeContentType(value: String): String =
+    value.takeIf { CONTENT_TYPE_PATTERN.matches(it) } ?: "application/octet-stream"
+
   private companion object {
     const val WAV_HEADER_BYTES = 44L
     const val COPY_BUFFER_BYTES = 64 * 1024
+    val CONTENT_TYPE_PATTERN = Regex("[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+")
   }
 }

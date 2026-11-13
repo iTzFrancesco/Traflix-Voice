@@ -34,7 +34,14 @@ class GroqCloudTranscriber(context: Context) {
   private val pendingFiles = linkedSetOf<File>()
   @Volatile private var activeConnection: HttpURLConnection? = null
 
-  fun transcribe(file: File, language: String, listener: Listener) {
+  fun transcribe(
+    file: File,
+    language: String,
+    listener: Listener,
+    uploadFileName: String = "recording.wav",
+    contentType: String = "audio/wav",
+    minimumFileBytes: Long = WAV_HEADER_BYTES + 1,
+  ) {
     cancel()
     val generation = requestGeneration.incrementAndGet()
     val queuedAt = SystemClock.elapsedRealtime()
@@ -50,7 +57,9 @@ class GroqCloudTranscriber(context: Context) {
         TAG,
         "transcription request started queueWaitMs=${SystemClock.elapsedRealtime() - queuedAt}",
       )
-      val result = runCatching { request(file, language, generation) }
+      val result = runCatching {
+        request(file, language, generation, uploadFileName, contentType, minimumFileBytes)
+      }
       if (!isCurrent(generation)) {
         forgetFile(file)
         file.delete()
@@ -103,17 +112,31 @@ class GroqCloudTranscriber(context: Context) {
     executor.shutdownNow()
   }
 
-  private fun request(file: File, language: String, generation: Long): String {
+  private fun request(
+    file: File,
+    language: String,
+    generation: Long,
+    uploadFileName: String,
+    contentType: String,
+    minimumFileBytes: Long,
+  ): String {
     ensureCurrent(generation)
     val apiKey = VoiceSecretsStore(appContext).groqApiKey()
       ?: throw IllegalStateException("Configura la chiave Groq Cloud nelle impostazioni")
     val fileBytes = file.length()
-    if (!file.exists() || fileBytes <= WAV_HEADER_BYTES) {
-      throw IllegalStateException("Registrazione vuota")
+    if (!file.exists() || fileBytes < minimumFileBytes) {
+      throw IllegalStateException("File audio vuoto")
     }
 
     val boundary = "----TraflixVoice${UUID.randomUUID()}"
-    val body = GroqMultipartBody(file, language, boundary)
+    val body = GroqMultipartBody(
+      file = file,
+      language = language,
+      boundary = boundary,
+      fileName = uploadFileName,
+      contentType = contentType,
+      minimumFileBytes = minimumFileBytes,
+    )
     val connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"
       connectTimeout = CONNECT_TIMEOUT_MS
@@ -121,6 +144,7 @@ class GroqCloudTranscriber(context: Context) {
       doInput = true
       doOutput = true
       useCaches = false
+      setFixedLengthStreamingMode(body.contentLength)
       // Do not forward the bearer credential or replay audio to a redirected endpoint.
       instanceFollowRedirects = false
       setRequestProperty("Authorization", "Bearer $apiKey")
@@ -218,7 +242,7 @@ class GroqCloudTranscriber(context: Context) {
   private fun cloudError(responseCode: Int): IllegalStateException = when (responseCode) {
     401, 403 -> IllegalStateException("Chiave Groq Cloud non autorizzata")
     408 -> IllegalStateException("Groq Cloud ha esaurito il tempo di attesa")
-    413 -> IllegalStateException("Registrazione troppo lunga per Groq Cloud")
+    413 -> IllegalStateException("File troppo grande per Groq Cloud (limite 25 MB)")
     429 -> IllegalStateException("Limite Groq Cloud raggiunto")
     in 500..599 -> IllegalStateException("Groq Cloud non è disponibile")
     else -> IllegalStateException("Groq Cloud ha rifiutato la richiesta")

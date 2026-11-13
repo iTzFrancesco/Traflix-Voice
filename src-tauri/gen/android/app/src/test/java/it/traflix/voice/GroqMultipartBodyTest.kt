@@ -34,6 +34,27 @@ class GroqMultipartBodyTest {
   }
 
   @Test
+  fun supportsSharedAudioMetadataAndSanitizesMultipartHeaders() {
+    val file = files.newFile("shared-audio.ogg").apply { writeBytes(byteArrayOf(42)) }
+    val body = GroqMultipartBody(
+      file = file,
+      language = "it",
+      boundary = BOUNDARY,
+      fileName = "../voice\"note.ogg\r\nX-Injected: yes",
+      contentType = "audio/ogg\r\nX-Injected: yes",
+      minimumFileBytes = 1,
+    )
+    val output = ByteArrayOutputStream()
+    body.writeTo(output) {}
+    val request = output.toString(Charsets.UTF_8.name())
+
+    assertTrue(request.contains("filename=\"voice_note.ogg__X-Injected__yes\"\r\n"))
+    assertTrue(request.contains("Content-Type: application/octet-stream\r\n\r\n"))
+    assertTrue(request.endsWith("\r\n--$BOUNDARY--\r\n"))
+    assertEquals(body.contentLength, output.size().toLong())
+  }
+
+  @Test
   fun calculatesLengthsBeyondIntRangeWithoutAllocatingTheWav() {
     val envelopeBytes = legacyBody(ByteArray(0), "中文-é", BOUNDARY).size.toLong()
     for (length in listOf(Int.MAX_VALUE.toLong() + 17L, Long.MAX_VALUE - envelopeBytes)) {
