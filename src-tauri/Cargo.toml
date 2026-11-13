@@ -38,3 +38,10 @@ cpal = "0.15"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
+# These Tauri Android plugins still use the Kotlin 1.x-only kotlinOptions DSL.
+# Their local copies keep the plugin modules compatible with Kotlin 2.4 for ML Kit GenAI.
+[patch.crates-io]
+tauri-plugin-clipboard-manager = { path = "vendor/tauri-plugin-clipboard-manager" }
+tauri-plugin-opener = { path = "vendor/tauri-plugin-opener" }
+tauri-plugin-shell = { path = "vendor/tauri-plugin-shell" }
