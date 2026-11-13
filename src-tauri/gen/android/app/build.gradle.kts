@@ -13,7 +13,7 @@ val hasReleaseSigning = listOf(
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.android") version "2.4.0"
     id("rust")
 }
 
