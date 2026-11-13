@@ -25,6 +25,9 @@ fn main() {
     // ACL. Without this manifest Tauri rejects every `plugin:voice-runtime`
     // invocation before the native plugin can handle it.
     const VOICE_RUNTIME_COMMANDS: &[&str] = &[
+        "pickLocalAudioFile",
+        "transcribeLocalAudio",
+        "releaseLocalAudioFile",
         "openAndroidSettings",
         "setRecordingMode",
         "getRecordingMode",

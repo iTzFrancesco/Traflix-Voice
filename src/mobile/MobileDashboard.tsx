@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, AppStats, GroqUsage, TranscriptionEntry } from "../types";
 
-export type MobileDestination = "overview" | "settings" | "history";
+export type MobileDestination = "overview" | "transcribe" | "history" | "settings";
+export interface MobileAudioFile {
+  uri: string;
+  name: string;
+  mimeType: string;
+}
+export interface MobileAudioTranscript {
+  text: string;
+  language: string;
+  savedInHistory: boolean;
+}
+export type MobileAudioState = "idle" | "picking" | "transcribing" | "error" | "done";
 export type MobileSettingsScreen =
   | "input_method"
   | "accessibility"
@@ -51,10 +62,14 @@ interface MobileDashboardProps {
   mobileUpdateState: MobileUpdateState;
   mobileUpdateError: string;
   onInstallMobileUpdate: () => Promise<void>;
+  onPickLocalAudio: () => Promise<MobileAudioFile | null>;
+  onTranscribeLocalAudio: (file: MobileAudioFile) => Promise<MobileAudioTranscript>;
+  onReleaseLocalAudio: (uri: string) => Promise<void>;
 }
 
 type IconName =
   | "overview"
+  | "audio"
   | "settings"
   | "history"
   | "cloud"
@@ -107,6 +122,13 @@ function MobileIcon({ name, size = 20 }: { name: IconName; size?: number }) {
           <path d="M12 7v5l3 2" />
           <path d="M4 5v4h4" />
           <path d="M4.5 9A8.5 8.5 0 0 1 19 6" />
+        </svg>
+      );
+    case "audio":
+      return (
+        <svg {...common}>
+          <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />
+          <path d="M3 20h18" />
         </svg>
       );
     case "cloud":
@@ -255,8 +277,16 @@ export default function MobileDashboard({
   mobileUpdateState,
   mobileUpdateError,
   onInstallMobileUpdate,
+  onPickLocalAudio,
+  onTranscribeLocalAudio,
+  onReleaseLocalAudio,
 }: MobileDashboardProps) {
   const [destination, setDestination] = useState<MobileDestination>("overview");
+  const [localAudioFile, setLocalAudioFile] = useState<MobileAudioFile | null>(null);
+  const [localAudioTranscript, setLocalAudioTranscript] = useState<MobileAudioTranscript | null>(null);
+  const [localAudioState, setLocalAudioState] = useState<MobileAudioState>("idle");
+  const [localAudioError, setLocalAudioError] = useState("");
+  const [localAudioCopied, setLocalAudioCopied] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
@@ -272,6 +302,16 @@ export default function MobileDashboard({
   const apiKeySaveTimerRef = useRef<number | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const copyRequestRef = useRef(0);
+  const localAudioUriRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    localAudioUriRef.current = localAudioFile?.uri ?? null;
+  }, [localAudioFile?.uri]);
+
+  useEffect(() => () => {
+    const uri = localAudioUriRef.current;
+    if (uri) void onReleaseLocalAudio(uri);
+  }, [onReleaseLocalAudio]);
 
   useEffect(() => {
     setApiKeyDraft(settings?.groqApiKey ?? "");
@@ -333,6 +373,70 @@ export default function MobileDashboard({
       setCopyFeedback(null);
       copyFeedbackTimerRef.current = null;
     }, 1_800);
+  };
+
+  const handlePickLocalAudio = async () => {
+    if (localAudioState === "picking" || localAudioState === "transcribing") return;
+    setLocalAudioState("picking");
+    setLocalAudioError("");
+    setLocalAudioCopied(false);
+    try {
+      const picked = await onPickLocalAudio();
+      if (!picked) {
+        setLocalAudioState(localAudioTranscript ? "done" : "idle");
+        return;
+      }
+      const previousUri = localAudioFile?.uri;
+      if (previousUri && previousUri !== picked.uri) {
+        await onReleaseLocalAudio(previousUri);
+      }
+      setLocalAudioFile(picked);
+      setLocalAudioTranscript(null);
+      setLocalAudioState("idle");
+    } catch (error) {
+      console.error("[mobile-audio] file selection failed:", error);
+      setLocalAudioError(error instanceof Error ? error.message : typeof error === "string" ? error : "Impossibile aprire il file audio.");
+      setLocalAudioState("error");
+    }
+  };
+
+  const handleTranscribeLocalAudio = async () => {
+    if (!localAudioFile || localAudioState === "transcribing") return;
+    setLocalAudioState("transcribing");
+    setLocalAudioError("");
+    setLocalAudioTranscript(null);
+    setLocalAudioCopied(false);
+    try {
+      const transcript = await onTranscribeLocalAudio(localAudioFile);
+      setLocalAudioTranscript(transcript);
+      setLocalAudioState("done");
+    } catch (error) {
+      console.error("[mobile-audio] transcription failed:", error);
+      setLocalAudioError(error instanceof Error ? error.message : typeof error === "string" ? error : "Trascrizione non riuscita. Riprova.");
+      setLocalAudioState("error");
+    }
+  };
+
+  const handleClearLocalAudio = () => {
+    const uri = localAudioFile?.uri;
+    if (uri) {
+      localAudioUriRef.current = null;
+      void onReleaseLocalAudio(uri);
+    }
+    setLocalAudioFile(null);
+    setLocalAudioTranscript(null);
+    setLocalAudioState("idle");
+    setLocalAudioError("");
+    setLocalAudioCopied(false);
+  };
+
+  const handleCopyLocalTranscript = async () => {
+    if (!localAudioTranscript) return;
+    const copied = await onHistoryClick(localAudioTranscript.text);
+    setLocalAudioCopied(copied);
+    if (copied) {
+      window.setTimeout(() => setLocalAudioCopied(false), 1_800);
+    }
   };
 
   const handleClearHistory = async () => {
@@ -588,6 +692,102 @@ export default function MobileDashboard({
     </div>
   );
 
+  const renderTranscribe = () => (
+    <div className="mobile-page mobile-page-enter">
+      <div className="mobile-page-heading">
+        <div>
+          <span className="mobile-eyebrow">Elaborazione sul telefono</span>
+          <h1 id="mobile-transcribe-title">Trascrivi audio</h1>
+          <p>Scegli un file e trasformalo in testo senza inviarlo a Groq.</p>
+        </div>
+        <span className="mobile-status-chip mobile-status-chip--local"><span className="mobile-status-dot" />Locale</span>
+      </div>
+
+      <section className="mobile-card mobile-audio-upload-card" aria-labelledby="local-audio-title">
+        <div className="mobile-audio-upload-mark"><MobileIcon name="audio" size={23} /></div>
+        <span className="mobile-card-kicker">DA FILE A TESTO</span>
+        <h2 id="local-audio-title">Il tuo audio, in chiaro</h2>
+        <p className="mobile-card-description">Apri un file audio dal telefono. La trascrizione usa il riconoscimento locale di Google e segue la lingua scelta nelle impostazioni.</p>
+
+        {localAudioFile ? (
+          <div className="mobile-audio-selected" aria-live="polite">
+            <span className="mobile-audio-selected-icon"><MobileIcon name="audio" size={18} /></span>
+            <span className="mobile-audio-selected-copy"><strong>{localAudioFile.name}</strong><small>{localAudioFile.mimeType || "File audio"}</small></span>
+            <button type="button" className="mobile-audio-clear" onClick={handleClearLocalAudio} disabled={localAudioState === "transcribing"} aria-label="Rimuovi file selezionato">×</button>
+          </div>
+        ) : (
+          <div className="mobile-audio-empty">
+            <span>♫</span>
+            <strong>Nessun file selezionato</strong>
+            <small>MP3, M4A, WAV, OGG e altri formati audio</small>
+          </div>
+        )}
+
+        <button
+          type="button"
+          className="mobile-secondary-button"
+          onClick={() => void handlePickLocalAudio()}
+          disabled={localAudioState === "picking" || localAudioState === "transcribing"}
+          aria-busy={localAudioState === "picking"}
+        >
+          <MobileIcon name="audio" size={17} />
+          {localAudioState === "picking" ? "Apro i file…" : localAudioFile ? "Scegli un altro audio" : "Scegli un file audio"}
+        </button>
+
+        {localAudioFile && !localAudioTranscript && (
+          <button
+            type="button"
+            className="mobile-primary-button"
+            onClick={() => void handleTranscribeLocalAudio()}
+            disabled={localAudioState === "transcribing" || localAudioState === "picking"}
+            aria-busy={localAudioState === "transcribing"}
+          >
+            {localAudioState === "transcribing" ? (
+              <><span className="mobile-audio-spinner" aria-hidden="true" />Trascrizione in corso…</>
+            ) : localAudioState === "error" ? "Riprova trascrizione" : "Trascrivi sul dispositivo"}
+          </button>
+        )}
+
+        {localAudioState === "transcribing" && (
+          <div className="mobile-audio-progress" role="status" aria-live="polite">
+            <span className="mobile-audio-progress-track"><span /></span>
+            <p>Preparo il modello locale e riconosco le parole. Al primo utilizzo potrebbe servire una connessione per scaricare il modello.</p>
+          </div>
+        )}
+        {localAudioError && <p className="mobile-settings-error" role="alert">{localAudioError}</p>}
+      </section>
+
+      <section className="mobile-card mobile-audio-engine-card">
+        <span className="mobile-icon-tile mobile-icon-tile--signal"><MobileIcon name="shield" size={19} /></span>
+        <div><span className="mobile-eyebrow">Riconoscimento locale</span><strong>Il file rimane sul dispositivo</strong><p>La tastiera continua a usare il suo percorso Groq originale. Questa pagina è indipendente.</p></div>
+      </section>
+
+      {localAudioTranscript && (
+        <section className="mobile-card mobile-transcript-card" aria-labelledby="local-transcript-title">
+          <div className="mobile-section-heading">
+            <div>
+              <span className="mobile-eyebrow">TRASCRIZIONE COMPLETATA</span>
+              <h2 id="local-transcript-title">Testo riconosciuto</h2>
+            </div>
+            <span className="mobile-mini-state is-ready">{localAudioTranscript.language}</span>
+          </div>
+          <p className="mobile-transcript-text">{localAudioTranscript.text}</p>
+          <div className="mobile-transcript-footer">
+            <span>{localAudioTranscript.text.trim().split(/\s+/).filter(Boolean).length} parole · {localAudioTranscript.savedInHistory ? "Salvata in cronologia" : "Non salvata in cronologia"}</span>
+            <button type="button" className="mobile-secondary-button mobile-copy-button" onClick={() => void handleCopyLocalTranscript()}>
+              {localAudioCopied ? "Copiato" : "Copia testo"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      <section className="mobile-privacy-note">
+        <MobileIcon name="shield" size={18} />
+        <p><strong>Audio privato.</strong> Il file viene letto dal selettore Android e trascritto sul dispositivo; il testo può essere eliminato dalla cronologia.</p>
+      </section>
+    </div>
+  );
+
   const renderHistory = () => (
     <div className="mobile-page mobile-page-enter">
       <div className="mobile-page-heading">
@@ -684,7 +884,7 @@ export default function MobileDashboard({
           <img src="/assets/logo.png" alt="" />
           <div><strong>Traflix Voice</strong><span>Mobile Hub <small>v{appVersion || "…"}</small></span></div>
         </div>
-        <span className="mobile-cloud-pill"><span />Groq Cloud</span>
+        <span className={`mobile-cloud-pill ${destination === "transcribe" ? "mobile-cloud-pill--local" : ""}`}><span />{destination === "transcribe" ? "Sul dispositivo" : "Groq Cloud"}</span>
       </header>
 
       <main
@@ -695,6 +895,7 @@ export default function MobileDashboard({
       >
         <div className="mobile-content">
           {destination === "overview" && renderOverview()}
+          {destination === "transcribe" && renderTranscribe()}
           {destination === "settings" && renderSettings()}
           {destination === "history" && renderHistory()}
         </div>
@@ -703,8 +904,9 @@ export default function MobileDashboard({
       <nav className="mobile-bottom-nav" aria-label="Navigazione mobile">
         {([
           ["overview", "Panoramica", "overview"],
-          ["settings", "Impostazioni", "settings"],
+          ["transcribe", "Trascrivi", "audio"],
           ["history", "Cronologia", "history"],
+          ["settings", "Impostazioni", "settings"],
         ] as const).map(([id, label, icon]) => (
           <button
             key={id}

@@ -29,8 +29,8 @@
 
 Traflix Voice has two platform surfaces built from a shared product contract:
 the Windows desktop app is local-first with optional Groq Cloud transcription,
-while the Android preview is a native keyboard with Groq Cloud as its only
-transcription provider.
+while Android provides a Groq-powered keyboard and a separate local
+transcription route for audio shared from other apps.
 
 ## Platforms
 
@@ -68,8 +68,20 @@ Windows application.
 The Android port is maintained on the
 [`main`](https://github.com/iTzFrancesco/Traflix-Voice/tree/main)
 branch. It provides a native Traflix Voice keyboard with hold-to-speak or
-toggle recording, Groq Cloud transcription, encrypted API-key persistence, and
-a small overview/settings/history Hub. The Hub checks GitHub for newer Android
+toggle recording and Groq Cloud transcription, encrypted API-key persistence,
+and an overview/settings/history Hub. A **Trascrivi** page also lets users choose
+an audio file with Android's system picker and get a local transcript in the
+same mobile interface. The app registers as an audio share target too: choose
+**Condividi** on an audio file in WhatsApp or another app, then select
+**Traflix Voice · Trascrivi audio**. Both routes use the shared on-device Google
+ML Kit Speech Recognition service; the result is saved in local history. The
+share route opens a compact floating panel over the source app, starts
+transcription automatically, and keeps the result visible there. It tries Basic
+mode first, then Advanced mode if Basic is unavailable and the device supports
+it. Neither local route falls back to Groq, and neither changes the original
+Groq-powered keyboard path. Android still requires a voice note to be shared
+from WhatsApp; the app cannot intercept taps inside WhatsApp. The Hub
+checks GitHub for newer Android
 releases after startup and only considers the `android-vX.Y.Z` tag family and
 the signed `app-universal-release.apk` asset; Windows releases are ignored. A
 newer mobile release is downloaded, verified, and sent to the Android installer
@@ -129,11 +141,22 @@ Android requires a signed APK for direct installation.
 4. In any supported text field, choose Hold to Speak or Toggle in the Hub.
 5. Press the Traflix microphone key. The transcript is committed through the
    active `InputConnection` and local history remains on the device.
+6. To transcribe an existing voice note, use WhatsApp's **Condividi** action
+   and select **Traflix Voice · Trascrivi audio**. A floating panel appears over
+   WhatsApp and begins transcription automatically. With **Rilevamento
+   automatico** selected, it uses the phone's language because the model needs
+   a fixed locale.
+7. To choose a file manually, open **Trascrivi** in the Hub, select an audio
+   file, then tap **Trascrivi sul dispositivo**. The transcript appears there
+   and is also added to local history.
 
 Windows 10 and Windows 11 are the supported desktop platforms. Android 13+
 is the target for the private mobile preview. macOS and Linux are not
-currently validated. Desktop local transcription requires a downloaded model;
-Android uses Groq Cloud only in the current preview.
+currently validated. Desktop local transcription requires a downloaded model.
+Android keyboard dictation uses Groq Cloud. Shared audio can use local ML Kit
+transcription on Android 12/API 31 and later. ML Kit Speech Recognition is an
+alpha API; Basic Italian is marked beta by Google, and Advanced mode is limited
+to compatible phones. The first model preparation may need internet access.
 
 ## Installation
 
@@ -207,11 +230,13 @@ Focused benchmark scripts and technical reports are under `scripts/` and
 ## Privacy and data handling
 
 Desktop local mode processes audio on the device after the Parakeet
-model has been downloaded. Desktop cloud mode and the Android preview send
-recorded audio to Groq only after the user configures cloud access. The Android
-preview stores its BYOK key in Android Keystore-backed storage and does not put
-it in the APK or repository. A public Android release must use the Traflix
-gateway instead of a client-held provider key.
+model has been downloaded. Desktop cloud mode and Android keyboard dictation
+send recorded audio to Groq only after the user configures cloud access. The
+Android keyboard stores its BYOK key in Android Keystore-backed storage and
+does not put it in the APK or repository. Shared audio follows a separate
+on-device ML Kit path and is not sent to Groq. A public Android release must use
+the Traflix gateway instead of a client-held provider key for keyboard
+dictation.
 
 History, settings, statistics, usage data, and downloaded models are stored in
 the operating system's application-data directory. Never commit API keys,

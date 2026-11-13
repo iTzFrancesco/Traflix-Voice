@@ -7,13 +7,25 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Log
+import androidx.activity.result.ActivityResult
+import androidx.appcompat.app.AppCompatActivity
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.Plugin
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @InvokeArg
 class AndroidSettingsArgs {
@@ -43,8 +55,131 @@ class HistoryEntryArgs {
   var wordCount: Int = 0
 }
 
+@InvokeArg
+class LocalAudioFileArgs {
+  var uri: String? = null
+  var name: String? = null
+}
+
 @TauriPlugin
 class VoiceRuntimePlugin(private val activity: Activity) : Plugin(activity) {
+  private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+  private var localAudioJob: Job? = null
+
+  override fun onDestroy(activity: AppCompatActivity) {
+    audioScope.cancel()
+    super.onDestroy(activity)
+  }
+
+  @Command
+  fun pickLocalAudioFile(invoke: Invoke) {
+    val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+      addCategory(Intent.CATEGORY_OPENABLE)
+      type = "audio/*"
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+    }
+    try {
+      startActivityForResult(invoke, picker, "onLocalAudioPicked")
+    } catch (error: Exception) {
+      Log.e(TAG, "open local audio picker failed", error)
+      invoke.reject(error.message ?: "Impossibile aprire il selettore audio")
+    }
+  }
+
+  @ActivityCallback
+  fun onLocalAudioPicked(invoke: Invoke, result: ActivityResult) {
+    if (result.resultCode != Activity.RESULT_OK) {
+      invoke.resolveObject(mapOf("cancelled" to true))
+      return
+    }
+
+    val uri = result.data?.data
+    if (uri == null) {
+      invoke.reject("Il selettore non ha restituito un file audio")
+      return
+    }
+
+    val readGrant = result.data?.flags?.and(Intent.FLAG_GRANT_READ_URI_PERMISSION) ?: 0
+    if (readGrant != 0) {
+      runCatching { activity.contentResolver.takePersistableUriPermission(uri, readGrant) }
+    }
+    val name = runCatching {
+      activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (cursor.moveToFirst() && column >= 0) cursor.getString(column) else null
+      }
+    }.getOrNull()?.takeIf { it.isNotBlank() }?.take(120)
+      ?: uri.lastPathSegment?.take(120)
+      ?: "Audio selezionato"
+    val mimeType = runCatching { activity.contentResolver.getType(uri) }.getOrNull().orEmpty()
+    invoke.resolveObject(
+      mapOf(
+        "cancelled" to false,
+        "uri" to uri.toString(),
+        "name" to name,
+        "mimeType" to mimeType,
+      ),
+    )
+  }
+
+  @Command
+  fun transcribeLocalAudio(invoke: Invoke) {
+    val args = invoke.parseArgs(LocalAudioFileArgs::class.java)
+    val uri = runCatching { Uri.parse(args.uri?.trim().orEmpty()) }.getOrNull()
+    if (uri == null || uri.scheme != "content") {
+      invoke.reject("Seleziona un file audio valido dal dispositivo")
+      return
+    }
+    if (localAudioJob?.isActive == true) {
+      invoke.reject("È già in corso una trascrizione audio")
+      return
+    }
+
+    localAudioJob = audioScope.launch {
+      try {
+        val transcript = OnDeviceAudioTranscriber(activity.applicationContext).transcribe(
+          uri = uri,
+          displayName = args.name?.takeIf { it.isNotBlank() } ?: "Audio selezionato",
+        )
+        val savedInHistory = try {
+          withContext(Dispatchers.IO) {
+            VoiceHistoryStore(activity.applicationContext).append(transcript.text)
+          }
+          true
+        } catch (error: Exception) {
+          Log.e(TAG, "save local audio transcript failed", error)
+          false
+        }
+        invoke.resolveObject(
+          mapOf(
+            "text" to transcript.text,
+            "language" to OnDeviceAudioTranscriber.languageName(transcript.locale.language),
+            "savedInHistory" to savedInHistory,
+          ),
+        )
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        Log.e(TAG, "local audio transcription failed", error)
+        invoke.reject(OnDeviceAudioTranscriber.friendlyError(error))
+      } finally {
+        localAudioJob = null
+      }
+    }
+  }
+
+  @Command
+  fun releaseLocalAudioFile(invoke: Invoke) {
+    val args = invoke.parseArgs(LocalAudioFileArgs::class.java)
+    val uri = runCatching { Uri.parse(args.uri?.trim().orEmpty()) }.getOrNull()
+    if (uri?.scheme == "content") {
+      runCatching {
+        activity.contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+    }
+    invoke.resolve()
+  }
+
   @Command
   fun openAndroidSettings(invoke: Invoke) {
     try {
