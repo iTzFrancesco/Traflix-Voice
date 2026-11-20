@@ -21,6 +21,13 @@ from whisper_engine import transcriber, ipc
 from whisper_engine.ready_microphone import ReadyMicrophone
 
 
+_NO_SPEECH_MESSAGES = {
+    "Nessun audio riconosciuto.",
+    "Nessuna voce rilevata.",
+    "Nessun audio catturato.",
+}
+
+
 class _RecordingSession:
     """Own the queue and stop signal for exactly one audio stream."""
 
@@ -139,6 +146,8 @@ class WhisperEngine:
         self._microphone = ReadyMicrophone(lambda **options: sd.InputStream(**options))
         self._microphone_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="microphone")
         self._recording_lock = threading.Lock()
+        self._file_lock = threading.Lock()
+        self._file_transcription_busy = False
         self._active_session = None
         self.models_dir = None
         self._shutting_down = False
@@ -312,6 +321,9 @@ class WhisperEngine:
         cloud_options = self._capture_cloud_options()
         session = _RecordingSession(provider=self.provider, cloud_options=cloud_options)
         with self._recording_lock:
+            if self._file_transcription_busy:
+                self.log({"status": "warning", "message": "Trascrizione da file in corso. Riprova tra poco."})
+                return None
             previous = self._active_session
             self._active_session = session
             self.audio_queue = session.queue
@@ -673,6 +685,134 @@ class WhisperEngine:
                     if self._active_session is session:
                         self._active_session = None
                         self.is_recording = False
+
+    def transcribe_audio_file(self, data):
+        """Transcribe PCM samples decoded by the WebView from a local audio file.
+
+        File transcriptions reuse the configured cloud/local recognizer but
+        report through `file_*` events: the normal `result` event would trigger
+        clipboard auto-paste and dictation stats, which make no sense here.
+        """
+        import base64
+
+        request_id = data.get("request_id") or ""
+        if not request_id:
+            self.log({"status": "file_error", "request_id": request_id,
+                      "message": "Richiesta senza identificativo."})
+            return
+        # The recording gate and the file gate share _recording_lock so a hotkey
+        # press cannot race the guard. Both jobs also share _transcription_executor
+        # (single worker), which serializes inference with a dictation still in
+        # its post-processing phase after is_recording has already been cleared.
+        with self._recording_lock:
+            with self._file_lock:
+                if self._shutting_down:
+                    self.log({"status": "file_error", "request_id": request_id,
+                              "message": "Motore in chiusura."})
+                    return
+                if self._file_transcription_busy:
+                    self.log({"status": "file_error", "request_id": request_id,
+                              "message": "È già in corso una trascrizione da file."})
+                    return
+                if self.is_recording or self._active_session is not None:
+                    self.log({"status": "file_error", "request_id": request_id,
+                              "message": "Termina prima la dettatura in corso."})
+                    return
+                self._file_transcription_busy = True
+
+        try:
+            samples = data.get("samples") or ""
+            # 10 minutes at 16 kHz int16 is ~19.2 MB PCM, ~25.6 MB base64.
+            # Reject oversized IPC before paying for base64 and numpy copies.
+            if not isinstance(samples, str) or len(samples) > 27_000_000:
+                raise ValueError("Payload audio non valido.")
+            raw = base64.b64decode(samples, validate=True)
+            recording = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+            if not 0 < recording.size <= SAMPLE_RATE * 600:
+                raise ValueError("Durata audio non valida (massimo 10 minuti).")
+            audio_module.apply_automatic_gain(recording)
+            duration = recording.size / SAMPLE_RATE
+            provider = data.get("provider", self.provider)
+            language = data.get("language", "it")
+            model_size = data.get("model", DEFAULT_LOCAL_MODEL)
+            self.log({"status": "file_processing", "request_id": request_id,
+                      "duration": duration, "provider": provider})
+
+            finished = False
+
+            def file_log(event):
+                nonlocal finished
+                if finished:
+                    return
+                status = event.get("status")
+                message = event.get("message", "")
+                if status == "result":
+                    finished = True
+                    self.log({
+                        "status": "file_result",
+                        "request_id": request_id,
+                        "text": event.get("text", ""),
+                        "message": message,
+                        "duration": event.get("duration", duration),
+                        "provider": provider,
+                        "language": language,
+                    })
+                elif status == "rate_limit":
+                    finished = True
+                    self.log({"status": "file_error", "request_id": request_id,
+                              "message": message or "Limite API Groq raggiunto."})
+                elif status == "ready":
+                    # `ready` is also emitted after errors; only the two
+                    # recognizer messages below mean "no speech detected".
+                    if message in _NO_SPEECH_MESSAGES:
+                        finished = True
+                        self.log({
+                            "status": "file_result",
+                            "request_id": request_id,
+                            "text": "",
+                            "message": message,
+                            "duration": duration,
+                            "provider": provider,
+                            "language": language,
+                        })
+                    elif message:
+                        finished = True
+                        self.log({"status": "file_error", "request_id": request_id,
+                                  "message": message})
+                elif status == "error":
+                    finished = True
+                    self.log({"status": "file_error", "request_id": request_id,
+                              "message": message or "Errore durante la trascrizione."})
+
+            if provider == "cloud":
+                from whisper_engine.cloud_quality import normalize_vocabulary
+                cloud_options = (
+                    data.get("cloud_correct_uncertain") is True,
+                    normalize_vocabulary(data.get("cloud_vocabulary")),
+                    data.get("cloud_speech_filter") is True,
+                )
+                self._transcribe_cloud(recording, language, duration, file_log,
+                                       cloud_options=cloud_options)
+            else:
+                is_valid, _ = model_module.verify_model(self.models_dir, model_size)
+                if not is_valid:
+                    file_log({"status": "error",
+                              "message": "Scarica prima il modello dalla tab Motore IA."})
+                    return
+                model = self.load_model(model_size)
+                if model is None:
+                    file_log({"status": "error", "message": "Modello locale non disponibile."})
+                    return
+                self._transcribe_local(recording, model_size, language, duration,
+                                       file_log, local_model=model)
+            if not finished and not self._shutting_down:
+                raise RuntimeError("Trascrizione terminata senza risultato.")
+        except Exception as e:
+            self.log({"status": "file_error", "request_id": request_id,
+                      "message": str(e)})
+        finally:
+            with self._file_lock:
+                self._file_transcription_busy = False
 
     def run(self):
         self.prepare_transcription_worker()

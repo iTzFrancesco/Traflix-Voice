@@ -113,6 +113,10 @@ def handle_command(cmd, data, engine):
             data.get("model", DEFAULT_LOCAL_MODEL),
             data.get("language", "it"),
         )
+    elif cmd == "transcribe_audio_file":
+        # Single-worker executor: file jobs queue behind dictation inference
+        # instead of racing it on the same recognizer/model handle.
+        engine._transcription_executor.submit(engine.transcribe_audio_file, data)
     elif cmd == "stop":
         engine.stop_recording()
     elif cmd == "configure_microphone":
