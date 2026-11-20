@@ -1,6 +1,7 @@
 import io
 import json
 import queue
+import re
 import struct
 import sys
 import threading
@@ -453,3 +454,134 @@ def test_widget_vocabulary_event_focus_and_settings_persistence(browser_page, e2
     browser_page.get_by_role("tab", name="Cronologia", exact=True).click()
     browser_page.get_by_role("tab", name="Motore IA").click()
     expect(vocabulary).to_have_value("\u2022 Traflix Voice\n\u2022 Silero\n\u2022 TypeScript")
+
+
+def test_audio_file_transcription_saves_to_history_without_paste(browser_page, e2e_base_url, tmp_path):
+    wav_path = tmp_path / "vocaletto.wav"
+    with wave.open(str(wav_path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(SAMPLE_RATE)
+        handle.writeframes(np.zeros(SAMPLE_RATE, dtype=np.int16).tobytes())
+
+    configure_tauri_bridge(browser_page, lambda _source, _command, _args: None, lambda _source: [])
+    open_app(browser_page, e2e_base_url)
+
+    browser_page.get_by_role("tab", name="Trascrivi audio").click()
+    expect(browser_page.locator("#audio-file-live")).to_have_count(1)
+    browser_page.locator("#audio-file-input").set_input_files(str(wav_path))
+    browser_page.locator("#audio-file-transcribe").click()
+    browser_page.wait_for_function(
+        "() => window.__e2e.calls.some(c => c.command === 'send_to_python' && c.args.message.includes('transcribe_audio_file'))"
+    )
+    calls = browser_page.evaluate("window.__e2e.calls")
+    command = next(
+        call for call in calls
+        if call["command"] == "send_to_python"
+        and "transcribe_audio_file" in call["args"]["message"]
+    )
+    message = json.loads(command["args"]["message"])
+    assert message["provider"] == "cloud"
+    assert message["language"] == "it"
+    assert message["samples"]
+
+    request_id = message["request_id"]
+    browser_page.evaluate(
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_processing', request_id:id}))",
+        request_id,
+    )
+    browser_page.evaluate(
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:id, text:'Ciao Francesco, ecco la trascrizione.', duration:1.2, provider:'cloud', language:'it'}))",
+        request_id,
+    )
+
+    expect(browser_page.get_by_text("Ciao Francesco, ecco la trascrizione.")).to_be_visible()
+    expect(browser_page.get_by_text("salvata in Cronologia")).to_be_visible()
+    browser_page.wait_for_function(
+        "() => window.__e2e.calls.some(c => c.command === 'save_transcription')"
+    )
+    calls = browser_page.evaluate("window.__e2e.calls")
+    saved = next(call for call in calls if call["command"] == "save_transcription")
+    assert saved["args"]["text"] == "Ciao Francesco, ecco la trascrizione."
+    assert saved["args"]["wordCount"] == 5
+    assert re.fullmatch(r"\d{2}/\d{2}/\d{4}, \d{2}:\d{2}:\d{2}", saved["args"]["timestamp"])
+    assert not any(call["command"] == "execute_paste" for call in calls)
+    assert not any(call["command"] == "update_stats" for call in calls)
+
+    browser_page.get_by_role("tab", name="Cronologia", exact=True).click()
+    expect(browser_page.get_by_text("Ciao Francesco, ecco la trascrizione.")).to_be_visible()
+
+
+def test_audio_file_result_survives_tab_switch(browser_page, e2e_base_url, tmp_path):
+    wav_path = tmp_path / "vocaletto.wav"
+    with wave.open(str(wav_path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(SAMPLE_RATE)
+        handle.writeframes(np.zeros(SAMPLE_RATE, dtype=np.int16).tobytes())
+
+    configure_tauri_bridge(browser_page, lambda _source, _command, _args: None, lambda _source: [])
+    open_app(browser_page, e2e_base_url)
+
+    browser_page.get_by_role("tab", name="Trascrivi audio").click()
+    browser_page.locator("#audio-file-input").set_input_files(str(wav_path))
+    browser_page.locator("#audio-file-transcribe").click()
+    browser_page.wait_for_function(
+        "() => window.__e2e.calls.some(c => c.command === 'send_to_python' && c.args.message.includes('transcribe_audio_file'))"
+    )
+    command = next(
+        call for call in browser_page.evaluate("window.__e2e.calls")
+        if call["command"] == "send_to_python" and "transcribe_audio_file" in call["args"]["message"]
+    )
+    request_id = json.loads(command["args"]["message"])["request_id"]
+
+    # The user checks another tab while the sidecar is still working.
+    browser_page.get_by_role("tab", name="Cronologia", exact=True).click()
+    browser_page.evaluate(
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:id, text:'Testo sopravvissuto al cambio scheda.', duration:1.0, provider:'cloud', language:'it'}))",
+        request_id,
+    )
+    browser_page.wait_for_function(
+        "() => window.__e2e.history.some(e => e.text === 'Testo sopravvissuto al cambio scheda.')"
+    )
+
+    browser_page.get_by_role("tab", name="Cronologia", exact=True).click()
+    expect(browser_page.get_by_text("Testo sopravvissuto al cambio scheda.")).to_be_visible()
+
+
+def test_audio_file_ignores_stale_request_and_shows_errors(browser_page, e2e_base_url, tmp_path):
+    wav_path = tmp_path / "vocaletto.wav"
+    with wave.open(str(wav_path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(SAMPLE_RATE)
+        handle.writeframes(np.zeros(SAMPLE_RATE, dtype=np.int16).tobytes())
+
+    configure_tauri_bridge(browser_page, lambda _source, _command, _args: None, lambda _source: [])
+    open_app(browser_page, e2e_base_url)
+
+    browser_page.get_by_role("tab", name="Trascrivi audio").click()
+    browser_page.locator("#audio-file-input").set_input_files(str(wav_path))
+    browser_page.locator("#audio-file-transcribe").click()
+    browser_page.wait_for_function(
+        "() => window.__e2e.calls.some(c => c.command === 'send_to_python' && c.args.message.includes('transcribe_audio_file'))"
+    )
+    command = next(
+        call for call in browser_page.evaluate("window.__e2e.calls")
+        if call["command"] == "send_to_python" and "transcribe_audio_file" in call["args"]["message"]
+    )
+    request_id = json.loads(command["args"]["message"])["request_id"]
+
+    browser_page.evaluate(
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:'stale-id', text:'Vecchia richiesta.', duration:1.0, provider:'cloud', language:'it'}))",
+        request_id,
+    )
+    expect(browser_page.get_by_text("Vecchia richiesta.")).to_have_count(0)
+    browser_page.evaluate(
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_error', request_id:id, message:'Limite API Groq raggiunto.'}))",
+        request_id,
+    )
+    expect(browser_page.locator('[role="alert"]').filter(has_text="Limite API Groq raggiunto.")).to_be_visible()
+    calls = browser_page.evaluate("window.__e2e.calls")
+    assert not any(call["command"] == "save_transcription" for call in calls)
+    assert not any(call["command"] == "execute_paste" for call in calls)

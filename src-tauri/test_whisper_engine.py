@@ -7,6 +7,7 @@ Run with:
     python -m unittest test_whisper_engine.py -v
 """
 
+import base64
 import json
 import io
 import os
@@ -2321,6 +2322,187 @@ class TestRamReleaseAndBackendProbe(unittest.TestCase):
         results = [e for e in events if e.get("status") == "result"]
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["provider"], "cloud")
+
+
+class TestAudioFileTranscription(unittest.TestCase):
+    """Local audio files use file_* events so dictation paste/stats stay untouched."""
+
+    def _make_engine(self):
+        engine = WhisperEngine()
+        engine.models_dir = "/tmp/models"
+        return engine
+
+    def _payload(self, request_id="r", **overrides):
+        pcm = np.zeros(SAMPLE_RATE, dtype=np.int16).tobytes()
+        data = {
+            "request_id": request_id,
+            "samples": base64.b64encode(pcm).decode("ascii"),
+            "provider": "local",
+            "language": "it",
+            "model": "parakeet-ultra",
+        }
+        data.update(overrides)
+        return data
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_cmd_transcribe_audio_file_uses_single_worker_executor(self, _):
+        engine = self._make_engine()
+        command = {"command": "transcribe_audio_file", "request_id": "r1", "samples": "AQ=="}
+        lines = [json.dumps(command) + "\n", json.dumps({"command": "quit"}) + "\n"]
+        with (
+            patch("sys.stdin", io.StringIO("".join(lines))),
+            patch.object(engine, "prepare_transcription_worker"),
+            patch.object(engine, "_transcription_executor") as executor,
+        ):
+            engine.run()
+
+        executor.submit.assert_called_once()
+        target, payload = executor.submit.call_args.args
+        self.assertEqual(target.__func__, WhisperEngine.transcribe_audio_file)
+        self.assertIs(target.__self__, engine)
+        self.assertEqual(payload["request_id"], "r1")
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_local_file_result_uses_file_event(self, _):
+        engine = self._make_engine()
+        events = []
+        engine.log = events.append
+
+        def emit_result(_recording, _model_size, _language, duration, log_func, **_kwargs):
+            log_func({"status": "result", "text": "ciao mondo", "duration": duration})
+
+        with (
+            patch("whisper_engine.engine.model_module.verify_model", return_value=(True, "")),
+            patch.object(engine, "load_model", return_value=MagicMock()),
+            patch.object(engine, "_transcribe_local", side_effect=emit_result),
+        ):
+            engine.transcribe_audio_file(self._payload("r2"))
+
+        results = [event for event in events if event.get("status") == "file_result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["text"], "ciao mondo")
+        self.assertEqual(results[0]["request_id"], "r2")
+        self.assertEqual(results[0]["provider"], "local")
+        self.assertFalse(any(event.get("status") == "result" for event in events))
+        self.assertTrue(any(event.get("status") == "file_processing" for event in events))
+        self.assertFalse(engine._file_transcription_busy)
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_cloud_result_keeps_cloud_options(self, _):
+        engine = self._make_engine()
+        events = []
+        engine.log = events.append
+        captured = {}
+
+        def emit_result(_recording, _language, _duration, _log, **kwargs):
+            captured["options"] = kwargs["cloud_options"]
+            _log({"status": "result", "text": "ciao cloud", "duration": 1.0})
+
+        data = self._payload(
+            "r3", provider="cloud", cloud_correct_uncertain=True,
+            cloud_vocabulary="Traflix Voice", cloud_speech_filter=False,
+        )
+        with patch.object(engine, "_transcribe_cloud", side_effect=emit_result):
+            engine.transcribe_audio_file(data)
+
+        results = [event for event in events if event.get("status") == "file_result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["provider"], "cloud")
+        self.assertEqual(results[0]["text"], "ciao cloud")
+        self.assertTrue(captured["options"][0])
+        self.assertIn("Traflix Voice", captured["options"][1])
+        self.assertFalse(captured["options"][2])
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_rate_limit_becomes_file_error_not_empty_result(self, _):
+        engine = self._make_engine()
+        events = []
+        engine.log = events.append
+
+        def emit_rate_limit(_recording, _language, _duration, log_func, **_kwargs):
+            log_func({"status": "rate_limit", "message": "Limite API Groq raggiunto."})
+            log_func({"status": "ready", "message": "Motore Whisper pronto."})
+
+        data = self._payload("r6", provider="cloud")
+        with patch.object(engine, "_transcribe_cloud", side_effect=emit_rate_limit):
+            engine.transcribe_audio_file(data)
+
+        self.assertFalse(any(event.get("status") == "file_result" for event in events))
+        errors = [event for event in events if event.get("status") == "file_error"]
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["message"], "Limite API Groq raggiunto.")
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_no_speech_ready_becomes_empty_file_result(self, _):
+        engine = self._make_engine()
+        events = []
+        engine.log = events.append
+
+        def emit_no_speech(_recording, _language, _duration, log_func, **_kwargs):
+            log_func({"status": "ready", "message": "Nessuna voce rilevata."})
+
+        with patch.object(engine, "_transcribe_cloud", side_effect=emit_no_speech):
+            engine.transcribe_audio_file(self._payload("r7", provider="cloud"))
+
+        results = [event for event in events if event.get("status") == "file_result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["text"], "")
+        self.assertEqual(results[0]["message"], "Nessuna voce rilevata.")
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_file_transcription_rejected_while_busy(self, _):
+        engine = self._make_engine()
+        engine._file_transcription_busy = True
+        events = []
+        engine.log = events.append
+        engine.transcribe_audio_file({"request_id": "r8", "samples": ""})
+        errors = [event for event in events if event.get("status") == "file_error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("già in corso", errors[0]["message"])
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_file_transcription_rejected_while_recording(self, _):
+        engine = self._make_engine()
+        engine.is_recording = True
+        events = []
+        engine.log = events.append
+        engine.transcribe_audio_file({"request_id": "r4", "samples": ""})
+        errors = [event for event in events if event.get("status") == "file_error"]
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["request_id"], "r4")
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_missing_model_reports_download_hint(self, _):
+        engine = self._make_engine()
+        events = []
+        engine.log = events.append
+        with patch("whisper_engine.engine.model_module.verify_model", return_value=(False, "")):
+            engine.transcribe_audio_file(self._payload("r9"))
+        errors = [event for event in events if event.get("status") == "file_error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Scarica prima il modello", errors[0]["message"])
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_invalid_or_oversized_payload_report_file_error(self, _):
+        engine = self._make_engine()
+        events = []
+        engine.log = events.append
+        engine.transcribe_audio_file({"request_id": "r5", "samples": "not-base64!!!"})
+        engine.transcribe_audio_file({"request_id": "r10", "samples": "A" * 27_000_001})
+        engine.transcribe_audio_file({"samples": "AQ=="})
+        errors = [event for event in events if event.get("status") == "file_error"]
+        self.assertEqual([event["request_id"] for event in errors], ["r5", "r10", ""])
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_shutdown_guard_rejects_file_job(self, _):
+        engine = self._make_engine()
+        engine._shutting_down = True
+        events = []
+        engine.log = events.append
+        engine.transcribe_audio_file(self._payload("r11"))
+        errors = [event for event in events if event.get("status") == "file_error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("chiusura", errors[0]["message"])
 
 
 if __name__ == "__main__":
