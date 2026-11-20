@@ -481,9 +481,11 @@ def test_audio_file_transcription_saves_to_history_without_paste(browser_page, e
         and "transcribe_audio_file" in call["args"]["message"]
     )
     message = json.loads(command["args"]["message"])
-    assert message["provider"] == "cloud"
+    assert message["provider"] == "local"
     assert message["language"] == "it"
     assert message["samples"]
+    assert "cloud_correct_uncertain" not in message
+    assert "cloud_vocabulary" not in message
 
     request_id = message["request_id"]
     browser_page.evaluate(
@@ -491,12 +493,13 @@ def test_audio_file_transcription_saves_to_history_without_paste(browser_page, e
         request_id,
     )
     browser_page.evaluate(
-        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:id, text:'Ciao Francesco, ecco la trascrizione.', duration:1.2, provider:'cloud', language:'it'}))",
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:id, text:'Ciao Francesco, ecco la trascrizione.', duration:1.2, provider:'local', language:'it'}))",
         request_id,
     )
 
     expect(browser_page.get_by_text("Ciao Francesco, ecco la trascrizione.")).to_be_visible()
-    expect(browser_page.get_by_text("salvata in Cronologia")).to_be_visible()
+    expect(browser_page.get_by_text("Parakeet Ultra")).to_be_visible()
+    expect(browser_page.get_by_text("in Cronologia")).to_be_visible()
     browser_page.wait_for_function(
         "() => window.__e2e.calls.some(c => c.command === 'save_transcription')"
     )
@@ -538,7 +541,7 @@ def test_audio_file_result_survives_tab_switch(browser_page, e2e_base_url, tmp_p
     # The user checks another tab while the sidecar is still working.
     browser_page.get_by_role("tab", name="Cronologia", exact=True).click()
     browser_page.evaluate(
-        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:id, text:'Testo sopravvissuto al cambio scheda.', duration:1.0, provider:'cloud', language:'it'}))",
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:id, text:'Testo sopravvissuto al cambio scheda.', duration:1.0, provider:'local', language:'it'}))",
         request_id,
     )
     browser_page.wait_for_function(
@@ -573,15 +576,15 @@ def test_audio_file_ignores_stale_request_and_shows_errors(browser_page, e2e_bas
     request_id = json.loads(command["args"]["message"])["request_id"]
 
     browser_page.evaluate(
-        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:'stale-id', text:'Vecchia richiesta.', duration:1.0, provider:'cloud', language:'it'}))",
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_result', request_id:'stale-id', text:'Vecchia richiesta.', duration:1.0, provider:'local', language:'it'}))",
         request_id,
     )
     expect(browser_page.get_by_text("Vecchia richiesta.")).to_have_count(0)
     browser_page.evaluate(
-        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_error', request_id:id, message:'Limite API Groq raggiunto.'}))",
+        "(id) => window.__e2e.emit('python_output', JSON.stringify({status:'file_error', request_id:id, message:'Modello locale non disponibile.'}))",
         request_id,
     )
-    expect(browser_page.locator('[role="alert"]').filter(has_text="Limite API Groq raggiunto.")).to_be_visible()
+    expect(browser_page.locator('[role="alert"]').filter(has_text="Modello locale non disponibile.")).to_be_visible()
     calls = browser_page.evaluate("window.__e2e.calls")
     assert not any(call["command"] == "save_transcription" for call in calls)
     assert not any(call["command"] == "execute_paste" for call in calls)

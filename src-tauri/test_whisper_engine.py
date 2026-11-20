@@ -2375,8 +2375,11 @@ class TestAudioFileTranscription(unittest.TestCase):
             patch("whisper_engine.engine.model_module.verify_model", return_value=(True, "")),
             patch.object(engine, "load_model", return_value=MagicMock()),
             patch.object(engine, "_transcribe_local", side_effect=emit_result),
+            patch.object(engine, "unload_model") as unload,
         ):
             engine.transcribe_audio_file(self._payload("r2"))
+
+        unload.assert_called_once_with(notify=False)
 
         results = [event for event in events if event.get("status") == "file_result"]
         self.assertEqual(len(results), 1)
