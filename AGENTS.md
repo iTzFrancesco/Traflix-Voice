@@ -40,13 +40,14 @@ Rust sends line-delimited JSON commands to Python. Important commands include:
 
 - `init` to configure models, compute device, provider, and the optional Groq key;
 - `transcribe` to record and transcribe audio;
+- `transcribe_audio_file` to transcribe 16 kHz mono PCM decoded from a local audio file by the desktop "Trascrivi audio" page;
 - `stop` to stop the active recording;
 - `download` to download a local Whisper model;
 - `set_provider` to switch between local and cloud transcription;
 - `set_groq_api_key` to update the optional cloud credential;
 - `quit` to shut down the sidecar cleanly.
 
-Python reports status through JSON events such as `listening`, `processing`, `result`, `volume`, `downloading`, `download_complete`, `ready`, `rate_limit`, `warning`, and `error`.
+Python reports status through JSON events such as `listening`, `processing`, `result`, `volume`, `downloading`, `download_complete`, `ready`, `rate_limit`, `warning`, and `error`. File transcriptions report through `file_processing`, `file_result`, and `file_error` events carrying a frontend-generated `request_id`, so they never trigger clipboard auto-paste or dictation statistics.
 
 Preserve this contract when changing either side of the boundary. Add or update focused tests for new commands and status payloads.
 
