@@ -207,11 +207,11 @@ class WhisperEngine:
                 self._loading_in_progress = False
                 raise
 
-    def unload_model(self):
+    def unload_model(self, notify=True):
         """Drop the native recognizer and force a collection so RAM is freed now.
 
-        Returns True when a model was actually resident. Emits `unloaded` so
-        the UI can update; emits nothing when there was nothing to free.
+        Returns True when a model was actually resident. Emits `unloaded` when
+        notify is True; file transcriptions release the model quietly.
         """
         with self._model_lock:
             if self.model is None:
@@ -228,7 +228,8 @@ class WhisperEngine:
             gc.collect()
         except Exception:
             pass
-        self.log({"status": "unloaded", "message": "Modello locale rimosso dalla memoria."})
+        if notify:
+            self.log({"status": "unloaded", "message": "Modello locale rimosso dalla memoria."})
         return True
 
     def _preload_default_model(self, model_size=DEFAULT_LOCAL_MODEL):
@@ -689,13 +690,14 @@ class WhisperEngine:
     def transcribe_audio_file(self, data):
         """Transcribe PCM samples decoded by the WebView from a local audio file.
 
-        File transcriptions reuse the configured cloud/local recognizer but
-        report through `file_*` events: the normal `result` event would trigger
-        clipboard auto-paste and dictation stats, which make no sense here.
+        File transcriptions use the local recognizer and report through
+        `file_*` events: the normal `result` event would trigger clipboard
+        auto-paste and dictation stats, which make no sense here.
         """
         import base64
 
         request_id = data.get("request_id") or ""
+        provider = data.get("provider", "local")
         if not request_id:
             self.log({"status": "file_error", "request_id": request_id,
                       "message": "Richiesta senza identificativo."})
@@ -732,7 +734,6 @@ class WhisperEngine:
                 raise ValueError("Durata audio non valida (massimo 10 minuti).")
             audio_module.apply_automatic_gain(recording)
             duration = recording.size / SAMPLE_RATE
-            provider = data.get("provider", self.provider)
             language = data.get("language", "it")
             model_size = data.get("model", DEFAULT_LOCAL_MODEL)
             self.log({"status": "file_processing", "request_id": request_id,
@@ -811,6 +812,10 @@ class WhisperEngine:
             self.log({"status": "file_error", "request_id": request_id,
                       "message": str(e)})
         finally:
+            # A file transcription is a one-off: release the ~740 MB recognizer
+            # as soon as it finishes so desktop RAM is not held hostage.
+            if provider == "local":
+                self.unload_model(notify=False)
             with self._file_lock:
                 self._file_transcription_busy = False
 

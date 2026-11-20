@@ -47,7 +47,7 @@ Rust sends line-delimited JSON commands to Python. Important commands include:
 - `set_groq_api_key` to update the optional cloud credential;
 - `quit` to shut down the sidecar cleanly.
 
-Python reports status through JSON events such as `listening`, `processing`, `result`, `volume`, `downloading`, `download_complete`, `ready`, `rate_limit`, `warning`, and `error`. File transcriptions report through `file_processing`, `file_result`, and `file_error` events carrying a frontend-generated `request_id`, so they never trigger clipboard auto-paste or dictation statistics.
+Python reports status through JSON events such as `listening`, `processing`, `result`, `volume`, `downloading`, `download_complete`, `ready`, `rate_limit`, `warning`, and `error`. File transcriptions always use the local model (no cloud provider, ChatJimmy correction, or personal vocabulary) and report through `file_processing`, `file_result`, and `file_error` events carrying a frontend-generated `request_id`, so they never trigger clipboard auto-paste or dictation statistics. The sidecar releases the local model from memory when a file transcription finishes.
 
 Preserve this contract when changing either side of the boundary. Add or update focused tests for new commands and status payloads.
 
