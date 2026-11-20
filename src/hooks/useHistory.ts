@@ -9,7 +9,7 @@ export function useHistory() {
   const mutationQueueRef = useRef(Promise.resolve());
 
   const enqueueMutation = useCallback(
-    (mutation: () => Promise<unknown>) => {
+    <T,>(mutation: () => Promise<T>): Promise<T> => {
       const scheduled = mutationQueueRef.current.then(mutation);
       mutationQueueRef.current = scheduled.then(
         () => undefined,
@@ -114,27 +114,29 @@ export function useHistory() {
   );
 
   const saveTranscription = useCallback(
-    async (text: string, timestamp: string, wordCount: number) => {
-      if (!window.__TAURI__?.core?.invoke) return;
+    async (text: string, timestamp: string, wordCount: number): Promise<boolean> => {
+      if (!window.__TAURI__?.core?.invoke) return false;
       const clearId = clearIdRef.current;
       ++mutationIdRef.current;
 
-      await enqueueMutation(async () => {
+      return enqueueMutation(async () => {
         // A clear invalidates saves that were already queued. Saves submitted
         // after clear are queued behind the clear operation and remain valid.
-        if (clearId !== clearIdRef.current) return;
+        if (clearId !== clearIdRef.current) return false;
         try {
           await window.__TAURI__.core.invoke("save_transcription", {
             text,
             timestamp,
             wordCount,
           });
-          if (clearId !== clearIdRef.current) return;
+          if (clearId !== clearIdRef.current) return false;
           const entry: TranscriptionEntry = { text, timestamp, word_count: wordCount };
           setEntries((previous) => [entry, ...previous].slice(0, 50));
+          return true;
         } catch (err) {
-          if (clearId !== clearIdRef.current) return;
+          if (clearId !== clearIdRef.current) return false;
           console.error("[cronologia] Errore salvataggio:", err);
+          return false;
         }
       });
     },

@@ -4,6 +4,7 @@ import HomeTab from "../components/HomeTab";
 import IATab from "../components/IATab";
 import TastiTab from "../components/TastiTab";
 import CronologiaTab from "../components/CronologiaTab";
+import AudioFileTab from "../components/AudioFileTab";
 import SistemaTab from "../components/SistemaTab";
 import ToastContainer from "../components/Toast";
 import LoadingOverlay from "../components/LoadingOverlay";
@@ -16,6 +17,7 @@ import { useAudioDevices } from "../hooks/useAudioDevices";
 import { useGroqUsage } from "../hooks/useGroqUsage";
 import { useHistory } from "../hooks/useHistory";
 import { usePythonOutput } from "../hooks/usePythonOutput";
+import { useAudioFileTranscription } from "../hooks/useAudioFileTranscription";
 import { useSettings } from "../hooks/useSettings";
 import { useStats } from "../hooks/useStats";
 import type {
@@ -118,6 +120,26 @@ export default function App() {
     saveTranscription,
     recordGroqUsage,
     reloadGroqUsage,
+  });
+
+  const handleFileCloudResult = useCallback((durationSeconds: number) => {
+    recordGroqUsage(durationSeconds);
+    // The sidecar writes groq_usage.json on its own executor after emitting
+    // the result, so give it a moment before refreshing the UI counter.
+    window.setTimeout(() => { void reloadGroqUsage(); }, 250);
+  }, [recordGroqUsage, reloadGroqUsage]);
+
+  // Mounted at app level so a tab change during a long file transcription
+  // cannot unmount the listener and drop the result before it is saved.
+  const audioFile = useAudioFileTranscription({
+    provider: selectedProvider,
+    language: selectedLanguage,
+    model: selectedModel,
+    cloudCorrectionEnabled: settings?.cloudCorrectionEnabled ?? true,
+    cloudVocabulary: settings?.cloudVocabulary ?? "",
+    cloudSpeechFilter: settings?.cloudSpeechFilter ?? true,
+    saveTranscription,
+    onCloudResult: handleFileCloudResult,
   });
 
   const isTranscriptionBusy =
@@ -776,6 +798,20 @@ export default function App() {
             onClear={clearHistory}
             onEntryClick={handleHistoryClick}
             onDeleteEntry={deleteStoredHistoryEntry}
+          />
+        )}
+
+        {activeTab === "audio" && (
+          <AudioFileTab
+            file={audioFile.file}
+            status={audioFile.status}
+            result={audioFile.result}
+            error={audioFile.error}
+            provider={selectedProvider}
+            cloudCorrectionEnabled={settings?.cloudCorrectionEnabled ?? true}
+            onSelectFile={audioFile.selectFile}
+            onClearFile={audioFile.clearFile}
+            onTranscribe={() => void audioFile.transcribeFile()}
           />
         )}
 

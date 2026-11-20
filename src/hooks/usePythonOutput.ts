@@ -23,7 +23,7 @@ interface UsePythonOutputOptions {
     text: string,
     timestamp: string,
     wordCount: number
-  ) => Promise<void>;
+  ) => Promise<boolean | void>;
   recordGroqUsage: (durationSecs: number) => void;
   reloadGroqUsage: () => Promise<void>;
 }
