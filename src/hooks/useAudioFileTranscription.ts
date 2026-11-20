@@ -26,18 +26,13 @@ export interface AudioFileTranscript {
 }
 
 interface UseAudioFileTranscriptionOptions {
-  provider: string;
   language: string;
   model: string;
-  cloudCorrectionEnabled: boolean;
-  cloudVocabulary: string;
-  cloudSpeechFilter: boolean;
   saveTranscription: (
     text: string,
     timestamp: string,
     wordCount: number
   ) => Promise<boolean>;
-  onCloudResult: (durationSeconds: number) => void;
 }
 
 interface FileEvent {
@@ -123,14 +118,9 @@ function toBase64(bytes: Uint8Array): string {
 }
 
 export function useAudioFileTranscription({
-  provider,
   language,
   model,
-  cloudCorrectionEnabled,
-  cloudVocabulary,
-  cloudSpeechFilter,
   saveTranscription,
-  onCloudResult,
 }: UseAudioFileTranscriptionOptions) {
   // This hook is mounted at app level: the result is saved even if the user
   // switches tab while the sidecar is still transcribing.
@@ -140,8 +130,8 @@ export function useAudioFileTranscription({
   const [error, setError] = useState("");
   const requestIdRef = useRef<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const optionsRef = useRef({ provider, language, model, cloudCorrectionEnabled, cloudVocabulary, cloudSpeechFilter });
-  optionsRef.current = { provider, language, model, cloudCorrectionEnabled, cloudVocabulary, cloudSpeechFilter };
+  const optionsRef = useRef({ language, model });
+  optionsRef.current = { language, model };
 
   const clearTimer = useCallback(() => {
     if (timeoutRef.current !== null) {
@@ -181,7 +171,7 @@ export function useAudioFileTranscription({
             text,
             notice: text ? "" : (data.message || "Nessun testo rilevato in questo audio."),
             duration: data.duration || 0,
-            provider: data.provider || optionsRef.current.provider,
+            provider: "local",
             language: data.language || optionsRef.current.language,
             savedInHistory: false,
           });
@@ -200,7 +190,6 @@ export function useAudioFileTranscription({
           } else {
             setStatus("done");
           }
-          if (data.provider === "cloud") onCloudResult(data.duration || 0);
           return;
         }
         if (data.status === "file_error") {
@@ -220,7 +209,7 @@ export function useAudioFileTranscription({
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [saveTranscription, onCloudResult, clearTimer]);
+  }, [saveTranscription, clearTimer]);
 
   useEffect(() => clearTimer, [clearTimer]);
 
@@ -267,12 +256,9 @@ export function useAudioFileTranscription({
           command: "transcribe_audio_file",
           request_id: requestId,
           samples: toBase64(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)),
-          provider: options.provider,
+          provider: "local",
           language: options.language,
           model: options.model,
-          cloud_correct_uncertain: options.cloudCorrectionEnabled,
-          cloud_vocabulary: options.cloudVocabulary,
-          cloud_speech_filter: options.cloudSpeechFilter,
         }),
       });
     } catch (decodeError) {

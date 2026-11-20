@@ -122,24 +122,13 @@ export default function App() {
     reloadGroqUsage,
   });
 
-  const handleFileCloudResult = useCallback((durationSeconds: number) => {
-    recordGroqUsage(durationSeconds);
-    // The sidecar writes groq_usage.json on its own executor after emitting
-    // the result, so give it a moment before refreshing the UI counter.
-    window.setTimeout(() => { void reloadGroqUsage(); }, 250);
-  }, [recordGroqUsage, reloadGroqUsage]);
-
-  // Mounted at app level so a tab change during a long file transcription
-  // cannot unmount the listener and drop the result before it is saved.
+  // File transcriptions always use the local model: no cloud provider, no
+  // ChatJimmy correction, no personal vocabulary sent anywhere. Mounted at app
+  // level so a tab change cannot drop the result before it is saved.
   const audioFile = useAudioFileTranscription({
-    provider: selectedProvider,
     language: selectedLanguage,
     model: selectedModel,
-    cloudCorrectionEnabled: settings?.cloudCorrectionEnabled ?? true,
-    cloudVocabulary: settings?.cloudVocabulary ?? "",
-    cloudSpeechFilter: settings?.cloudSpeechFilter ?? true,
     saveTranscription,
-    onCloudResult: handleFileCloudResult,
   });
 
   const isTranscriptionBusy =
@@ -807,8 +796,6 @@ export default function App() {
             status={audioFile.status}
             result={audioFile.result}
             error={audioFile.error}
-            provider={selectedProvider}
-            cloudCorrectionEnabled={settings?.cloudCorrectionEnabled ?? true}
             onSelectFile={audioFile.selectFile}
             onClearFile={audioFile.clearFile}
             onTranscribe={() => void audioFile.transcribeFile()}
