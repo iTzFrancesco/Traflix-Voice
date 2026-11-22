@@ -34,7 +34,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Receives one shared audio file and displays its Groq transcript in a floating panel. */
+/**
+ * Receives one shared audio file, transcribes it via Groq in a floating panel, copies the
+ * transcript to the clipboard, then closes the whole task so repeated shares start fresh
+ * instead of stacking overlay activities in the background.
+ */
 class SharedAudioTranscriptionActivity : AppCompatActivity() {
   private var transcriptionJob: Job? = null
   private var groqAudioEndpoint: GroqAudioTranscriptionEndpoint? = null
@@ -370,6 +374,7 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
         showTranscript(finalTranscript)
+        closeWithTranscript()
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
@@ -398,6 +403,15 @@ class SharedAudioTranscriptionActivity : AppCompatActivity() {
     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("Trascrizione Traflix Voice", finalTranscript))
     Toast.makeText(this, "Trascrizione copiata", Toast.LENGTH_SHORT).show()
+  }
+
+  private fun closeWithTranscript() {
+    if (finalTranscript.isBlank()) {
+      Toast.makeText(this, "Trascrizione completata", Toast.LENGTH_SHORT).show()
+    } else {
+      copyTranscript()
+    }
+    finishAndRemoveTask()
   }
 
   private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
